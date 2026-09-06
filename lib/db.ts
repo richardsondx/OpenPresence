@@ -1553,8 +1553,8 @@ export function readState(): OpenPresenceState {
  * read-only; normal workspace reads remain scoped to the active Agent.
  */
 export function readAgentPresenceDirectory(): Array<{ agentId: string; presence: Presence }> {
-  const rows = sqlite.prepare("SELECT agent_id, payload FROM presences ORDER BY updated_at ASC").all() as Array<{ agent_id?: string | null; payload?: string }>;
-  return rows.flatMap((row) => {
+  const rows = sqlite.prepare("SELECT agent_id, payload FROM presences ORDER BY updated_at DESC").all() as Array<{ agent_id?: string | null; payload?: string }>;
+  const normalized = rows.flatMap((row) => {
     if (!row.agent_id || !row.payload) return [];
     try {
       return [{ agentId: row.agent_id, presence: JSON.parse(row.payload) as Presence }];
@@ -1562,6 +1562,32 @@ export function readAgentPresenceDirectory(): Array<{ agentId: string; presence:
       return [];
     }
   });
+  // Older workspaces may have the durable Agent snapshots but no normalized
+  // Presence rows yet. Preserve the Agent ownership from those snapshots;
+  // matching on editable names/handles is not a safe substitute.
+  const workspaceRows = sqlite.prepare("SELECT agent_id, payload FROM agent_workspaces").all() as Array<{ agent_id?: string | null; payload?: string }>;
+  const workspaceEntries = workspaceRows.flatMap((row) => {
+    if (!row.agent_id || !row.payload) return [];
+    try {
+      const workspace = JSON.parse(row.payload) as AgentWorkspaceSnapshot;
+      const presences = workspace.presences?.length
+        ? workspace.presences
+        : workspace.presence
+          ? [workspace.presence]
+          : [];
+      return presences.map((presence) => ({ agentId: row.agent_id!, presence }));
+    } catch {
+      return [];
+    }
+  });
+  // Workspace snapshots are the authoritative per-Agent copy. Normalized
+  // rows can lag during compatibility migrations, so they fill only the
+  // Agents that do not yet have a durable workspace snapshot.
+  const directoryByAgent = new Map(workspaceEntries.map((entry) => [entry.agentId, entry]));
+  for (const entry of normalized) {
+    if (!directoryByAgent.has(entry.agentId)) directoryByAgent.set(entry.agentId, entry);
+  }
+  return [...directoryByAgent.values()];
 }
 
 /** Materialize a mutable context from the cached state with one clone. */
@@ -1628,7 +1654,10 @@ export function readStateSnapshotForContext(context: StateContext): OpenPresence
   try {
     const compact = JSON.parse(row.payload) as OpenPresenceState;
     const durableRequestedAgentId = context.agentId ?? compact.activeAgentId ?? undefined;
-    const workspaceRow = durableRequestedAgentId
+    // app_state is the authoritative active workspace. The archived Agent
+    // snapshot may predate a just-saved Chat turn; overlaying it here loses
+    // that turn whenever the worker reads outside the in-process cache.
+    const workspaceRow = durableRequestedAgentId && durableRequestedAgentId !== compact.activeAgentId
       ? sqlite.prepare("SELECT payload FROM agent_workspaces WHERE agent_id = ?").get(durableRequestedAgentId) as { payload?: string } | undefined
       : undefined;
     const workspace = workspaceRow?.payload ? JSON.parse(workspaceRow.payload) as Partial<OpenPresenceState> : undefined;

@@ -1,4 +1,4 @@
-import type { NativeChannelConnection } from "./types";
+import type { NativeChannelConnection, View } from "./types";
 
 export const X_CREDITS_PATTERN = /no api credits|credits depleted|credit balance|credits remaining|billing and usage|quota exhausted/i;
 
@@ -19,4 +19,13 @@ export function xCreditsBillingUrl(accountId?: string) {
   return accountId
     ? `https://console.x.com/accounts/${encodeURIComponent(accountId)}/billing/credits`
     : X_API_CONSOLE_URL;
+}
+
+/**
+ * X credit exhaustion is a public-channel delivery/observation boundary.
+ * Keep it out of private cognition and rehearsal surfaces, where showing the
+ * alert falsely suggests that ordinary in-app conversation needs X access.
+ */
+export function xCreditsAlertAppliesToView(view: View) {
+  return new Set<View>(["live", "review", "feed", "growth", "analytics", "schedule", "calendar", "work", "brain", "presence", "usage"]).has(view);
 }

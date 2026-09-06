@@ -25,6 +25,7 @@ const routes = {
   rehearsal: "/rehearsal",
   watching: "/watching",
   people: "/people",
+  work: "/work",
   channels: "/settings",
   settings: "/settings",
   presence: "/settings",

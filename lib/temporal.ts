@@ -233,7 +233,7 @@ export function dispatchDueAssignmentWorkers(state: OpenPresenceState, now = new
 export function repairMissingOperatorNudgeWakes(state: OpenPresenceState, now = new Date()): number {
   let repaired = 0;
   for (const presence of state.presences.filter((item) => item.status === "live")) {
-    const hasQueuedNudge = (state.operatorNudges ?? []).some((nudge) => nudge.presenceId === presence.id && ["queued", "acknowledged"].includes(nudge.status));
+    const hasQueuedNudge = (state.operatorNudges ?? []).some((nudge) => !nudge.privateConversation && nudge.presenceId === presence.id && ["queued", "acknowledged"].includes(nudge.status));
     if (!hasQueuedNudge) continue;
     const hasNudgeWake = listScheduledWakes(presence.id).some((wake) => wake.state === "pending" && ((wake.payload as { triggers?: string[] } | undefined)?.triggers ?? []).includes("operator_nudge"));
     // A waiting Attention run owns delivery/verification continuity, but it

@@ -1,0 +1,15 @@
+[
+  {"command":"open","destination":"/"},
+  {"command":"type","label":"Agent name","text":"Jenny"},
+  {"command":"click","role":"button","name":"Create Agent + Presence"},
+  {"command":"assert","text":"Awake"},
+  {"command":"click","role":"button","name":"Jenny is awake. Put to sleep"},
+  {"command":"wait-for","text":"Asleep"},
+  {"command":"screenshot","path":"/tmp/openpresence-verify-agent-asleep.png"},
+  {"command":"open","destination":"chat"},
+  {"command":"wait-for","text":"Asleep"},
+  {"command":"click","role":"button","name":"Jenny is asleep. Wake up"},
+  {"command":"wait-for","text":"Awake"},
+  {"command":"assert","text":"Awake"},
+  {"command":"screenshot","path":"/tmp/openpresence-verify-agent-wake.png"}
+]

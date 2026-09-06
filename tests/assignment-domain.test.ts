@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, assertAssignmentPersistenceInvariant, assignmentIsCurrentlyProcessing, assignmentIsSatisfied, assignmentProgressLabel, compileAssignmentInstruction, createAgent, normalizeState, preflightAssignment } from "../lib/runtime";
+import { applyOperation, assertAssignmentPersistenceInvariant, assignmentIsCurrentlyProcessing, assignmentIsSatisfied, assignmentProgressLabel, compileAssignmentInstruction, createAgent, nextScheduledOccurrence, normalizeState, preflightAssignment, scheduledAssignmentIsDue } from "../lib/runtime";
 import { evaluateExecutionReadiness } from "../lib/execution-readiness";
 import { assignmentRunBlocksNewWork, classifyLiveAssignmentRun, isAutonomousPreWriteDeliveryFailure, liveAssignmentRunStage, maxConcurrentPursuitDeliveries, reconcileLiveAssignmentRuns } from "../lib/live-assignment-run";
 import { reconcileOrphanedAssignmentStatuses } from "../lib/assignment-recovery";
@@ -57,6 +57,23 @@ describe("canonical Assignment domain", () => {
 
     expect(recurring.recurrence).toMatchObject({ kind: "weekly", label: "Every week" });
     expect(oneTime.recurrence).toMatchObject({ kind: "once", label: "Once" });
+  });
+
+  it("keeps one-time dates separate from weekly cadence", () => {
+    const state = createAgent(input);
+    const presenceId = state.presence!.id;
+    const date = "2026-09-03";
+    const oneTimeState = applyOperation(state, { type: "createAssignment", instruction: "Publish one useful lesson about persistent agents.", presenceId, environment: "sandbox", schedule: { date, day: "Thursday", time: "08:00", executionWindow: "08:00–08:00" } });
+    const weeklyState = applyOperation(oneTimeState, { type: "createAssignment", instruction: "Publish one weekly useful lesson about persistent agents.", presenceId, environment: "sandbox", schedule: { day: "Thursday", time: "08:00", executionWindow: "08:00–08:00" } });
+    const oneTime = weeklyState.assignments.find((assignment) => assignment.schedule?.date === date)!;
+    const weekly = weeklyState.assignments.find((assignment) => assignment.instruction.includes("weekly"))!;
+
+    expect(oneTime.recurrence).toMatchObject({ kind: "once" });
+    expect(weekly.recurrence).toMatchObject({ kind: "weekly" });
+    const activeOneTime = { ...oneTime, status: "active" as const };
+    expect(scheduledAssignmentIsDue(activeOneTime, new Date(2026, 8, 2, 9, 0))).toBe(false);
+    expect(scheduledAssignmentIsDue(activeOneTime, new Date(2026, 8, 3, 9, 0))).toBe(true);
+    expect(nextScheduledOccurrence(oneTime.schedule!, new Date(2026, 8, 1, 9, 0), oneTime.recurrence)).toEqual(new Date(2026, 8, 3, 8, 0));
   });
 
   it("repairs legacy dated Assignments that used once as an unset recurrence", () => {

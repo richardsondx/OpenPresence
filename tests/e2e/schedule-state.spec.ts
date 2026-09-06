@@ -5,22 +5,14 @@ test.beforeEach(async ({ request }) => {
   expect(response.ok()).toBeTruthy();
 });
 
-test("Schedule combines Agent-owned and operator Assignments with persistent controls", async ({ page }) => {
+test("Schedule creates a simple one-time Assignment with clear controls", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
   await page.getByRole("button", { name: "Schedule", exact: true }).click();
 
-  await page.getByRole("button", { name: "Create plan", exact: true }).click();
-  await expect(page.getByRole("button", { name: "◇ Jenny's publishing rhythm", exact: true })).toBeVisible();
   const schedule = page.getByRole("region", { name: "Schedule list" });
-  await expect(page.getByRole("region", { name: "Agent publishing plan" })).toHaveCount(0);
-  await expect(schedule.getByText("Jenny · Agent-owned", { exact: true }).first()).toBeVisible();
-  await schedule.getByRole("button", { name: /Open Assignment/ }).first().click();
-  const details = page.getByRole("complementary", { name: "Assignment details" });
-  await details.getByRole("button", { name: "Pause Jenny's assignment", exact: true }).click();
-  await expect(details.getByText("paused", { exact: true })).toBeVisible();
-  await details.getByRole("button", { name: "Resume Jenny's assignment", exact: true }).click();
-  await details.getByRole("button", { name: "Close Assignment details", exact: true }).click();
+  await expect(page.getByText("publishing rhythm", { exact: false })).toHaveCount(0);
+  await expect(page.getByText("Create plan", { exact: true })).toHaveCount(0);
 
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
   await expect(page.getByText("Optional asset preferences", { exact: true })).toBeVisible();
@@ -28,19 +20,19 @@ test("Schedule combines Agent-owned and operator Assignments with persistent con
   await page.getByText("Optional asset preferences", { exact: true }).click();
   await expect(page.getByLabel("Assignment Asset Collection")).toBeVisible();
   await page.getByLabel("What should Jenny accomplish?").fill("Teach one useful idea about persistent agents.");
-  await page.getByRole("button", { name: "Review responsibility", exact: true }).click();
-  await page.getByRole("button", { name: "Activate Assignment", exact: true }).click();
+  await page.getByLabel("Assignment date").fill(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto" }).format(new Date()));
+  await page.getByRole("textbox", { name: "Time" }).fill("08:00");
+  await expect(page.getByText("Objective", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Flexible", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Create assignment", exact: true }).click();
   await expect(schedule.getByText("You · Operator assignment", { exact: true })).toBeVisible();
-
-  await page.route("**/api/state", async (route) => {
-    const request = route.request();
-    if (request.method() === "POST" && request.postData()?.includes('"type":"runLiveAssignment"')) {
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
-    }
-    await route.continue();
-  });
-
-  await page.getByRole("button", { name: "Work now", exact: true }).click({ noWaitAfter: true });
-  await expect(page.getByRole("status").filter({ hasText: "is working on a scheduled item" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Open Assignment Teach one useful idea/ })).toContainText("Working now");
+  const row = schedule.getByRole("button", { name: /Open one-time Assignment Teach one useful idea/ });
+  await expect(row).toContainText("One-time");
+  await row.click();
+  const details = page.getByRole("complementary", { name: "Assignment details" });
+  await expect(details.getByRole("button", { name: "Edit Assignment", exact: true })).toBeVisible();
+  await expect(details.getByRole("button", { name: "Work now", exact: true })).toBeVisible();
+  await expect(details.getByRole("button", { name: "Cancel Assignment", exact: true })).toBeVisible();
+  await expect(details.getByRole("button", { name: "Activate Assignment", exact: true })).toHaveCount(0);
+  await expect(details.getByRole("button", { name: "Run in Playground", exact: true })).toHaveCount(0);
 });

@@ -47,6 +47,14 @@ function nextRecurringAssignmentWake(assignment: Assignment, nowMs: number) {
   if (!schedule) return new Date(nowMs + 15 * 60_000).toISOString();
   const [hours, minutes] = schedule.time.split(":").map(Number);
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return new Date(nowMs + 15 * 60_000).toISOString();
+  if (assignment.recurrence?.kind === "once" && schedule.date) {
+    const [year, month, day] = schedule.date.split("-").map(Number);
+    if ([year, month, day].every(Number.isFinite)) {
+      const target = new Date(year, month - 1, day);
+      target.setHours(hours, minutes, 0, 0);
+      return target.toISOString();
+    }
+  }
   const next = new Date(nowMs);
   next.setHours(hours, minutes, 0, 0);
   const day = schedule.day.trim().toLowerCase();

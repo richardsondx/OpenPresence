@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readState } from "@/lib/db";
+import { readStateForContext } from "@/lib/db";
 import { readAssetBytes } from "@/lib/asset-store";
 import { assetIsEligibleForPresence } from "@/lib/asset-library";
 import { assertRuntimeScope, createRuntimeScope, stateForContext } from "@/lib/runtime";
@@ -11,7 +11,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!token) return NextResponse.json({ error: "A server-resolved RuntimeScope is required." }, { status: 401 });
   let state;
   try {
-    const stored = readState();
+    const stored = readStateForContext(token);
     state = stateForContext(stored, token);
     const scope = createRuntimeScope(state, { presenceId: token.presenceId });
     assertRuntimeScope(state, scope);
@@ -20,10 +20,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   }
   const asset = state.assets.find((item) => item.id === id);
   if (!asset || !assetIsEligibleForPresence(state, asset, state.presence?.id)) return NextResponse.json({ error: "Stored asset not found." }, { status: 404 });
-  if (!asset?.storage?.storeKey) return NextResponse.json({ error: "Stored asset not found." }, { status: 404 });
+  const storeKey = asset.storage?.storeKey ?? asset.storagePath;
+  if (!storeKey) return NextResponse.json({ error: "Stored asset not found." }, { status: 404 });
   try {
-    const bytes = await readAssetBytes(asset.storage.storeKey);
-    return new NextResponse(bytes as BodyInit, { headers: { "Content-Type": asset.storage.mimeType, "Cache-Control": "private, max-age=31536000, immutable", "X-Content-Sha256": asset.storage.exactHash } });
+    const bytes = await readAssetBytes(storeKey);
+    return new NextResponse(bytes as BodyInit, { headers: { "Content-Type": asset.storage?.mimeType ?? asset.mimeType ?? "application/octet-stream", "Cache-Control": "private, max-age=31536000, immutable", ...(asset.storage?.exactHash || asset.checksum ? { "X-Content-Sha256": asset.storage?.exactHash ?? asset.checksum! } : {}) } });
   } catch {
     return NextResponse.json({ error: "Stored asset is unavailable." }, { status: 404 });
   }

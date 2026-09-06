@@ -1,0 +1,15 @@
+[
+  {"command":"open","destination":"/"},
+  {"command":"type","label":"Agent name","text":"Jenny"},
+  {"command":"click","role":"button","name":"Create Agent + Presence"},
+  {"command":"wait-for","text":"Talk to Jenny"},
+  {"command":"open","destination":"agent"},
+  {"command":"wait-for","text":"Make Jenny unmistakable"},
+  {"command":"click","role":"button","name":"Change Jenny avatar"},
+  {"command":"wait-for","text":"Edit Jenny's avatar"},
+  {"command":"click","role":"button","name":"Comet ghost avatar"},
+  {"command":"click","role":"button","name":"Save avatar"},
+  {"command":"wait-for","text":"Make Jenny unmistakable"},
+  {"command":"assert","text":"Change avatar"},
+  {"command":"screenshot","path":"/tmp/openpresence-verify-agent-avatar-flow.png"}
+]

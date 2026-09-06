@@ -20,11 +20,11 @@ Open the context sidebar from Chat, choose Calendar, follow `Open full calendar`
 
 ## Agent Main → work thread → reload
 
-Open `/` or `/chat` in an onboarded workspace and prove the Agent-first sidebar opens the permanent `Main thread`. Send a non-public operator message, reload, and verify the same thread title and message remain. The Main header exposes no rename, archive, or transcript-copy controls; prove the permanent Main context remains available and any linked Assignment remains in the state projection.
+Open `/` or `/chat` in an onboarded workspace and prove the Agent-first sidebar opens the single main Chat. Verify there is no duplicate Conversation/New conversation context card, private-thread creator, rename, archive, or transcript-copy control. Send a non-public operator message, reload, and verify the same main Chat and message remain; any linked Assignment remains in the state projection.
 
 ## Project → linked Chat thread
 
-From Chat, choose `New project` in the sidebar, fill `Project name`, `What should the Agent accomplish?`, and `Project environment`, then submit `Create project`. Prove the Project persists in the sidebar, the route opens Chat with a non-Main `threadId`, the thread context contains exactly that Project responsibility, and the operator composer can submit input without creating a second Project thread. Reload and select the same Project again; prove the same thread opens. Project rows show one round avatar for the selected Agent. Multi-Agent invitations and stacked avatar controls are deferred.
+Assignments no longer create a separate project surface or Chat route. From Chat, give the Agent a concrete responsibility and prove the operator message, acknowledgement, working/tool evidence, and any review or verified outcome receipt stay in the single Main conversation. Use Schedule or Work for durable responsibility details; use Chat for the narrative handoff.
 
 ## Playground → decision trace → rehearsal feedback
 
@@ -36,7 +36,7 @@ Follow [Channels and Manage Agent](channels-agent.md), change a Presence setting
 
 ## Portfolio Agent → connected channel context
 
-Create or use at least two Agents, each with its own connected channel context. Switch Agent from the portfolio rail or topbar dropdown, verify the Agent name and Agent-scoped Knowledge/Assets/meaning remain stable, then verify the active channel, Activity, Review, Chat, and unified settings all follow the selected Agent. Do not introduce a separate channel switcher into the primary workspace.
+Create or use at least two Agents, each with its own connected channel context. Switch Agent from the portfolio rail, verify the Agent name and Agent-scoped Knowledge/Assets/meaning remain stable, then verify the active channel, Activity, Review, Chat, and unified settings all follow the selected Agent. Do not introduce a separate channel switcher into the primary workspace.
 
 ## Responsive and partial-state resilience
 

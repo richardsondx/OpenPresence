@@ -29,6 +29,22 @@ export function usageBrowserProjection(state: OpenPresenceState): OpenPresenceSt
   ] as const) {
     projection[key] = [] as never;
   }
+  // The shell still renders the Agent's compact assignment index on Usage. Keep
+  // identity and routing fields only; the usage report owns the heavy ledger.
+  projection.assignments = state.assignments.map((assignment) => ({
+    id: assignment.id,
+    presenceId: assignment.presenceId,
+    title: assignment.title,
+    instruction: assignment.instruction?.slice(0, 420),
+    environment: assignment.environment,
+    status: assignment.status,
+    progress: assignment.progress,
+    activation: assignment.activation,
+    recurrence: assignment.recurrence,
+    schedule: assignment.schedule,
+    work: assignment.work,
+    deliverable: assignment.deliverable,
+  })) as never;
   projection.proposals = state.proposals.filter((proposal) => proposal.status === "pending") as never;
   return projection;
 }

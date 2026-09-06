@@ -1,11 +1,21 @@
 import { expect, test } from "@playwright/test";
 
+function torontoDate() {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function torontoWeekday() {
+  return new Intl.DateTimeFormat("en-US", { timeZone: "America/Toronto", weekday: "long" }).format(new Date());
+}
+
 test.beforeEach(async ({ request }) => {
   const response = await request.post("/api/state", { data: { type: "reset" } });
   expect(response.ok()).toBeTruthy();
 });
 
-test("Calendar Week mode visualizes Assignment timing without pretending to show posts", async ({ page }) => {
+test("Calendar Week mode visualizes dated Assignment timing", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
   await expect(page).toHaveURL(/chat/);
@@ -13,36 +23,37 @@ test("Calendar Week mode visualizes Assignment timing without pretending to show
   await page.getByRole("button", { name: "Week", exact: true }).click();
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
   await page.getByLabel("What should Jenny accomplish?").fill("Teach one useful idea about persistent agents.");
-  await page.getByLabel("Day").selectOption("Tuesday");
+  await page.getByLabel("Assignment date").fill(torontoDate());
   await page.getByRole("textbox", { name: "Time" }).fill("08:00");
-  await page.getByLabel("Objective", { exact: true }).selectOption("education");
-  await page.getByRole("button", { name: "Review responsibility", exact: true }).click();
+  await expect(page.getByText("One time only", { exact: true })).toBeVisible();
+  await expect(page.getByText("Objective", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Flexible", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Create assignment", exact: true }).click();
   await expect(page.getByRole("button", { name: "Week", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("region", { name: "Weekly schedule" })).toBeVisible();
   await expect(page.getByText("When Jenny can notice and act")).toBeVisible();
-  await expect(page.getByText("Tue", { exact: true }).last()).toBeVisible();
-  const assignmentCard = page.getByRole("button", { name: /Open Assignment Teach one useful idea.*Tuesday at 08:00/ });
+  const assignmentCard = page.getByRole("button", { name: /Open one-time Assignment Teach one useful idea.*at 08:00/ });
   await expect(assignmentCard).toBeVisible();
   await expect(assignmentCard).not.toHaveClass(/processing/);
   await expect(assignmentCard).toContainText("Not started");
-  await expect(page.locator(".week-calendar-toolbar").getByText("choose the next useful step", { exact: false })).toBeVisible();
+  await expect(page.locator(".week-calendar-toolbar").getByText("One-time assignments appear on their date", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "List", exact: true }).click();
   await expect(page.getByRole("heading", { name: "What needs to happen" })).toBeVisible();
 });
 
-test("Calendar Week marks only today’s occurrence of a recurring Assignment as processing", async ({ page, request }) => {
+test("Calendar Week marks the current occurrence of a weekly Assignment as processing", async ({ page, request }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
   const base = await request.get("/api/state").then((response) => response.json());
   const presenceId = base.presence.id as string;
-  const instruction = "Each day, review one worthwhile builder conversation.";
+  const instruction = "Review one worthwhile builder conversation every week.";
   const created = await request.post("/api/state", {
     data: {
       type: "createAssignment",
       presenceId,
       environment: "live",
       instruction,
-      schedule: { day: "Daily", time: "08:00", executionWindow: "08:00–11:00" },
+      schedule: { day: torontoWeekday(), time: "08:00", executionWindow: "08:00–08:00" },
     },
   });
   expect(created.ok()).toBeTruthy();
@@ -78,25 +89,25 @@ test("Calendar Week marks only today’s occurrence of a recurring Assignment as
   await page.goto("/schedule");
   await page.getByRole("button", { name: "Week", exact: true }).click();
   const cards = page.locator(".compact-calendar-item-assignment").filter({ hasText: instruction });
-  await expect(cards).toHaveCount(7);
+  await expect(cards).toHaveCount(1);
   await expect(page.locator(".compact-calendar-item-assignment.is-processing").filter({ hasText: instruction })).toHaveCount(1);
   await expect(page.locator(".compact-calendar-processing-pill").filter({ hasText: "Processing" })).toHaveCount(1);
   await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
-test("Calendar keeps a verified recurring outcome visible as Done today", async ({ page, request }) => {
+test("Calendar keeps a verified weekly outcome visible as Done today", async ({ page, request }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
   const base = await request.get("/api/state").then((response) => response.json());
   const presenceId = base.presence.id as string;
-  const instruction = "Each day, publish one verified lesson about persistent agents.";
+  const instruction = "Publish one verified lesson about persistent agents every week.";
   const created = await request.post("/api/state", {
     data: {
       type: "createAssignment",
       presenceId,
       environment: "sandbox",
       instruction,
-      schedule: { day: "Daily", time: "08:00", executionWindow: "08:00–11:00" },
+      schedule: { day: torontoWeekday(), time: "08:00", executionWindow: "08:00–08:00" },
     },
   });
   expect(created.ok()).toBeTruthy();
@@ -126,19 +137,17 @@ test("Calendar keeps a verified recurring outcome visible as Done today", async 
   await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
-test("Calendar progressively discloses a long flexible-responsibility list", async ({ page, request }) => {
+test("Calendar does not render unscheduled on-demand work as a scheduled window", async ({ page, request }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
   const base = await request.get("/api/state").then((response) => response.json());
   const presenceId = base.presence.id as string;
-  for (const instruction of [1, 2, 3, 4].map((item) => `Review flexible responsibility ${item}.`)) {
-    const created = await request.post("/api/state", { data: { type: "createAssignment", presenceId, environment: "sandbox", instruction } });
-    expect(created.ok()).toBeTruthy();
-  }
+  const instruction = "Handle this on-demand request from chat.";
+  const created = await request.post("/api/state", { data: { type: "createAssignment", presenceId, environment: "sandbox", instruction } });
+  expect(created.ok()).toBeTruthy();
 
   await page.goto("/schedule");
   await page.getByRole("button", { name: "Week", exact: true }).click();
-  const flexible = page.getByRole("region", { name: "Weekly schedule" }).getByRole("region", { name: "Flexible assignment windows" });
-  await expect(flexible.locator(":scope > .week-unscheduled-list > .week-unscheduled-item")).toHaveCount(3);
-  await expect(flexible.locator(".week-flexible-more > summary")).toContainText("Show 1 more flexible responsibilities");
+  await expect(page.getByRole("region", { name: "Flexible assignment windows" })).toHaveCount(0);
+  await expect(page.getByText(instruction, { exact: true })).toHaveCount(0);
 });

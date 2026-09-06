@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, CircleSlash2, Pencil, Plus, Users, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, CircleSlash2, Eye, Pencil, Plus, Users, X } from "lucide-react";
 import { isCognitionEligibleMirrorObject } from "@/lib/social-context";
 import { peopleForPresence, resolveCanonicalPerson } from "@/lib/network-memory";
 import { readPeopleNote } from "@/lib/people-notes";
@@ -28,6 +28,7 @@ type PeopleViewProps = {
   watchRelationshipPolicy: (watch: Watch, state: OpenPresenceState) => RelationshipPolicy | undefined;
   watchPolicyFromPurpose: (purpose?: string) => RelationshipPolicy | undefined;
   watchPlanSummary: (watch: Watch, presence: Presence, policy?: RelationshipPolicy) => RelationshipPlan;
+  onOpenWatchlist: () => void;
   initialFilterMode?: "all" | "following" | "watched" | "boundaries";
 };
 
@@ -39,7 +40,7 @@ const REQUEST_TYPE_OPTIONS = [
   { id: "introduction", label: "Introductions" },
 ] as const;
 
-export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, ChannelAvatar, channelLabel, formatTime, formatDateTime, watchRelationshipPolicy, watchPolicyFromPurpose, watchPlanSummary, initialFilterMode }: PeopleViewProps) {
+export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, ChannelAvatar, channelLabel, formatTime, formatDateTime, watchRelationshipPolicy, watchPolicyFromPurpose, watchPlanSummary, onOpenWatchlist, initialFilterMode }: PeopleViewProps) {
   const presence = state.presence ?? state.presences[0];
   const agentName = state.agent?.name ?? "the Agent";
   const [query, setQuery] = useState("");
@@ -187,9 +188,9 @@ export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, 
       className="people-header"
       eyebrow="Presence relationships"
       title="People"
-      description={<>Who {presence.name} remembers and follows. Seeing someone in the world does not automatically create a relationship.</>}
+      description={<>People is {presence.name}&apos;s relationship memory: who the Agent knows, follows, and has boundaries with. Use Watchlist to tell it what to monitor; noticing someone does not automatically create a relationship.</>}
       actionsClassName="heading-actions"
-      actions={<Button variant="primary" onClick={() => setRemembering((value) => !value)}><Plus size={14} /> Remember a person</Button>}
+      actions={<><Button variant="secondary" onClick={onOpenWatchlist}><Eye size={14} /> Open Watchlist</Button><Button variant="primary" onClick={() => setRemembering((value) => !value)}><Plus size={14} /> Remember a person</Button></>}
     />
     {remembering && <section className="people-composer" aria-label="Remember a person">
       <div><SectionEyebrow>Explicit memory</SectionEyebrow><h2>Who should {presence.name} remember?</h2><p>This creates identity context without inventing prior interaction history.</p></div>

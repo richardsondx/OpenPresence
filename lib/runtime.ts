@@ -20,7 +20,7 @@ import { getDefaultCurationSources, normalizeCurationSources, seedDefaultEditori
 import { assignmentRunIsActive, isTerminalDuplicateExecution, reconcileLiveAssignmentRuns, settleTerminalDuplicateAssignment } from "./live-assignment-run";
 export { assignmentRunIsActive } from "./live-assignment-run";
 import { BUILTIN_CONVERSATION_STYLES, DEFAULT_CONVERSATION_STYLE_ID } from "./conversation-styles";
-import { defaultAvatarLook } from "./avatars";
+import { AGENT_AVATAR_VARIANTS, defaultAvatarLook, defaultAvatarVariant } from "./avatars";
 import { autobiographicalExpressionSafetyReason, retrievePublicSafeAutobiographicalContext } from "./autobiographical-memory";
 import { growthEvidenceIsInPresenceScope, growthPublicationIsInPresenceScope, growthWindowStartAt, presenceGrowthBoundary } from "./growth-scope";
 import { applyGrowthHypothesisActions, compileSocialStrategyContext, ensureGrowthEvidenceRecords, legacyChannelStrategyGuidance, strategyUseFromDecision } from "./social-strategy";
@@ -1747,12 +1747,12 @@ export function markNativeConnectionNeedsAttention(source: OpenPresenceState, pr
     : connection);
   if (creditsExhausted) {
     state.presences = state.presences.map((presence) => {
-      if (presence.id === presenceId && presence.channel === "x" && presence.status !== "paused") {
+    if (presence.id === presenceId && presence.channel === "x" && presence.connectionMode !== "bridge" && presence.status !== "paused") {
         return { ...presence, status: "paused" as const };
       }
       return presence;
     });
-    if (state.presence?.id === presenceId && state.presence.channel === "x" && state.presence.status !== "paused") {
+    if (state.presence?.id === presenceId && state.presence.channel === "x" && state.presence.connectionMode !== "bridge" && state.presence.status !== "paused") {
       state.presence = { ...state.presence, status: "paused" as const };
     }
   }
@@ -2389,9 +2389,8 @@ function normalizeOperatorThreads(
     const availableAssignmentIds = assignments.filter((assignment) => assignment.agentId === agentId && assignment.presenceId === conversation.presenceId).map((assignment) => assignment.id);
     const preservedAssignmentIds = (previous?.assignmentIds ?? []).filter((assignmentId) => availableAssignmentIds.includes(assignmentId));
     // Older workspaces derived every responsibility into every conversation.
-    // That made a Project appear attached to an arbitrary thread. Treat that
-    // broad legacy shape as unscoped and let the Project opener create a real
-    // one-to-one link on first use.
+    // Treat that broad legacy shape as unscoped so Chat cannot appear attached
+    // to an arbitrary responsibility.
     const isLegacyBroadLink = preservedAssignmentIds.length > 0
       && availableAssignmentIds.length > 1
       && preservedAssignmentIds.length === availableAssignmentIds.length;
@@ -2432,7 +2431,7 @@ function defaultSkills(): import("./types").Skill[] {
 }
 
 export function createAgent(input: CreateAgentInput): OpenPresenceState {
-  const agent = { id: id("agent"), name: input.name.trim(), description: input.description.trim(), audience: input.audience?.trim() || "builders and curious operators", topics: ["AI agents", "software", "useful ideas"], accent: input.accent, glyph: "◉", languagePolicy: { ...EMPTY_LANGUAGE_POLICY }, conversationStyleId: DEFAULT_CONVERSATION_STYLE_ID };
+  const agent = { id: id("agent"), name: input.name.trim(), description: input.description.trim(), audience: input.audience?.trim() || "builders and curious operators", topics: ["AI agents", "software", "useful ideas"], accent: input.accent, glyph: "◉", avatarVariant: defaultAvatarVariant(input.accent, input.name), languagePolicy: { ...EMPTY_LANGUAGE_POLICY }, conversationStyleId: DEFAULT_CONVERSATION_STYLE_ID };
   const definitions = builtinChannelDefinitions();
   const presence = makePresence({ channel: "x", handle: input.handle.trim() || `@${agent.name.toLowerCase().replace(/[^a-z0-9]/g, "")}`, mode: input.mode, accent: input.accent, connectionMode: "sandbox" }, agent.name, definitions[0], defaultPresenceBrief(agent));
   const conversation = makeConversation();
@@ -3672,6 +3671,7 @@ function migrateLegacyDefaultModel(state: OpenPresenceState) {
 
 function assignmentRecurrenceForInstruction(instruction: string, schedule: Assignment["schedule"], existing?: Assignment["recurrence"]) {
   const clean = instruction.trim();
+  if (schedule?.date) return { kind: "once" as const, label: "One time" };
   if (/\b(?:once|one[- ]time|single\s+occurrence)\b/i.test(clean)) return { kind: "once" as const, label: "Once" };
   if (/every\s+(?:weekday|workday)|each\s+weekday/i.test(clean)) return { kind: "weekdays" as const, label: "Every weekday" };
   if (/every\s+day|each\s+day|per\s+day|daily/i.test(clean)) return { kind: "daily" as const, label: "Every day" };
@@ -4118,7 +4118,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
     const inferredCreatedAt = item.createdAt ?? presenceGrowthBoundary(lifecycleState, item.id).startAt;
     const migrated = { ...migrateBuiltInXCapabilities(item), ...(inferredCreatedAt ? { createdAt: inferredCreatedAt } : {}), conversationStyleId: item.conversationStyleId ?? DEFAULT_CONVERSATION_STYLE_ID, languagePolicy: normalizeLanguagePolicy((item as Presence & { languagePolicy?: LanguagePolicy }).languagePolicy), requestPolicy: item.requestPolicy ?? defaultPresenceRequestPolicy(item.id) };
     const nativeConn = (state.nativeConnections ?? []).find((c) => c.presenceId === item.id && (c.kind === "x" || c.channelId === "x"));
-    if (migrated.status === "live" && migrated.channel === "x" && migrated.environment !== "sandbox" && xCreditsExhausted(nativeConn)) {
+    if (migrated.status === "live" && migrated.channel === "x" && migrated.connectionMode !== "bridge" && migrated.environment !== "sandbox" && xCreditsExhausted(nativeConn)) {
       return { ...migrated, status: "paused" as const };
     }
     return migrated;
@@ -4853,6 +4853,7 @@ function assignmentDeliverableType(instruction: string): Assignment["deliverable
 
 function scheduledAssignmentRecurrence(schedule: Assignment["schedule"]) {
   if (!schedule) return { kind: "once" as const, label: "Once" };
+  if (schedule.date) return { kind: "once" as const, label: "One time" };
   if (schedule.day.trim().toLowerCase() === "daily") return { kind: "daily" as const, label: "Every day" };
   return { kind: "weekly" as const, label: "Every week" };
 }
@@ -4962,15 +4963,15 @@ export function preflightAssignment(source: OpenPresenceState, assignment: Assig
     deliverable,
     successEvidence: assignment.successEvidence?.kind === "metric_threshold" ? `${assignment.successEvidence.metric} ${assignment.successEvidence.comparator} ${assignment.successEvidence.value.toLocaleString()}.` : assignmentSuccessEvidence(assignment.deliverable.type, presence, assignment.environment),
     timing,
-    agentDecides: ["angle and wording", "research and evidence", "format and assets", "sequencing and retries", "exact moment within the authorized window"],
+    agentDecides: ["angle and wording", "research and evidence", "format and assets", "sequencing and retries", "how to use the scheduled start time"],
     hardConstraints: assignment.editorialContext?.constraints ?? [],
     assumptions,
   };
-  return { status, delegationPolicy, semanticSummary: assignment.deliverable.type === "decision_report" ? "This Assignment evaluates and reports; it does not require a public response." : `This Assignment requires ${deliverable}; a rejected candidate keeps the responsibility active.`, contract, checks, issues, reviewedAt: now(), reviewedRevision: assignment.revision ?? 0 };
+  return { status, delegationPolicy, semanticSummary: assignment.deliverable.type === "decision_report" ? "This Assignment evaluates and reports; it does not require a public response." : `This Assignment is ready to work toward ${deliverable}. If an attempt is rejected, it stays open until the outcome is verified.`, contract, checks, issues, reviewedAt: now(), reviewedRevision: assignment.revision ?? 0 };
 }
 
 function assignmentCreationSignature(assignment: Assignment) {
-  const schedule = assignment.schedule ? `${assignment.schedule.day}|${assignment.schedule.time}|${assignment.schedule.executionWindow}` : "";
+  const schedule = assignment.schedule ? `${assignment.schedule.date ?? ""}|${assignment.schedule.day}|${assignment.schedule.time}|${assignment.schedule.executionWindow}` : "";
   return [
     assignment.presenceId,
     assignment.environment,
@@ -5279,6 +5280,10 @@ export function scheduledAssignmentIsDue(assignment: Assignment, now = new Date(
   if (evaluatedToday && assignment.lastOutcome && !["action_no_op", "candidate_rejected", "delivery_failed"].includes(assignment.lastOutcome.class)) return false;
   const day = assignment.schedule.day.trim().toLowerCase();
   const currentDay = now.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
+  if (assignment.recurrence?.kind === "once" && assignment.schedule.date) {
+    const currentDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    if (assignment.schedule.date !== currentDate) return false;
+  }
   const daily = assignment.recurrence?.kind === "daily" || day === "daily";
   const weekdaysOnly = assignment.recurrence?.kind === "weekdays";
   if (!daily && (!weekdaysOnly || ["monday", "tuesday", "wednesday", "thursday", "friday"].includes(currentDay)) && day !== currentDay) return false;
@@ -5287,16 +5292,24 @@ export function scheduledAssignmentIsDue(assignment: Assignment, now = new Date(
   if (startMinutes === undefined) return false;
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
   const endMinutes = scheduledExecutionEnd(assignment.schedule);
-  if (endMinutes === undefined) return currentMinutes >= startMinutes;
+  if (endMinutes === undefined || endMinutes === startMinutes) return currentMinutes >= startMinutes;
   if (endMinutes >= startMinutes) return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
   // Preserve support for a window that crosses midnight (for example 22:00–02:00).
   return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
 }
 
-export function nextScheduledOccurrence(schedule: { day: string; time: string }, now = new Date(), recurrence?: Assignment["recurrence"]): Date {
+export function nextScheduledOccurrence(schedule: { day: string; time: string; date?: string }, now = new Date(), recurrence?: Assignment["recurrence"]): Date {
   const daysOfWeek = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
   const startMinutes = parseScheduleClock(schedule.time);
   if (startMinutes === undefined) return new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  if (recurrence?.kind === "once" && schedule.date) {
+    const [year, month, day] = schedule.date.split("-").map(Number);
+    if ([year, month, day].every(Number.isFinite)) {
+      const targetDate = new Date(year, month - 1, day);
+      targetDate.setHours(Math.floor(startMinutes / 60), startMinutes % 60, 0, 0);
+      return targetDate;
+    }
+  }
   const daily = recurrence?.kind === "daily" || schedule.day.trim().toLowerCase() === "daily";
   if (daily) {
     const targetDate = new Date(now);
@@ -6414,7 +6427,12 @@ export function isExplicitXPostRequest(content: string) {
     && /\b(?:tweet|post|publish|on\s+x)\b/.test(normalized)
     || /\b(?:make|create|publish|send|ship)\b[^.!?\n]{0,80}\b(?:first\s+)?(?:tweet|x\s+post|post\s+on\s+x)\b/.test(normalized)
     || /\b(?:post|publish|send)\b[^.!?\n]{0,80}\b(?:to|on)\s+x\b/.test(normalized)
-    || /\b(?:tweet|post)\s+(?:this|that|it)\s+(?:now|on\s+x)?\b/.test(normalized);
+    || /\b(?:tweet|post)\s+(?:this|that|it)\s+(?:now|on\s+x)?\b/.test(normalized)
+    // Operators should be able to use ordinary imperative language for a
+    // one-time action. The channel-specific path above remains useful for
+    // explicit X wording, but “publish this now” and “post something right
+    // now” must not fall through as ordinary conversation.
+    || /\b(?:publish|post|tweet|send|ship)\b[^.!?\n]{0,120}\b(?:now|right\s+now|immediately|right\s+away)\b/.test(normalized);
 }
 
 export function formChatPostIntent(source: OpenPresenceState, text: string, standingIntentId?: string, sourceKind: "agent" | "operator" = "agent", assetIds: string[] = [], decisionInput?: SocialDecisionInput, runId?: string, presenceOverride?: Presence) {
@@ -6445,8 +6463,12 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
     state.events.unshift(event("decision", "Post intention held", "Jenny formed a social intention, but Posts are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id, decisionId: socialDecision?.id }));
     return state;
   }
-  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""))));
-  const bridge = nativeX ? undefined : bridgeFor(state, presence.id, "post");
+  // Respect the Presence's selected live route. A healthy native connection
+  // may still be present for reads (or may be out of credits), but it must not
+  // silently override an operator-selected Bridge for public writes.
+  const useNativeRoute = presence.connectionMode !== "bridge";
+  const nativeX = useNativeRoute ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? "")))) : undefined;
+  const bridge = !nativeX ? bridgeFor(state, presence.id, "post") : undefined;
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : undefined;
   const leakageReason = identityLeakageReason(state, presence, text);
   const autobiographicalSafetyReason = sourceKind === "agent" ? autobiographicalExpressionSafetyReason(state, presence.id, autobiographicalEventIds, text) : undefined;
@@ -7333,7 +7355,6 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
   }
   if (operation.type === "createAssignment") {
     const assignment = compileAssignmentInstruction(state, operation.instruction, operation.presenceId, operation.environment ?? "sandbox", operation.sessionId, operation.schedule, operation.delegationPolicy, operation.objective);
-    assignment.projectName = operation.projectName?.trim() || undefined;
     if (operation.assetConstraint?.collectionId && !state.assetCollections?.some((collection) => collection.id === operation.assetConstraint?.collectionId && collection.agentId === state.agent?.id && collection.status === "active")) throw new Error("That Asset Collection does not belong to the active Agent.");
     assignment.assetConstraint = operation.assetConstraint;
     assignment.createdBy = "operator";
@@ -7343,7 +7364,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     assignment.revision = 0;
     state.assignments.unshift(assignment);
     ensureCapabilityRequests(state, assignment.presenceId);
-    state.events.unshift(event("system", "Assignment reviewed", `${assignment.preflight?.status === "ready" || assignment.preflight?.status === "ready_with_assumptions" ? "Ready to activate" : "Needs input before activation"} · ${assignment.progress.required} ${assignment.deliverable.type === "original_publication" ? "original publications" : assignment.deliverable.type} · ${assignment.recurrence?.label ?? "Once"}.`, assignment.preflight?.status === "blocked" || assignment.preflight?.status === "needs_input" ? "warning" : "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
+    state.events.unshift(event("system", "Assignment created", `${assignment.preflight?.status === "ready" || assignment.preflight?.status === "ready_with_assumptions" ? "Ready to work" : "Needs information"} · ${assignment.progress.required} ${assignment.deliverable.type === "original_publication" ? "original publications" : assignment.deliverable.type} · ${assignment.recurrence?.label ?? "One time"}.`, assignment.preflight?.status === "blocked" || assignment.preflight?.status === "needs_input" ? "warning" : "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
     return state;
   }
   if (operation.type === "updateAssignment") {
@@ -8170,6 +8191,29 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
         : workspace);
       return state;
     }
+    case "setAgentAvatar": {
+      if (!state.agents.some((item) => item.id === operation.agentId) || !/^#[0-9a-fA-F]{6}$/.test(operation.accent) || !AGENT_AVATAR_VARIANTS.some((item) => item.id === operation.avatarVariant)) return state;
+      const updateAgent = (item: Agent) => item.id === operation.agentId
+        ? { ...item, accent: operation.accent, avatarVariant: operation.avatarVariant }
+        : item;
+      state.agents = state.agents.map(updateAgent);
+      state.agentWorkspaces = state.agentWorkspaces.map((workspace) => workspace.agent?.id === operation.agentId
+        ? {
+          ...workspace,
+          agent: workspace.agent ? updateAgent(workspace.agent) : workspace.agent,
+          presences: workspace.presences.map((presence) => ({ ...presence, accent: operation.accent })),
+          presence: workspace.presence ? { ...workspace.presence, accent: operation.accent } : workspace.presence,
+        }
+        : workspace);
+      if (state.agent?.id === operation.agentId) {
+        state.agent = updateAgent(state.agent);
+        state.presences = state.presences.map((presence) => ({ ...presence, accent: operation.accent }));
+        state.presence = state.presence ? { ...state.presence, accent: operation.accent } : state.presence;
+      }
+      const avatarLabel = AGENT_AVATAR_VARIANTS.find((item) => item.id === operation.avatarVariant)?.label ?? "selected";
+      state.events.unshift(event("system", "Agent avatar updated", `${state.agent?.name ?? "The Agent"} now uses the ${avatarLabel} ghost mark.`, "positive"));
+      return state;
+    }
     case "renameAgent": {
       if (!state.agent || !operation.name.trim()) return state;
       const previous = state.agent.name;
@@ -8228,7 +8272,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       const assignment = operation.assignmentId
         ? state.assignments.find((item) => item.id === operation.assignmentId && item.agentId === state.agent?.id && item.presenceId === presence.id)
         : undefined;
-      if (operation.assignmentId && !assignment) throw new Error("That Project is no longer available for this Agent.");
+      if (operation.assignmentId && !assignment) throw new Error("That Assignment is no longer available for this Agent.");
       const timestamp = now();
       const conversationId = id("operator_conversation");
       const threadId = `thread:${conversationId}`;
@@ -8371,7 +8415,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       state.events.unshift(event("system", "Legacy calendar entries removed", `${removedSlots} older calendar entr${removedSlots === 1 ? "y" : "ies"} were removed. Assignments and the Publishing Plan remain unchanged.`, "quiet"));
       return state;
     }
-    case "addSlot": { const targetPresence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; const slot = makeCalendarSlot(operation.instruction, targetPresence, operation.day, operation.time, operation.objective, operation.executionWindow); const standing = makeStandingIntent(state, slot.instruction, targetPresence, slot.day, slot.time, slot.objective, slot.executionWindow); const assignment = compileAssignmentInstruction(state, slot.instruction, targetPresence?.id, targetPresence?.environment ?? "sandbox", undefined, { day: slot.day, time: slot.time, executionWindow: slot.executionWindow }); assignment.origin = "schedule"; slot.standingIntentId = standing.id; slot.assignmentId = assignment.id; state.standingIntents.push(standing); state.assignments.unshift(assignment); state.calendar.push(slot); recordChangeSet(state, "Create Assignment", [{ path: "assignments", action: "create", after: assignment.instruction }]); state.events.unshift(event("system", "Assignment reviewed", `${slot.label} · ${slot.day} at ${slot.time}. ${assignment.preflight?.status === "ready" || assignment.preflight?.status === "ready_with_assumptions" ? "Ready to activate." : "Needs input before activation."}`, assignment.preflight?.status === "ready" || assignment.preflight?.status === "ready_with_assumptions" ? "positive" : "warning")); return state; }
+    case "addSlot": { const targetPresence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; const slot = makeCalendarSlot(operation.instruction, targetPresence, operation.day, operation.time, operation.objective, operation.executionWindow); const standing = makeStandingIntent(state, slot.instruction, targetPresence, slot.day, slot.time, slot.objective, slot.executionWindow); const assignment = compileAssignmentInstruction(state, slot.instruction, targetPresence?.id, targetPresence?.environment ?? "sandbox", undefined, { day: slot.day, time: slot.time, executionWindow: slot.executionWindow }); assignment.origin = "schedule"; slot.standingIntentId = standing.id; slot.assignmentId = assignment.id; state.standingIntents.push(standing); state.assignments.unshift(assignment); state.calendar.push(slot); recordChangeSet(state, "Create Assignment", [{ path: "assignments", action: "create", after: assignment.instruction }]); state.events.unshift(event("system", "Assignment created", `${slot.label} · ${slot.day} at ${slot.time}. ${assignment.preflight?.status === "ready" || assignment.preflight?.status === "ready_with_assumptions" ? "Ready to work." : "Needs information before work can begin."}`, assignment.preflight?.status === "ready" || assignment.preflight?.status === "ready_with_assumptions" ? "positive" : "warning")); return state; }
     case "editSlot": { const slot = state.calendar.find((item) => item.id === operation.id); if (!slot) return state; const targetPresence = state.presences.find((item) => item.id === slot.presence) ?? state.presence; const previous = { ...slot }; const scheduleChanged = previous.day !== operation.day || previous.time !== operation.time; slot.instruction = operation.instruction.trim() || slot.instruction; slot.label = slot.instruction.length > 34 ? `${slot.instruction.slice(0, 34).trim()}…` : slot.instruction; slot.day = operation.day; slot.time = operation.time; slot.objective = operation.objective; slot.executionWindow = operation.executionWindow; slot.mode = targetPresence?.execution.post ?? slot.mode; if (scheduleChanged) slot.lastEvaluatedAt = undefined; const standing = state.standingIntents.find((item) => item.id === slot.standingIntentId); if (standing) { const [startsAt, endsAt] = slot.executionWindow.split(/[–-]/).map((part) => part.trim()); standing.instruction = slot.instruction; standing.presenceId = targetPresence?.id; standing.trigger = { type: "schedule", config: { day: slot.day, time: slot.time } }; standing.objective = slot.objective; standing.executionWindow = { startsAt, endsAt: endsAt || startsAt }; standing.updatedAt = now(); } const assignment = slot.assignmentId ? state.assignments.find((item) => item.id === slot.assignmentId) : undefined; if (assignment) { assignment.instruction = slot.instruction; assignment.title = slot.instruction; assignment.schedule = { day: slot.day, time: slot.time, executionWindow: slot.executionWindow }; assignment.preflight = preflightAssignment(state, assignment, assignment.executionPolicy.delegationPolicy); assignment.updatedAt = now(); } recordChangeSet(state, "Edit Assignment", [{ path: `assignments.${slot.assignmentId ?? slot.id}`, action: "update", before: previous.instruction, after: slot.instruction }]); state.events.unshift(event("system", "Assignment updated", `${slot.label} · ${slot.day} at ${slot.time}.`, "positive")); return state; }
     case "createSkill": { if (!state.agent || !operation.name.trim() || !operation.description.trim()) return state; const skillId = `${operation.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "skill"}-${Date.now().toString(36)}`; const skill = { id: skillId, name: operation.name.trim(), description: operation.description.trim(), channels: ["x", "linkedin"] as import("./types").ChannelId[], requiresTools: [], compatibleFormats: [] }; state.skills.push(skill); state.agentSkills.push({ id: id("agent-skill"), agentId: state.agent.id, skillId: skill.id, enabled: true }); state.events.unshift(event("learning", "Skill created", `${skill.name} is installed and enabled for ${state.agent.name}.`, "positive")); return state; }
     case "editSkill": { const skill = state.skills.find((item) => item.id === operation.id); if (!skill || !operation.name.trim() || !operation.description.trim()) return state; const previous = { name: skill.name, description: skill.description }; skill.name = operation.name.trim(); skill.description = operation.description.trim(); state.events.unshift(event("learning", "Skill updated", `${skill.name} instruction prompt updated.`, "positive")); recordChangeSet(state, "Edit skill", [{ path: `skills.${skill.id}`, action: "update", before: previous.description, after: skill.description }]); return state; }
@@ -8534,7 +8578,8 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       return state;
     }
     case "setModel": { const profile = state.modelProfiles.find((item) => item.agentId === state.agent?.id); if (profile && operation.model.trim()) { profile.model = operation.model.trim(); if (operation.provider) profile.provider = operation.provider; if (operation.quality) profile.quality = operation.quality; if (operation.vision !== undefined) profile.capabilities = { ...profile.capabilities, vision: operation.vision }; else if (operation.provider) profile.capabilities = { ...profile.capabilities, vision: ["openai", "anthropic", "gemini"].includes(operation.provider) }; const connection = state.providerConnections.find((item) => item.provider === profile.provider && item.status !== "needs-configuration"); if (connection) profile.connectionId = connection.id; profile.updatedAt = now(); } return state; }
-    case "wakePresence": { const target = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; if (!target || target.status !== "paused") return state; const updated = { ...target, status: "live" as const }; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); if (state.presence?.id === updated.id) state.presence = updated; state.events.unshift(event("system", "Jenny woke up", "The Presence is active again and beginning its first attention cycle.", "positive", { presenceId: updated.id })); return state.nativeConnections.some((connection) => connection.presenceId === updated.id && connection.channelId === "x" && connection.status === "connected") ? state : runAttentionCycle(state, updated); }
+    case "wakePresence": { const target = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; if (!target || target.status !== "paused") return state; const updated = { ...target, status: "live" as const }; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); if (state.presence?.id === updated.id) state.presence = updated; state.events.unshift(event("system", `${updated.name} woke up`, "The Presence is active again and beginning its first attention cycle.", "positive", { presenceId: updated.id })); return state.nativeConnections.some((connection) => connection.presenceId === updated.id && connection.channelId === "x" && connection.status === "connected") ? state : runAttentionCycle(state, updated); }
+    case "pausePresence": { const target = state.presences.find((item) => item.id === operation.presenceId); if (!target || target.status !== "live") return state; const updated = { ...target, status: "paused" as const }; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); if (state.presence?.id === updated.id) state.presence = updated; state.events.unshift(event("system", `${updated.name} went to sleep`, "The Presence is paused. External actions and attention will wait until you wake it.", "warning", { presenceId: updated.id })); return state; }
     case "runPulse": { const pulsePresence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; if (!pulsePresence || pulsePresence.status !== "live") return state; return state.nativeConnections.some((connection) => connection.presenceId === pulsePresence.id && connection.channelId === "x" && connection.status === "connected") ? state : runAttentionCycle(state, pulsePresence); }
     case "syncNativeX": return state;
     case "startPlayground":

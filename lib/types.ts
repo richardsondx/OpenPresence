@@ -1514,7 +1514,7 @@ export interface LanguagePolicy { avoid: string[]; prohibited: string[]; }
 export interface ConversationStylePreview { id: string; label: string; input: string; reply: string; }
 export interface ConversationStyleDefinition { corePrinciple: string; conversationSignature: string; postMoves?: string[]; replyMoves?: string[]; acknowledgmentMoves?: string[]; disagreementMoves?: string[]; humorMoves?: string[]; questionMoves?: string[]; closureMoves?: string[]; languageTexture?: string[]; formatting?: string[]; antiPatterns?: string[]; boundaries?: string[]; }
 export interface ConversationStyleProfile { id: string; name: string; description: string; source: "built_in" | "custom"; channel: ChannelId; schema: "taste.conversation_style.v1"; style: ConversationStyleDefinition; previews: ConversationStylePreview[]; createdAt?: string; updatedAt?: string; }
-export interface Agent { id: string; name: string; description: string; audience: string; topics: string[]; accent: string; glyph: string; languagePolicy: LanguagePolicy; resourceBudget?: ResourceBudget; conversationStyleId?: string; }
+export interface Agent { id: string; name: string; description: string; audience: string; topics: string[]; accent: string; glyph: string; avatarVariant?: import("./avatars").AgentAvatarVariant; languagePolicy: LanguagePolicy; resourceBudget?: ResourceBudget; conversationStyleId?: string; }
 
 export interface ModelRuntimeCapabilities { vision: boolean; toolCalling: boolean; structuredOutput: boolean; streaming: boolean; }
 export type ModelProvider = "openai" | "anthropic" | "gemini" | "openrouter" | "ollama" | "custom";
@@ -1993,6 +1993,8 @@ export interface PresenceChatSession { id: string; presenceId: string; title: st
 export type OperatorNudgeStatus = "queued" | "acknowledged" | "working" | "resolved" | "held_paused" | "assignment_created" | "failed";
 export interface OperatorNudge {
   id: string;
+  /** Private Chat owns this note; ambient attention must never claim it. */
+  privateConversation?: boolean;
   agentId: string;
   presenceId: string;
   conversationId: string;
@@ -2014,6 +2016,8 @@ export interface OperatorNudge {
 }
 export interface OperatorConversationMessage {
   id: string;
+  /** The durable operator turn this reply or tool receipt belongs to. */
+  replyToMessageId?: string;
   role: "operator" | "presence" | "system";
   content: string;
   timestamp: string;
@@ -2249,8 +2253,6 @@ export interface Assignment {
   agentId: string;
   presenceId: string;
   sessionId?: string;
-  /** Compact operator-facing label for a Project; instruction remains the durable contract. */
-  projectName?: string;
   channelId: ChannelId;
   environment: PresenceEnvironment;
   title?: string;
@@ -2266,7 +2268,8 @@ export interface Assignment {
   quantityPolicy?: { quantity?: number | "agent_planned"; mode: AssignmentQuantityMode; period?: "day" | "week" | "assignment"; timezone?: string };
   periods?: AssignmentPeriod[];
   recurrence?: { kind: "once" | "daily" | "weekdays" | "weekly"; label?: string };
-  schedule?: { day: string; time: string; executionWindow: string };
+  /** Weekly schedules use `day`; one-time schedules also carry an ISO local `date`. */
+  schedule?: { day: string; time: string; executionWindow: string; date?: string };
   timeframe?: { startsAt?: string; deadline?: string };
   editorialContext?: { topics?: string[]; sources?: string[]; constraints?: string[] };
   assetConstraint?: { collectionId?: string; required?: boolean };
@@ -2798,8 +2801,16 @@ export interface AgentWorkspaceSnapshot {
   workspaceRevision?: number;
 }
 
+/** Lightweight browser directory entry for the Agent rail. */
+export interface AgentPresenceDirectoryEntry {
+  agentId: string;
+  presence: Presence;
+}
+
 export interface OpenPresenceState extends AgentWorkspaceSnapshot {
   agents: Agent[]; activeAgentId: string | null; agentWorkspaces: AgentWorkspaceSnapshot[]; assignmentRuns?: AssignmentRun[];
+  /** Presence identity/status for Agents outside the currently open workspace. */
+  agentPresenceDirectory?: AgentPresenceDirectoryEntry[];
   /** Identifies whether an API response contains the complete workspace or the compact Activity read model. Never persisted. */
   responseProjection?: "activity" | "chat" | "growth" | "knowledge" | "assets" | "people" | "feed" | "schedule" | "work" | "watching" | "rehearsal" | "brain" | "teach" | "presence" | "playground" | "usage" | "full";
   /** Activity-only compact summaries. They are derived from the full ledger and never persisted as workspace state. */
@@ -2884,9 +2895,9 @@ export type KnowledgeOperation =
   | { type: "archiveKnowledgeCollection"; collectionId: string };
 export interface CreatePresenceInput { channel: ChannelId; name?: string; handle: string; mode: PresenceMode; accent: string; avatarLook?: import("./avatars").AvatarLook; channelDefinition?: ChannelDefinition; connectionMode?: PresenceConnectionMode; }
 export type AssignmentOperation =
-  | { type: "createAssignment"; instruction: string; projectName?: string; presenceId?: string; sessionId?: string; environment?: PresenceEnvironment; schedule?: { day: string; time: string; executionWindow: string }; objective?: string; delegationPolicy?: AssignmentDelegationPolicy; assetConstraint?: { collectionId?: string; required?: boolean } }
-  | { type: "updateAssignment"; id: string; instruction: string; schedule?: { day: string; time: string; executionWindow: string } | null; objective?: string; assetConstraint?: { collectionId?: string; required?: boolean } }
-  | { type: "confirmSchedulePrompt"; promptId: string; presenceId: string; drafts: Array<{ instruction: string; schedule: { day: string; time: string; executionWindow: string }; objective?: string; environment?: PresenceEnvironment; delegationPolicy?: AssignmentDelegationPolicy; plan?: Omit<AssignmentPlan, "id" | "assignmentId" | "revision" | "createdAt" | "updatedAt"> }> }
+  | { type: "createAssignment"; instruction: string; presenceId?: string; sessionId?: string; environment?: PresenceEnvironment; schedule?: { day: string; time: string; executionWindow: string; date?: string }; objective?: string; delegationPolicy?: AssignmentDelegationPolicy; assetConstraint?: { collectionId?: string; required?: boolean } }
+  | { type: "updateAssignment"; id: string; instruction: string; schedule?: { day: string; time: string; executionWindow: string; date?: string } | null; objective?: string; assetConstraint?: { collectionId?: string; required?: boolean } }
+  | { type: "confirmSchedulePrompt"; promptId: string; presenceId: string; drafts: Array<{ instruction: string; schedule: { day: string; time: string; executionWindow: string; date?: string }; objective?: string; environment?: PresenceEnvironment; delegationPolicy?: AssignmentDelegationPolicy; plan?: Omit<AssignmentPlan, "id" | "assignmentId" | "revision" | "createdAt" | "updatedAt"> }> }
   | { type: "activateAssignment"; id: string; delegationPolicy?: AssignmentDelegationPolicy }
   | { type: "updateAssignmentPlan"; assignmentId: string; plan: Omit<AssignmentPlan, "id" | "assignmentId" | "revision" | "createdAt" | "updatedAt"> }
   | { type: "startAssignment"; id: string; sessionId: string }
@@ -2988,6 +2999,7 @@ export type PresenceChatRehearsalOperation =
   | { type: "sendPresenceChatMessage"; presenceId: string; sessionId: string; content: string; attachments?: SandboxAssetInput[]; replyToMessageId?: string; briefOverride?: PresenceBrief; respond?: boolean }
   | { type: "askPresenceChatToReply"; presenceId: string; sessionId: string; targetMessageId: string; briefOverride?: PresenceBrief };
 export type OperatorConversationOperation =
+  | { type: "retryOperatorChat"; presenceId: string; messageId: string }
   | { type: "sendPresenceNudge"; presenceId: string; content: string; threadId?: string; attachments?: SandboxAssetInput[]; clientRequestId?: string }
   | { type: "retryPresenceNudge"; presenceId: string; nudgeId: string }
   | { type: "createAssignmentFromNudge"; presenceId: string; nudgeId: string; title?: string }
@@ -3020,12 +3032,13 @@ export type OperationalRecheckOperation =
   | { type: "syncNativeX"; presenceId?: string; manual?: boolean; reconcile?: boolean; incidentId?: string };
 
 export type PresenceSettingsOperation = { type: "setPresence"; patch: Partial<Presence> };
+export type PresenceWakeOperation = { type: "pausePresence"; presenceId: string; agentId?: string };
 export type OperatorThreadOperation =
   | { type: "createOperatorThread"; presenceId?: string; title?: string; assignmentId?: string }
   | { type: "renameOperatorThread"; threadId: string; title: string }
   | { type: "archiveOperatorThread"; threadId: string }
   | { type: "restoreOperatorThread"; threadId: string };
-export type Operation = AssignmentOperation | CapabilityTrialOperation | LanguagePolicyOperation | ScenarioOperation | PublishingPlanOperation | GrowthOperation | AgentRequestOperation | FailureReviewOperation | ExplorationOperation | OperationalOperation | AttentionControlOperation | WatchRequestOperation | RelationshipStudyOperation | PeopleNoteOperation | AssetLibraryOperation | PresenceSettingsOperation
+export type Operation = AssignmentOperation | CapabilityTrialOperation | LanguagePolicyOperation | ScenarioOperation | PublishingPlanOperation | GrowthOperation | AgentRequestOperation | FailureReviewOperation | ExplorationOperation | OperationalOperation | AttentionControlOperation | WatchRequestOperation | RelationshipStudyOperation | PeopleNoteOperation | AssetLibraryOperation | PresenceSettingsOperation | PresenceWakeOperation
   | BrowserOperation
   | ObservabilityOperation
   | LegacyLanguageOperation
@@ -3045,4 +3058,4 @@ export type Operation = AssignmentOperation | CapabilityTrialOperation | Languag
   | { type: "removeLegacyCalendarEntries" }
   | { type: "askPresenceToIgnore"; presenceId: string; objectId: string; sessionId?: string }
   | { type: "generatePlaygroundStimulus"; sessionId: string; presenceId?: string; targetAffordance: PlaygroundStimulusTarget; topic?: string }
-  | { type: "reset" } | { type: "createAgent"; input: CreateAgentInput } | { type: "createAdditionalAgent"; input: CreateAgentInput } | { type: "selectAgent"; id: string } | { type: "deleteAgent"; confirmationName: string } | { type: "setAgentAccent"; agentId: string; accent: string } | { type: "renameAgent"; name: string } | { type: "createPresence"; input: CreatePresenceInput } | { type: "deletePresence"; presenceId: string; confirmationName: string } | { type: "createChannel"; definition: ChannelDefinition } | { type: "updateChannel"; definition: ChannelDefinition } | { type: "createBridge"; input: { presenceId: string; name: string; kind: ConnectorKind; capabilities: ConnectorCapabilities } } | { type: "rotateBridgeKey"; id: string } | { type: "revokeBridge"; id: string } | { type: "removeBridge"; id: string } | { type: "markManualExecution"; id: string; externalRef: EntityRef } | { type: "retryExecution"; id: string } | { type: "reconcileXDeliveries"; presenceId?: string; retryMissing?: boolean } | { type: "selectPresence"; id: string } | { type: "selectConversation"; id: string } | { type: "newConversation" } | { type: "sendMessage"; content: string; conversationId?: string } | { type: "newPresenceChatSession"; presenceId: string } | { type: "sendPresenceChatMessage"; presenceId: string; sessionId: string; content: string; attachments?: SandboxAssetInput[]; replyToMessageId?: string; briefOverride?: PresenceBrief } | { type: "saveFile"; kind: FileKind; content: string } | { type: "resolveProposal"; id: string; decision: "approve" | "reject" } | { type: "addSlot"; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "editSlot"; id: string; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "runNow"; instruction: string; presenceId?: string } | { type: "createWatch"; query: string; purpose?: string; presenceId?: string } | { type: "deleteWatch"; id: string } | { type: "rememberPerson"; personId?: string; presenceId?: string; channel?: ChannelId; externalActorId: string; displayName: string; handle?: string; profileUrl?: string; source?: "operator" | "current-context" | "watched" } | { type: "forgetRelationship"; relationshipId: string } | { type: "restoreRelationship"; relationshipId: string } | { type: "correctRelationshipFact"; factId?: string; relationshipId: string; statement: string; visibility?: RelationshipVisibility } | { type: "createIntroductionRecord"; presenceId?: string; requesterPersonId?: string; requesterActorId?: string; candidatePersonId?: string; candidateActorId?: string; sourceIntentIds?: string[] } | { type: "respondIntroductionConsent"; id: string; party: "requester" | "candidate"; consent: boolean } | { type: "createSkill"; name: string; description: string } | { type: "editSkill"; id: string; name: string; description: string } | { type: "configureProvider"; provider: ModelProvider; label: string; endpoint?: string; hasSecret?: boolean; secret?: string } | { type: "configureAssetProvider"; provider: AssetProviderConnection["provider"]; label: string; endpoint?: string; hasSecret?: boolean; secret?: string } | { type: "disconnectAssetProvider"; provider: AssetProviderConnection["provider"] } | { type: "wakePresence"; presenceId?: string } | { type: "runPulse"; presenceId?: string } | { type: "syncNativeX"; presenceId?: string } | { type: "setModel"; model: string; provider?: ModelProvider; quality?: ModelQuality; vision?: boolean } | { type: "runSlot"; id: string; scheduled?: boolean } | { type: "approveExecution"; id: string } | { type: "executeIntent"; id: string } | { type: "confirmAutoMode"; presenceId: string; capabilities: string[]; executionIds: string[] } | { type: "approveSandboxIntroduction"; id: string } | { type: "declineSandboxIntroduction"; id: string } | { type: "setPresence"; patch: Partial<Pick<Presence, "name" | "handle" | "mode" | "status" | "avatarLook" | "pacing" | "attentionIntervalMinutes" | "quietHours" | "publishingInitiative" | "execution" | "ghostProfile" | "connectionMode" | "brief" | "publicSelf" | "mediaPerceptionPolicy" | "language" | "selfDirectedAttention" | "curationSources">> } | { type: "startPlayground"; presenceId?: string; source?: "fresh" | "scenario" | "replay" } | { type: "syncPlaygroundTime"; sessionId: string } | { type: "resetPlayground"; sessionId: string } | { type: "inspectMirrorMedia"; presenceId: string; objectId: string } | { type: "inspectSandboxMedia"; sessionId: string; objectId: string } | { type: "addSandboxEvent"; sessionId: string; kind?: string; actionId?: string; actorId?: string; actorName?: string; actorHandle?: string; profile?: SandboxActorProfile; targetExternalRef?: EntityRef; parentExternalRef?: EntityRef; observeOnly?: boolean } | { type: "advanceSandboxTime"; sessionId: string; minutes: number } | { type: "runSandboxPulse"; sessionId: string } | { type: "considerOriginalPublication"; sessionId: string; inspiration?: string } | { type: "recordPreferenceEvidence"; sessionId: string; attemptId: string; reaction: PreferenceReaction; reasons?: PreferenceReason[]; note?: string };
+  | { type: "reset" } | { type: "createAgent"; input: CreateAgentInput } | { type: "createAdditionalAgent"; input: CreateAgentInput } | { type: "selectAgent"; id: string } | { type: "deleteAgent"; confirmationName: string } | { type: "setAgentAccent"; agentId: string; accent: string } | { type: "setAgentAvatar"; agentId: string; avatarVariant: import("./avatars").AgentAvatarVariant; accent: string } | { type: "renameAgent"; name: string } | { type: "createPresence"; input: CreatePresenceInput } | { type: "deletePresence"; presenceId: string; confirmationName: string } | { type: "createChannel"; definition: ChannelDefinition } | { type: "updateChannel"; definition: ChannelDefinition } | { type: "createBridge"; input: { presenceId: string; name: string; kind: ConnectorKind; capabilities: ConnectorCapabilities } } | { type: "rotateBridgeKey"; id: string } | { type: "revokeBridge"; id: string } | { type: "removeBridge"; id: string } | { type: "markManualExecution"; id: string; externalRef: EntityRef } | { type: "retryExecution"; id: string } | { type: "reconcileXDeliveries"; presenceId?: string; retryMissing?: boolean } | { type: "selectPresence"; id: string } | { type: "selectConversation"; id: string } | { type: "newConversation" } | { type: "sendMessage"; content: string; conversationId?: string } | { type: "newPresenceChatSession"; presenceId: string } | { type: "sendPresenceChatMessage"; presenceId: string; sessionId: string; content: string; attachments?: SandboxAssetInput[]; replyToMessageId?: string; briefOverride?: PresenceBrief } | { type: "saveFile"; kind: FileKind; content: string } | { type: "resolveProposal"; id: string; decision: "approve" | "reject" } | { type: "addSlot"; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "editSlot"; id: string; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "runNow"; instruction: string; presenceId?: string } | { type: "createWatch"; query: string; purpose?: string; presenceId?: string } | { type: "deleteWatch"; id: string } | { type: "rememberPerson"; personId?: string; presenceId?: string; channel?: ChannelId; externalActorId: string; displayName: string; handle?: string; profileUrl?: string; source?: "operator" | "current-context" | "watched" } | { type: "forgetRelationship"; relationshipId: string } | { type: "restoreRelationship"; relationshipId: string } | { type: "correctRelationshipFact"; factId?: string; relationshipId: string; statement: string; visibility?: RelationshipVisibility } | { type: "createIntroductionRecord"; presenceId?: string; requesterPersonId?: string; requesterActorId?: string; candidatePersonId?: string; candidateActorId?: string; sourceIntentIds?: string[] } | { type: "respondIntroductionConsent"; id: string; party: "requester" | "candidate"; consent: boolean } | { type: "createSkill"; name: string; description: string } | { type: "editSkill"; id: string; name: string; description: string } | { type: "configureProvider"; provider: ModelProvider; label: string; endpoint?: string; hasSecret?: boolean; secret?: string } | { type: "configureAssetProvider"; provider: AssetProviderConnection["provider"]; label: string; endpoint?: string; hasSecret?: boolean; secret?: string } | { type: "disconnectAssetProvider"; provider: AssetProviderConnection["provider"] } | { type: "wakePresence"; presenceId?: string; agentId?: string } | { type: "runPulse"; presenceId?: string } | { type: "syncNativeX"; presenceId?: string } | { type: "setModel"; model: string; provider?: ModelProvider; quality?: ModelQuality; vision?: boolean } | { type: "runSlot"; id: string; scheduled?: boolean } | { type: "approveExecution"; id: string } | { type: "executeIntent"; id: string } | { type: "confirmAutoMode"; presenceId: string; capabilities: string[]; executionIds: string[] } | { type: "approveSandboxIntroduction"; id: string } | { type: "declineSandboxIntroduction"; id: string } | { type: "setPresence"; patch: Partial<Pick<Presence, "name" | "handle" | "mode" | "status" | "avatarLook" | "pacing" | "attentionIntervalMinutes" | "quietHours" | "publishingInitiative" | "execution" | "ghostProfile" | "connectionMode" | "brief" | "publicSelf" | "mediaPerceptionPolicy" | "language" | "selfDirectedAttention" | "curationSources">> } | { type: "startPlayground"; presenceId?: string; source?: "fresh" | "scenario" | "replay" } | { type: "syncPlaygroundTime"; sessionId: string } | { type: "resetPlayground"; sessionId: string } | { type: "inspectMirrorMedia"; presenceId: string; objectId: string } | { type: "inspectSandboxMedia"; sessionId: string; objectId: string } | { type: "addSandboxEvent"; sessionId: string; kind?: string; actionId?: string; actorId?: string; actorName?: string; actorHandle?: string; profile?: SandboxActorProfile; targetExternalRef?: EntityRef; parentExternalRef?: EntityRef; observeOnly?: boolean } | { type: "advanceSandboxTime"; sessionId: string; minutes: number } | { type: "runSandboxPulse"; sessionId: string } | { type: "considerOriginalPublication"; sessionId: string; attemptId: string; reaction: PreferenceReaction; reasons?: PreferenceReason[]; note?: string };

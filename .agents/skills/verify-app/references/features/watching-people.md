@@ -10,7 +10,7 @@ Watching manages Presence-scoped attention sources; People exposes remembered id
 
 ## How to get to it (user POV)
 
-Choose `Watching` or open `/watching`. Add a creator/topic/conversation watch from the page, use its contextual `View person` action when available, or open `/people` from the People surface/contextual navigation. `People` is a direct/contextual route and is not currently present in the primary sidebar.
+Open the sidebar `Resources` menu and choose `Watchlist` (`/watching?tab=watchlist`). Watchlist is where the operator tells a Presence what known people, accounts, sources, or topics to monitor. Use the Watchlist `People` action or a watch card's contextual `View person` action to inspect the Agent's durable relationship memory, facts, open loops, and boundaries. `/people` remains a direct route for deep links, but is not duplicated in the primary Resources menu.
 
 ## Driving it with verify-app
 
@@ -33,4 +33,4 @@ The Watch’s visible state, Presence scope, and persisted watch record must agr
 - Watches are durable attention sources, not authority to speak.
 - No-observation is a meaningful state; do not treat an empty result as a failure.
 - People is loaded with a dedicated projection and is sensitive to partial-state drift.
-- `Watching` currently combines top-level All/People/Explorations/Watchlist tabs, while People separately combines Remembered/Following/Watched/Boundaries filters. Review whether the two filters are teaching one coherent attention/relationship model.
+- Watchlist attention and People relationship memory are separate surfaces; do not treat a Watch as automatic memory or authority to speak.

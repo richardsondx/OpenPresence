@@ -7,14 +7,14 @@ Schedule manages durable operator responsibility and timing; the Agent chooses t
 - Create and review an Assignment with a completion contract.
 - View Week/List timing without pretending scheduled content is already published.
 - Scan the cross-Presence Work index and follow a responsibility into Schedule.
-- Run or cancel a responsibility in the supported Sandbox path.
+- Work now or cancel a responsibility from its details; Playground remains a separate rehearsal surface.
 - Inspect due, working, blocked, deferred, failed, and completed states.
-- Scan prominent responsibility times, see verified recurring work as `Done today`, and expand long flexible-responsibility lists only when needed.
+- Scan prominent start times and distinguish one-time dates from weekly cadence.
 - Return to the originating Agent conversation with the persistent `Back to Chat` action.
 
 ## How to get to it (user POV)
 
-Choose `Schedule` or open `/schedule`; `/calendar` remains a legacy alias that resolves to the same Schedule view. When Schedule is opened from the Chat context sidebar, use the visible `Back to Chat` action in the Schedule header to return to the Agent conversation. The current route offers `List`/`Week`, `Create with a prompt`, `Add assignment`, publishing rhythm/plan controls, layer visibility, recurrence/day filters, and Assignment details. Use `Add assignment`, fill `What should <Presence> accomplish?`, choose `Day`, `Time`, and `Objective`, then choose `Review responsibility`. A dated Assignment repeats weekly by default; include `once` or `one-time` only for a single event.
+Choose `Schedule` or open `/schedule`; `/calendar` remains a legacy alias that resolves to the same Schedule view. When Schedule is opened from the Chat context sidebar, use the visible `Back to Chat` action in the Schedule header to return to the Agent conversation. The current route offers `List`/`Week`, `Add assignment`, assignment-type/day filters, and Assignment details. Use `Add assignment`, fill `What should <Presence> accomplish?`, choose `One time only` with a specific `Date` or `Weekly` with a `Day`, choose one exact `Time`, then choose `Create assignment`. The Agent interprets the instruction and owns the method; there is no operator Objective or activation step.
 
 ## Driving it with verify-app
 
@@ -23,9 +23,10 @@ verify-app open schedule
 verify-app click --role button --name 'Add assignment'
 verify-app snapshot
 verify-app type --label 'What should Jenny accomplish?' --text 'Teach one useful idea about persistent agents.'
-verify-app select --label Day --value Tuesday
+verify-app click --role radio --name 'One time only'
+verify-app type --label 'Assignment date' --text '2026-09-03'
 verify-app type --role textbox --name Time --text 08:00
-verify-app click --role button --name 'Review responsibility'
+verify-app click --role button --name 'Create assignment'
 verify-app wait-for --text 'Assignment details'
 verify-app click --role button --name Week
 verify-app wait-for --role region --name 'Weekly schedule'
@@ -40,7 +41,7 @@ Proof is a visible Assignment with the correct timing and completion contract pl
 
 ## Gotchas
 
-- Calendar timing grants permission to consider acting, not an obligation to publish.
+- A one-time Assignment carries an ISO local date; a weekly Assignment carries a weekday. Both carry one exact local start time.
 - A rejected candidate, blocked expression, or delivery failure leaves responsibility incomplete.
 - Live assignments need a real connector; harness verification should remain Sandbox-safe.
-- Flexible responsibilities are progressively disclosed: the first relevant items are visible and the remainder is behind `Show more`.
+- Chat-created responsibilities are immediate one-time work and are not silently converted into weekly schedule entries.

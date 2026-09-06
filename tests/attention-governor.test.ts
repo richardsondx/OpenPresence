@@ -47,4 +47,21 @@ describe("Attention Governor", () => {
     expect(resumed.presence?.selfDirectedAttention?.nextEligibleAt).toBeUndefined();
     expect(resumed.presence?.selfDirectedAttention?.usageResetAt).toBeDefined();
   });
+
+  it("counts exploration model calls inside the self-directed budget", () => {
+    let state = createAgent(input);
+    const presence = {
+      ...state.presence!,
+      selfDirectedAttention: {
+        ...state.presence!.selfDirectedAttention!,
+        budget: { maxChannelReadsPerDay: 10, maxModelCallsPerDay: 2, maxVisionCallsPerDay: 2, maxHydrationsPerDay: 4 },
+      },
+    };
+    state.presence = presence;
+    state.presences = [presence];
+    state = recordResourceUsageEvent(state, { presenceId: presence.id, invocationId: "exploration", originKind: "exploration", attentionSource: "exploration", category: "model", provider: "openai", usage: { requests: 2 } });
+
+    expect(attentionGovernorSnapshot(state, presence.id).selfDirected.modelCalls).toBe(2);
+    expect(requestAttentionCapacity(state, presence.id, "candidate_evaluation", "model")).toMatchObject({ allowed: false, reason: "deferred_budget" });
+  });
 });

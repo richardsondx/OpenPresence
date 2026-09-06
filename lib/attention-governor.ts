@@ -94,8 +94,11 @@ function eventCountsFor(state: OpenPresenceState, presenceId: string, now: Date)
   const start = Math.max(dayStart(now), resetAt ? new Date(resetAt).getTime() : Number.NEGATIVE_INFINITY);
   const events = state.resourceUsageEvents.filter((event) => event.presenceId === presenceId && new Date(event.createdAt).getTime() >= start);
   return {
-    selfDirected: totalsFor(events.filter((event) => event.attentionSource === "self_directed_discovery")),
-    background: totalsFor(events.filter((event) => event.attentionSource !== "self_directed_discovery")),
+    // Exploration is self-initiated attention too. Keeping it in the
+    // background bucket let a Presence spend its entire daily model envelope
+    // on exploration while the governor still reported capacity remaining.
+    selfDirected: totalsFor(events.filter((event) => event.attentionSource === "self_directed_discovery" || event.attentionSource === "exploration")),
+    background: totalsFor(events.filter((event) => event.attentionSource !== "self_directed_discovery" && event.attentionSource !== "exploration")),
   };
 }
 

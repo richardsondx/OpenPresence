@@ -40,6 +40,25 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
 
   for (const key of historyCollections) next[key] = [] as never;
 
+  // The Agent shell remains mounted around every resource view. Keep the
+  // compact assignment index available there so Knowledge, Assets, Usage, and
+  // Watching does not falsely show an empty state just because its page
+  // projection omits the heavy assignment history.
+  next.assignments = state.assignments.map((assignment) => ({
+    id: assignment.id,
+    presenceId: assignment.presenceId,
+    title: assignment.title,
+    instruction: assignment.instruction?.slice(0, 420),
+    environment: assignment.environment,
+    status: assignment.status,
+    progress: assignment.progress,
+    activation: assignment.activation,
+    recurrence: assignment.recurrence,
+    schedule: assignment.schedule,
+    work: assignment.work,
+    deliverable: assignment.deliverable,
+  })) as never;
+
   if (projection === "knowledge") {
     for (const key of ["assets", "assetCollections", "assetCollectionMemberships", "assetProcessingJobs"] as const) next[key] = [] as never;
     next.knowledgeDocuments = state.knowledgeDocuments;
@@ -200,6 +219,28 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
       const presenceId = state.presence?.id;
       next.files = state.files;
       next.presenceChatSessions = (state.presenceChatSessions ?? []).filter((session) => !presenceId || session.presenceId === presenceId);
+      // Agent Lab owns both the private Rehearse thread and the repeatable
+      // Scenario library. Keep the library in this projection as well; the
+      // old split meant `/rehearsal` showed an empty state and scenario
+      // mutations returned a response without the newly-created records.
+      const scenarioIds = new Set(state.scenarios
+        .filter((scenario) => scenario.ownerScope !== "presence" || scenario.presenceId === presenceId)
+        .map((scenario) => scenario.id));
+      const scenarioRuns = state.scenarioRuns.filter((run) => !presenceId || run.presenceId === presenceId);
+      const scenarioRunIds = new Set(scenarioRuns.map((run) => run.id));
+      const scenarioSessionIds = new Set(scenarioRuns.map((run) => run.playgroundSessionId).filter((id): id is string => Boolean(id)));
+      const runObjects = state.mirrorObjects.filter((object) => object.sessionId !== undefined && scenarioSessionIds.has(object.sessionId));
+      const runObjectAssetIds = new Set(runObjects.flatMap((object) => (object.assetRefs ?? []).map((ref) => ref.assetId)));
+      next.scenarios = state.scenarios.filter((scenario) => scenarioIds.has(scenario.id));
+      next.scenarioVersions = state.scenarioVersions.filter((version) => scenarioIds.has(version.scenarioId));
+      next.scenarioRuns = scenarioRuns;
+      next.scenarioEvaluations = state.scenarioEvaluations.filter((evaluation) => scenarioRunIds.has(evaluation.runId));
+      next.scenarioRunProvenance = state.scenarioRunProvenance.filter((provenance) => scenarioRuns.some((run) => run.provenanceId === provenance.id));
+      next.playgroundSessions = state.playgroundSessions.filter((session) => scenarioSessionIds.has(session.id));
+      next.mirrorObjects = runObjects;
+      next.events = state.events.filter((event) => event.sessionId !== undefined && scenarioSessionIds.has(event.sessionId));
+      next.assets = state.assets.filter((asset) => runObjectAssetIds.has(asset.id));
+      next.perceptions = state.perceptions.filter((perception) => runObjectAssetIds.has(perception.assetId));
       return next;
     }
     if (projection === "brain") {

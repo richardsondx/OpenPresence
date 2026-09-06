@@ -129,8 +129,10 @@ test("native X connection delivers an approved Presence action", async ({ page }
   await navigation.getByRole("button", { name: "Schedule", exact: true }).click();
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
   await page.getByLabel("What should Jenny accomplish?").fill("Share one useful idea about persistent agents.");
-  await page.getByRole("button", { name: "Review responsibility" }).click();
+  await page.getByLabel("Assignment date").fill(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto" }).format(new Date()));
+  await page.getByRole("textbox", { name: "Time", exact: true }).fill("09:45");
+  await page.getByRole("button", { name: "Create assignment", exact: true }).click();
   await expect(page.getByText("post is available through the Presence execution envelope.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Activate Assignment" }).click();
-  await expect(page.getByRole("button", { name: "Run in Playground" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Work now", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run in Playground", exact: true })).toHaveCount(0);
 });

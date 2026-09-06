@@ -1,3 +1,4 @@
+import { recentChatItems } from "@/lib/operator-chat-history";
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { gzipSync } from "node:zlib";
@@ -18,7 +19,7 @@ import { attentionGovernorSnapshot, requestAttentionCapacity } from "@/lib/atten
 import { requestAttention } from "@/lib/attention-coordinator";
 import { pauseExhaustedAssignmentPursuits, runOperationalSweep, scheduleOperationalSweep } from "@/lib/temporal";
 import { deriveActivityNow } from "@/lib/activity-now";
-import { createOperatorNudge, directWatchQuery, isBurstStatusQuestion, operatorBurstStatusReply, operatorNudgeReceipt, recordOperatorConversationMessage, recordNudgeAssignmentHandoff, releasePausedNudges, settleNudgeFromAssignment } from "@/lib/operator-chat";
+import { createOperatorNudge, recordOperatorConversationMessage, recordNudgeAssignmentHandoff, releasePausedNudges, settleNudgeFromAssignment } from "@/lib/operator-chat";
 
 import { findVerifiedXReply, readNativeXCredentials, readPublicXPostByUrl, readXPostsByIds, searchRecentXPosts, testXCredentials, upsertNativeXConnection, xPostIdFromUrl } from "@/lib/x";
 import { formatReplyText, operatorFeedbackText, publicExpressionText } from "@/lib/public-expression";
@@ -321,9 +322,7 @@ function chatProjection(state: OpenPresenceState): OpenPresenceState {
   const projection = Object.fromEntries(Object.entries(state).filter(([key]) => chatProjectionKeys.has(key as keyof OpenPresenceState))) as OpenPresenceState;
   projection.responseProjection = "chat";
   const presenceId = state.presence?.id ?? state.activePresenceId ?? undefined;
-  const scoped = <T>(items: T[] | undefined, limit: number) => (items ?? [])
-    .filter((item) => !presenceId || (item as { presenceId?: string }).presenceId === undefined || (item as { presenceId?: string }).presenceId === presenceId)
-    .slice(-limit);
+  const scoped = <T>(items: T[] | undefined, limit: number) => recentChatItems(items, presenceId, limit);
   const compactAssignment = (assignment: OpenPresenceState["assignments"][number]) => ({
     ...assignment,
     storyResearch: assignment.storyResearch?.slice(-3),
@@ -359,7 +358,7 @@ function chatProjection(state: OpenPresenceState): OpenPresenceState {
 /** Keep mutation responses bounded to the same browser scope as GET reads. */
 function stateForResponse(request: Request, state: OpenPresenceState, forceActivity = false) {
   const projection = request.headers.get("x-openpresence-projection");
-  return forceActivity || projection === "activity"
+  const browserState = forceActivity || projection === "activity"
     ? activityProjection(state)
     : projection === "chat"
       ? chatProjection(state)
@@ -390,6 +389,21 @@ function stateForResponse(request: Request, state: OpenPresenceState, forceActiv
         : projection === "playground"
           ? agentLibraryBrowserProjection(state, "playground")
     : browserWorkspaceProjection(state);
+  return withAgentPresenceDirectory(browserState, state);
+}
+
+function withAgentPresenceDirectory(browserState: OpenPresenceState, state: OpenPresenceState) {
+  // The rail needs Presence identity and wake state for every Agent, but it
+  // must not receive every Agent's full workspace. Read the normalized
+  // Agent→Presence directory and overlay the active workspace's current
+  // Presence so a just-completed pause/wake response is immediately correct.
+  const directory = readAgentPresenceDirectory();
+  const directoryByAgent = new Map(directory.map((entry) => [entry.agentId, entry]));
+  if (state.agent?.id && state.presence) directoryByAgent.set(state.agent.id, { agentId: state.agent.id, presence: state.presence });
+  return {
+    ...browserState,
+    agentPresenceDirectory: [...directoryByAgent.values()],
+  };
 }
 
 function stateResponse(request: Request, state: OpenPresenceState, options?: { runId?: string; activity?: boolean; receiptOnly?: boolean }) {
@@ -648,7 +662,9 @@ function pursuitTargetLimitReached(state: OpenPresenceState, window: AssignmentP
 
 function parseIncreaseEffortRequest(content: string) {
   const normalized = content.toLowerCase().replace(/[’]/g, "'");
-  if (!/\b(?:increase|raise|push|accelerate|more effort|harder|high[- ]intensity|burst|volume)\b/.test(normalized)) return undefined;
+  // Only an affirmative imperative can change the effort budget. Words in
+  // status questions, negations, and strategy discussion are not commands.
+  if (!/^(?:please\s+)?(?:increase\s+(?:the\s+)?effort|raise\s+(?:the\s+)?(?:effort|volume)|start\s+(?:a\s+|the\s+)?burst|push\s+harder)\b/.test(normalized.trim())) return undefined;
   const requested = normalized.match(/\b(?:up to|max(?:imum)?|about|around|for)\s+(\d{1,3})\b/)?.[1];
   const maxVerifiedActions = Math.min(100, Math.max(1, Number(requested ?? (normalized.includes("100") ? 100 : 40))));
   const deadline = new Date();
@@ -1199,6 +1215,10 @@ function scheduledAssignmentIsDue(assignment: Assignment, now = new Date()) {
   if (evaluatedToday && assignment.lastOutcome && !["action_no_op", "candidate_rejected", "delivery_failed"].includes(assignment.lastOutcome.class)) return false;
   const day = assignment.schedule.day.trim().toLowerCase();
   const currentDay = now.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
+  if (assignment.recurrence?.kind === "once" && assignment.schedule.date) {
+    const currentDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    if (assignment.schedule.date !== currentDate) return false;
+  }
   if (day !== currentDay) return false;
   const [hours, minutes] = assignment.schedule.time.split(":").map(Number);
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return false;
@@ -1209,7 +1229,9 @@ function scheduledAssignmentIsDue(assignment: Assignment, now = new Date()) {
     const [endHours, endMinutes] = (end ?? "").split(":").map(Number);
     if (Number.isFinite(endHours) && Number.isFinite(endMinutes)) {
       const endAt = endHours * 60 + endMinutes;
-      const inWindow = endAt >= startMinutes
+      const inWindow = endAt === startMinutes
+        ? currentMinutes >= startMinutes
+        : endAt > startMinutes
         ? currentMinutes >= startMinutes && currentMinutes <= endAt
         : currentMinutes >= startMinutes || currentMinutes <= endAt;
       if (!inWindow) return false;
@@ -2354,6 +2376,7 @@ function dispatchLiveAssignmentWorker(runId: string) {
 function createRequiredAssignmentFromOperatorNudge(source: OpenPresenceState, presenceId: string, nudgeId: string, title?: string) {
   const nudge = source.operatorNudges?.find((item) => item.id === nudgeId && item.presenceId === presenceId);
   if (!nudge) throw new Error("That note is no longer available.");
+  const presence = source.presences.find((item) => item.id === presenceId) ?? source.presence;
   let next = source;
   let assignment = nudge.assignmentId ? next.assignments.find((item) => item.id === nudge.assignmentId) : undefined;
   if (nudge.assignmentId && !assignment) throw new Error("The linked Assignment is no longer available.");
@@ -2365,11 +2388,17 @@ function createRequiredAssignmentFromOperatorNudge(source: OpenPresenceState, pr
     next = applyOperation(next, {
       type: "createAssignment",
       presenceId,
-      environment: "live",
+      // A direct chat command inherits the Presence execution environment.
+      // The harness boots Genny awake in a Sandbox, so labeling this as live
+      // would send it through the live worker and produce a false delivery
+      // failure instead of a truthful Playground handoff.
+      environment: presence?.environment === "sandbox" ? "sandbox" : "live",
       instruction: draft?.instruction ?? instruction,
       objective: draft?.objective,
       delegationPolicy: draft?.delegationPolicy,
-      schedule: draft?.schedule,
+      // A task created from Chat is an immediate, one-time responsibility.
+      // It must not inherit the prompt planner's recurring schedule.
+      schedule: undefined,
     });
     assignment = next.assignments.find((item) => !before.has(item.id));
     if (!assignment) throw new Error("An equivalent Assignment already exists.");
@@ -2395,16 +2424,18 @@ function createRequiredAssignmentFromOperatorNudge(source: OpenPresenceState, pr
     linked.status = "assignment_created";
     linked.updatedAt = new Date().toISOString();
   }
-  const presence = next.presences.find((item) => item.id === presenceId) ?? next.presence;
+  const nextPresence = next.presences.find((item) => item.id === presenceId) ?? next.presence;
   const ready = ["ready", "ready_with_assumptions"].includes(assignment.preflight?.status ?? "");
   const hasOpenRun = (next.assignmentRuns ?? []).some((run) => run.assignmentId === assignment?.id && !terminalAssignmentRunStatuses.has(run.status));
   let runId: string | undefined;
-  if (ready && presence?.status === "live" && !hasOpenRun && ["active", "accepted", "planning", "working", "awaiting_execution"].includes(assignment.status)) {
+  if (nextPresence?.environment === "sandbox") {
+    next = recordNudgeAssignmentHandoff(next, nudge.id, "Sandbox Assignment created. Open Playground to run this rehearsal; nothing will publish to a live channel.");
+  } else if (ready && nextPresence?.status === "live" && !hasOpenRun && ["active", "accepted", "planning", "working", "awaiting_execution"].includes(assignment.status)) {
     const queued = queueLiveAssignmentRun(next, assignment.id, presenceId);
     next = queued.state;
     runId = queued.run.id;
     next = recordNudgeAssignmentHandoff(next, nudge.id, "Required Assignment queued. Its result will return to this conversation.");
-  } else if (presence?.status === "paused") {
+  } else if (nextPresence?.status === "paused") {
     assignment = next.assignments.find((item) => item.id === assignment?.id)!;
     assignment.nextDueAt = new Date().toISOString();
     next = recordNudgeAssignmentHandoff(next, nudge.id, "Required Assignment created and held until this Presence is explicitly woken.");
@@ -4799,6 +4830,7 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("selectAgent"), id: z.string().min(1) }),
   z.object({ type: z.literal("deleteAgent"), confirmationName: z.string().min(1).max(80) }),
   z.object({ type: z.literal("setAgentAccent"), agentId: z.string().min(1), accent: z.string().regex(/^#[0-9a-fA-F]{6}$/) }),
+  z.object({ type: z.literal("setAgentAvatar"), agentId: z.string().min(1), avatarVariant: z.enum(["genny", "atlas", "drift", "beacon"]), accent: z.string().regex(/^#[0-9a-fA-F]{6}$/) }),
   z.object({ type: z.literal("renameAgent"), name: z.string().trim().min(1).max(80) }),
   z.object({ type: z.literal("createPresence"), input: presenceInput }),
   z.object({ type: z.literal("deletePresence"), presenceId: z.string().min(1), confirmationName: z.string().min(1).max(120) }),
@@ -4838,6 +4870,7 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("setExplorationStatus"), id: z.string().min(1), status: z.enum(["active", "paused", "archived"]) }),
   z.object({ type: z.literal("setExplorationEngagement"), id: z.string().min(1), mode: z.enum(["surface", "opportunistic", "objective"]), objective: z.string().trim().max(2000).optional() }),
   z.object({ type: z.literal("lookNow"), id: z.string().min(1).optional(), presenceId: z.string().min(1).optional() }),
+  z.object({ type: z.literal("retryOperatorChat"), presenceId: z.string().min(1), messageId: z.string().min(1) }),
   z.object({ type: z.literal("sendPresenceNudge"), presenceId: z.string().min(1), threadId: z.string().min(1).optional(), content: z.string().trim().min(1).max(20_000), attachments: z.array(presenceChatAsset).max(12).optional(), clientRequestId: z.string().trim().min(1).max(160).optional() }),
   z.object({ type: z.literal("retryPresenceNudge"), presenceId: z.string().min(1), nudgeId: z.string().min(1) }),
   z.object({ type: z.literal("createAssignmentFromNudge"), presenceId: z.string().min(1), nudgeId: z.string().min(1), title: z.string().trim().min(1).max(240).optional() }),
@@ -4857,7 +4890,8 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("disconnectAssetProvider"), provider: z.enum(["tavily", "evidence-visual"]) }),
   z.object({ type: z.literal("setToolBinding"), toolId: z.string().trim().min(1).max(100), provider: z.enum(["openai", "anthropic", "gemini", "openrouter", "ollama", "custom"]).optional(), model: z.string().trim().max(120).optional(), connectionId: z.string().trim().min(1).max(120).optional() }),
   z.object({ type: z.literal("setCapability"), capabilityId: z.enum(["research", "asset-intelligence", "visual-creation", "channel-action"]), enabled: z.boolean() }),
-  z.object({ type: z.literal("wakePresence"), presenceId: z.string().min(1).optional() }),
+  z.object({ type: z.literal("wakePresence"), presenceId: z.string().min(1).optional(), agentId: z.string().min(1).optional() }),
+  z.object({ type: z.literal("pausePresence"), presenceId: z.string().min(1), agentId: z.string().min(1).optional() }),
   z.object({ type: z.literal("runPulse"), presenceId: z.string().min(1).optional(), scheduled: z.boolean().optional() }),
   z.object({ type: z.literal("replanPublishing"), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("syncNativeX"), presenceId: z.string().min(1).optional(), manual: z.boolean().optional(), reconcile: z.boolean().optional(), incidentId: z.string().min(1).optional() }),
@@ -4877,10 +4911,10 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("setAgentLanguagePolicy"), policy: languagePolicy }),
   z.object({ type: z.literal("setPresenceLanguagePolicy"), policy: languagePolicy }),
   z.object({ type: z.literal("overrideLanguagePolicy"), id: z.string().min(1) }),
-  z.object({ type: z.literal("createAssignment"), instruction: z.string().trim().min(1).max(4000), projectName: z.string().trim().min(1).max(120).optional(), presenceId: z.string().min(1).optional(), sessionId: z.string().min(1).optional(), environment: z.enum(["sandbox", "live"]).optional(), objective: z.enum(["audience_growth", "education", "relationship", "reflection"]).optional(), delegationPolicy: z.enum(["keep_moving", "ask_before_change", "stop_on_deviation"]).optional(), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40) }).optional(), assetConstraint: z.object({ collectionId: z.string().min(1).optional(), required: z.boolean().optional() }).optional() }),
-  z.object({ type: z.literal("updateAssignment"), id: z.string().min(1), instruction: z.string().trim().min(1).max(4000), objective: z.enum(["audience_growth", "education", "relationship", "reflection"]).optional(), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40) }).nullable().optional(), assetConstraint: z.object({ collectionId: z.string().min(1).optional(), required: z.boolean().optional() }).optional() }),
+  z.object({ type: z.literal("createAssignment"), instruction: z.string().trim().min(1).max(4000), presenceId: z.string().min(1).optional(), sessionId: z.string().min(1).optional(), environment: z.enum(["sandbox", "live"]).optional(), objective: z.enum(["audience_growth", "education", "relationship", "reflection"]).optional(), delegationPolicy: z.enum(["keep_moving", "ask_before_change", "stop_on_deviation"]).optional(), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional(), assetConstraint: z.object({ collectionId: z.string().min(1).optional(), required: z.boolean().optional() }).optional() }),
+  z.object({ type: z.literal("updateAssignment"), id: z.string().min(1), instruction: z.string().trim().min(1).max(4000), objective: z.enum(["audience_growth", "education", "relationship", "reflection"]).optional(), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).nullable().optional(), assetConstraint: z.object({ collectionId: z.string().min(1).optional(), required: z.boolean().optional() }).optional() }),
   z.object({ type: z.literal("analyzeSchedulePrompt"), prompt: z.string().trim().min(12).max(4000), presenceId: z.string().min(1).optional() }),
-  z.object({ type: z.literal("confirmSchedulePrompt"), promptId: z.string().trim().min(1).max(120), presenceId: z.string().min(1), drafts: z.array(z.object({ instruction: z.string().trim().min(1).max(4000), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40) }), objective: z.enum(["audience_growth", "education", "relationship", "reflection"]).optional(), environment: z.enum(["sandbox", "live"]).optional(), delegationPolicy: z.enum(["keep_moving", "ask_before_change", "stop_on_deviation"]).optional(), plan: z.object({ summary: z.string().trim().min(1).max(2000), dailyTargets: z.array(z.string().trim().min(1).max(500)).max(20), publishingApproach: z.array(z.string().trim().min(1).max(500)).max(20), discoveryDirections: z.array(z.string().trim().min(1).max(500)).max(20), relationshipFocus: z.array(z.string().trim().min(1).max(500)).max(20), hypotheses: z.array(z.string().trim().min(1).max(500)).max(20), capabilitiesConsidered: z.array(z.string().trim().min(1).max(500)).max(20).optional(), stopConditions: z.array(z.string().trim().min(1).max(500)).max(20).optional(), evidenceNeeded: z.array(z.string().trim().min(1).max(500)).max(20).optional(), nextWeeklyReviewAt: z.string().datetime().optional(), nextStrategicReviewAt: z.string().datetime().optional(), source: z.enum(["agent", "operator"]) }).optional() })).min(1).max(24) }),
+  z.object({ type: z.literal("confirmSchedulePrompt"), promptId: z.string().trim().min(1).max(120), presenceId: z.string().min(1), drafts: z.array(z.object({ instruction: z.string().trim().min(1).max(4000), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40), date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/).optional() }), objective: z.enum(["audience_growth", "education", "relationship", "reflection"]).optional(), environment: z.enum(["sandbox", "live"]).optional(), delegationPolicy: z.enum(["keep_moving", "ask_before_change", "stop_on_deviation"]).optional(), plan: z.object({ summary: z.string().trim().min(1).max(2000), dailyTargets: z.array(z.string().trim().min(1).max(500)).max(20), publishingApproach: z.array(z.string().trim().min(1).max(500)).max(20), discoveryDirections: z.array(z.string().trim().min(1).max(500)).max(20), relationshipFocus: z.array(z.string().trim().min(1).max(500)).max(20), hypotheses: z.array(z.string().trim().min(1).max(500)).max(20), capabilitiesConsidered: z.array(z.string().trim().min(1).max(500)).max(20).optional(), stopConditions: z.array(z.string().trim().min(1).max(500)).max(20).optional(), evidenceNeeded: z.array(z.string().trim().min(1).max(500)).max(20).optional(), nextWeeklyReviewAt: z.string().datetime().optional(), nextStrategicReviewAt: z.string().datetime().optional(), source: z.enum(["agent", "operator"]) }).optional() })).min(1).max(24) }),
   z.object({ type: z.literal("activateAssignment"), id: z.string().min(1), delegationPolicy: z.enum(["keep_moving", "ask_before_change", "stop_on_deviation"]).optional() }),
   z.object({ type: z.literal("updateAssignmentPlan"), assignmentId: z.string().min(1), plan: z.object({ summary: z.string().trim().min(1).max(2000), dailyTargets: z.array(z.string().trim().min(1).max(500)).max(20), publishingApproach: z.array(z.string().trim().min(1).max(500)).max(20), discoveryDirections: z.array(z.string().trim().min(1).max(500)).max(20), relationshipFocus: z.array(z.string().trim().min(1).max(500)).max(20), hypotheses: z.array(z.string().trim().min(1).max(500)).max(20), capabilitiesConsidered: z.array(z.string().trim().min(1).max(500)).max(20).optional(), stopConditions: z.array(z.string().trim().min(1).max(500)).max(20).optional(), evidenceNeeded: z.array(z.string().trim().min(1).max(500)).max(20).optional(), nextWeeklyReviewAt: z.string().datetime().optional(), nextStrategicReviewAt: z.string().datetime().optional(), source: z.enum(["agent", "operator"]) }) }),
   z.object({ type: z.literal("recordAudienceSnapshot"), presenceId: z.string().min(1).optional(), followers: z.number().int().min(0), following: z.number().int().min(0).optional(), source: z.enum(["native", "bridge", "manual", "sandbox"]).optional(), observationStatus: z.enum(["observed", "partial", "unavailable"]).optional(), observedAt: z.string().datetime().optional() }),
@@ -5117,7 +5151,7 @@ export async function GET(request: Request) {
             : projection === "playground"
               ? agentLibraryBrowserProjection(contextualState, "playground")
           : browserWorkspaceProjection(contextualState);
-      const payload = { ...browserState, runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } };
+      const payload = { ...withAgentPresenceDirectory(browserState, contextualState), runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } };
       if (!["activity", "chat"].includes(projection ?? "")) return stateBodyResponse(request, JSON.stringify(payload), { headers: responseHeaders });
       const body = JSON.stringify(payload);
       rememberActivityResponse(activityCacheKey, { etag, body });
@@ -5185,13 +5219,16 @@ export async function POST(request: Request) {
           return { ...base, presences: [...base.presences, ...directory.filter((item) => !known.has(item.presence.id)).map((item) => item.presence)] };
         })()
       : undefined;
+    const scopedAgentId = (parsed.type === "pausePresence" || parsed.type === "wakePresence") && "agentId" in parsed
+      ? parsed.agentId ?? context.agentId
+      : context.agentId;
     const current = parsed.type === "selectAgent"
       // Ignore the outgoing URL's Presence while resolving a new Agent. In
       // legacy databases those Presences share one compatibility directory;
       // carrying the old Presence into the switch can select the right Agent
       // with the wrong channel and make the dropdown appear inert.
       ? stateForContext(directoryState!, { agentId: context.agentId })
-      : readStateForContext(context);
+      : readStateForContext({ ...context, agentId: scopedAgentId, presenceId: "presenceId" in parsed ? parsed.presenceId ?? context.presenceId : context.presenceId });
     const durableWorkspaceRevision = current.workspaceRevision;
     // Selecting an Agent is a directory/context transition, not an edit to
     // the workspace currently rendered in the browser. Resolve it from the
@@ -5418,6 +5455,17 @@ export async function POST(request: Request) {
       const persisted = persistExplorationState(current, next);
       return stateResponse(request, persisted);
     }
+    if (parsed.type === "retryOperatorChat") {
+      const conversation = current.operatorConversations?.find((item) => item.presenceId === parsed.presenceId && item.messages.some((message) => message.id === parsed.messageId && message.role === "operator"));
+      if (!conversation) throw new Error("That Chat turn is not available in this Presence.");
+      if (conversation.messages.some((message) => message.role === "presence" && message.replyToMessageId === parsed.messageId)) return stateResponse(request, current);
+      const active = listOperationalRuns(parsed.presenceId).find((run) => run.kind === "operator_chat" && run.metadata?.operatorMessageId === parsed.messageId && !["failed", "succeeded", "cancelled"].includes(run.state));
+      if (active) return stateResponse(request, current, { runId: active.id });
+      const queued = queueAutonomyRun(parsed.presenceId, "operator_chat", { stage: "operator_chat.queued", metadata: { source: "operator", operatorMessageId: parsed.messageId } });
+      if (isTestRuntime()) await dispatchAutonomyWorker(queued.run.id);
+      else scheduleOperationalSweep();
+      return stateResponse(request, readStateSnapshotForContext({ agentId: current.agent!.id, presenceId: parsed.presenceId }), { runId: queued.run.id });
+    }
     if (parsed.type === "sendPresenceNudge") {
       const conversationPresence = current.presences.find((item) => item.id === parsed.presenceId) ?? current.presence;
       const existingOperatorMessage = parsed.clientRequestId
@@ -5429,15 +5477,7 @@ export async function POST(request: Request) {
         return stateResponse(request, current);
       }
       const hasSharedContext = Boolean(parsed.attachments?.length || /https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^\s/]+\/status\/\d+/i.test(parsed.content));
-      const directWatch = conversationPresence?.status === "live" ? directWatchQuery(parsed.content) : undefined;
-      const explicitPublicationAssignment = conversationPresence?.channel === "x" && isExplicitXPostRequest(parsed.content);
       const increaseEffort = conversationPresence?.status === "live" ? parseIncreaseEffortRequest(parsed.content) : undefined;
-      if (conversationPresence && isBurstStatusQuestion(parsed.content)) {
-        let next = recordOperatorConversationMessage(current, { presenceId: conversationPresence.id, threadId: parsed.threadId, content: parsed.content, clientRequestId: parsed.clientRequestId });
-        next = recordOperatorConversationMessage(next, { presenceId: conversationPresence.id, threadId: parsed.threadId, role: "presence", content: operatorBurstStatusReply(next, conversationPresence.id) });
-        writeState(next);
-        return stateResponse(request, next);
-      }
       if (increaseEffort && conversationPresence) {
         const eligibleAssignments = current.assignments.filter((item) => item.presenceId === conversationPresence.id && item.environment === "live" && item.deliverable.type === "meaningful_engagement" && !["completed", "cancelled", "failed", "expired_incomplete"].includes(item.status));
         // A burst is a control for a distribution responsibility, not a new
@@ -5467,28 +5507,20 @@ export async function POST(request: Request) {
         if (queued?.run.id) void dispatchLiveAssignmentWorker(queued.run.id);
         return stateResponse(request, next, { runId: queued?.run.id });
       }
-      if (explicitPublicationAssignment) {
-        const created = createOperatorNudge(current, parsed);
-        if (created.duplicate) return stateResponse(request, created.state);
-        writeState(created.state);
-        const queued = createRequiredAssignmentFromOperatorNudge(created.state, parsed.presenceId, created.nudge.id);
-        writeState(queued.state);
-        if (queued.runId) dispatchLiveAssignmentWorker(queued.runId);
-        return stateResponse(request, queued.state, { runId: queued.runId });
-      }
-      if (conversationPresence?.status === "live" && !hasSharedContext) {
+      if (conversationPresence) {
         let next = current;
-        if (directWatch) next = applyOperation(next, { type: "createWatch", presenceId: parsed.presenceId, query: `@${directWatch}`, purpose: "The operator asked the Agent to keep this person in view." });
         // Persist the operator's turn before invoking the model. The private
         // conversation should remain truthful even if the model is slow,
         // unavailable, or the process restarts while it is being generated.
-        next = recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, threadId: parsed.threadId, content: parsed.content, clientRequestId: parsed.clientRequestId });
+        next = hasSharedContext
+          ? createOperatorNudge(next, { ...parsed, privateConversation: true }).state
+          : recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, threadId: parsed.threadId, content: parsed.content, clientRequestId: parsed.clientRequestId });
         writeState(next);
         const operatorConversation = next.operatorConversations?.find((item) =>
           item.presenceId === parsed.presenceId
           && (!parsed.threadId || item.threadId === parsed.threadId || item.id === parsed.threadId || (!item.threadId && `thread:${item.id}` === parsed.threadId)),
         );
-        const operatorMessage = operatorConversation?.messages.slice().reverse().find((item) => item.role === "operator");
+        const operatorMessage = operatorConversation?.messages.slice().reverse().find((item) => item.role === "operator" && (!parsed.clientRequestId || item.clientRequestId === parsed.clientRequestId));
         if (!operatorMessage) throw new Error("The operator message could not be persisted.");
         const queued = queueAutonomyRun(parsed.presenceId, "operator_chat", {
           stage: "operator_chat.queued",
@@ -5496,7 +5528,6 @@ export async function POST(request: Request) {
             source: "operator",
             operatorMessageId: operatorMessage.id,
             ...(parsed.clientRequestId ? { clientRequestId: parsed.clientRequestId } : {}),
-            ...(directWatch ? { directWatch } : {}),
           },
         });
         if (isTestRuntime()) {
@@ -5507,20 +5538,8 @@ export async function POST(request: Request) {
         return stateResponse(request, queued.state, { runId: queued.run.id });
       }
       const created = createOperatorNudge(current, parsed);
-      if (created.duplicate) return stateResponse(request, created.state);
-      let next = created.state;
-      const presence = next.presences.find((item) => item.id === parsed.presenceId) ?? next.presence;
-      if (presence?.status === "live" && hasSharedContext) {
-        next = recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, threadId: parsed.threadId, role: "presence", content: operatorNudgeReceipt(parsed.content) });
-      }
-      writeState(next);
-      if (presence?.status === "live") {
-        const receipt = requestAttention(parsed.presenceId, "operator_nudge", new Date().toISOString(), "broad");
-        if (isTestRuntime()) await runOperationalSweep();
-        else scheduleOperationalSweep();
-        return stateResponse(request, next, { runId: receipt.runId ?? receipt.wake?.id });
-      }
-      return stateResponse(request, next);
+      writeState(created.state);
+      return stateResponse(request, created.state);
     }
     if (parsed.type === "retryPresenceNudge") {
       const nudge = current.operatorNudges?.find((item) => item.id === parsed.nudgeId && item.presenceId === parsed.presenceId);
@@ -5532,6 +5551,12 @@ export async function POST(request: Request) {
       nudge.resolvedAt = undefined;
       nudge.updatedAt = new Date().toISOString();
       writeState(current);
+      if (nudge.privateConversation) {
+        const queued = queueAutonomyRun(parsed.presenceId, "operator_chat", { stage: "operator_chat.queued", metadata: { source: "operator", operatorMessageId: nudge.messageId } });
+        if (isTestRuntime()) await dispatchAutonomyWorker(queued.run.id);
+        else scheduleOperationalSweep();
+        return stateResponse(request, readStateSnapshotForContext({ presenceId: parsed.presenceId }), { runId: queued.run.id });
+      }
       if (presence.status === "live") {
         const receipt = requestAttention(parsed.presenceId, "operator_nudge", new Date().toISOString(), "broad");
         if (isTestRuntime()) await runOperationalSweep();
@@ -6835,8 +6860,10 @@ export async function POST(request: Request) {
       if (connection) deleteProviderSecret(connection.id);
     }
     next = recordCapabilityFeedback(current, next, next.presence?.id);
-    writeState(next, parsed.type === "setAgentAccent"
-      ? { persistAgentWorkspaces: true }
+    const crossAgentPresenceMutation = (parsed.type === "pausePresence" || parsed.type === "wakePresence")
+      && Boolean(scopedAgentId && context.agentId && scopedAgentId !== context.agentId);
+    writeState(next, parsed.type === "setAgentAccent" || crossAgentPresenceMutation
+      ? { persistAgentWorkspaces: parsed.type === "setAgentAccent", persistActiveWorkspace: crossAgentPresenceMutation }
       : parsed.type === "selectAgent"
         ? { force: true }
         : undefined);

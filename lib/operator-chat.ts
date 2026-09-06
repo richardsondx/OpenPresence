@@ -19,6 +19,79 @@ function localTime(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+function assignmentLabel(assignment: OpenPresenceState["assignments"][number]) {
+  return assignment.title?.trim() || assignment.instruction.replace(/\s+/g, " ").trim().slice(0, 110);
+}
+
+/**
+ * Answer factual workspace questions from the durable ledger first. The
+ * operator should never have to trust a generic language-model answer for
+ * things the product already knows, such as an active watch or a blocked run.
+ * Returning undefined keeps ordinary conversation on the Agent's natural
+ * language path.
+ */
+export function operatorWorkspaceStatusReply(source: OpenPresenceState, presenceId: string, content: string) {
+  const normalized = content.toLowerCase().replace(/\s+/g, " ").trim();
+  const asksWatch = /\b(?:watchlist|watching|watches|watch|people)\b/.test(normalized)
+    && /\b(?:who|what|which|where|show|tell|know|currently|right now|active|status|have)\b/.test(normalized);
+  const asksWork = /\b(?:working|work|stuck|blocked|busy|progress|doing|next|schedule|calendar|today|later|after)\b/.test(normalized)
+    && /\b(?:what|who|where|when|which|is|are|can|show|tell|next|right now|currently|today|later)\b/.test(normalized);
+  if (!asksWatch && !asksWork) return undefined;
+
+  if (asksWatch) {
+    const watches = (source.watches ?? []).filter((watch) => watch.presenceId === presenceId && (watch.state ?? "active") === "active");
+    if (!watches.length) return "I’m not watching anyone or anything right now. You can ask me to watch a person, topic, or opportunity and I’ll keep it in this Agent’s attention queue.";
+    const details = watches.slice(0, 5).map((watch) => {
+      const target = watch.target?.handle ? `@${watch.target.handle.replace(/^@/, "")}` : watch.title || watch.query;
+      const identity = watch.target?.identityStatus === "verified" ? "identity verified" : "identity not linked yet";
+      const observed = watch.observation.observedCount > 0
+        ? `${watch.observation.observedCount} observation${watch.observation.observedCount === 1 ? "" : "s"}`
+        : "awaiting the first observation";
+      return `${target} (${watch.observation.status}, ${identity}, ${observed})`;
+    });
+    return `Right now I’m watching ${details.join("; ")}. Watching is private attention, not a public action; I’ll bring a worthwhile signal back here before anything else happens.`;
+  }
+
+  const assignments = (source.assignments ?? []).filter((assignment) => assignment.presenceId === presenceId && !["completed", "cancelled", "failed", "expired_incomplete"].includes(assignment.status));
+  const runs = (source.assignmentRuns ?? []).filter((run) => run.presenceId === presenceId);
+  const activeRuns = runs.filter((run) => ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status));
+  const blocked = assignments.filter((assignment) => ["blocked", "needs_operator"].includes(assignment.status))
+    .map((assignment) => `${assignmentLabel(assignment)}${assignment.work?.blockedReason ? ` (${assignment.work.blockedReason})` : ""}`);
+  const asksNow = /\b(?:now|currently|working|doing|busy|progress)\b/.test(normalized);
+  const asksNext = /\b(?:next|after|later|schedule|calendar|today)\b/.test(normalized);
+  if (activeRuns.length) {
+    const current = activeRuns.slice(0, 3).map((run) => {
+      const assignment = assignments.find((item) => item.id === run.assignmentId);
+      return `${assignment ? assignmentLabel(assignment) : "a responsibility"} (${run.currentStage ?? run.status})`;
+    });
+    if (asksNow && !asksNext && !/\b(?:stuck|blocked)\b/.test(normalized)) return `I’m working on ${current.join("; ")} right now. ${blocked.length ? `One other responsibility needs attention: ${blocked.join("; ")}.` : "I don’t see a blocked responsibility."}`;
+  }
+  const upcoming = assignments
+    .filter((assignment) => assignment.schedule || assignment.nextDueAt)
+    .sort((left, right) => Date.parse(left.nextDueAt ?? "") - Date.parse(right.nextDueAt ?? "") || (left.schedule?.time ?? "99:99").localeCompare(right.schedule?.time ?? "99:99"))
+    .slice(0, 4);
+  const next = upcoming.map((assignment) => {
+    const when = assignment.nextDueAt ? `next at ${localTime(assignment.nextDueAt)}` : assignment.schedule ? `${assignment.schedule.day} at ${assignment.schedule.time}` : "flexible timing";
+    const cadence = assignment.recurrence?.kind === "once" ? "one-time" : assignment.recurrence?.label?.toLowerCase() || "recurring";
+    return `${assignmentLabel(assignment)} (${cadence}, ${when})`;
+  });
+  const nowSummary = activeRuns.length
+    ? `I’m working on ${activeRuns.slice(0, 3).map((run) => {
+      const assignment = assignments.find((item) => item.id === run.assignmentId);
+      return `${assignment ? assignmentLabel(assignment) : "a responsibility"} (${run.currentStage ?? run.status})`;
+    }).join("; ")} right now.`
+    : "Nothing is running right now.";
+  const nextSummary = upcoming.length
+    ? `Next up: ${next.join("; ")}. One-time responsibilities happen once; recurring responsibilities stay available for their next window.`
+    : "There is no timed responsibility next; the remaining work is flexible and waits for its conditions.";
+  const blockedSummary = blocked.length
+    ? `Stuck check: ${blocked.join("; ")} ${blocked.length === 1 ? "is" : "are"} blocked and needs attention before continuing.`
+    : "Stuck check: nothing is marked stuck or blocked right now.";
+  if (/\b(?:stuck|blocked)\b/.test(normalized) || (asksNow && asksNext)) return `${nowSummary} ${nextSummary} ${blockedSummary}`;
+  if (asksNext) return `${nowSummary} ${nextSummary}`;
+  return `${nowSummary} ${blockedSummary}`;
+}
+
 /** Answer burst status from durable state, without asking the model to infer it. */
 export function operatorBurstStatusReply(source: OpenPresenceState, presenceId: string, at = new Date()) {
   const nowMs = at.getTime();
@@ -47,16 +120,21 @@ export function operatorBurstStatusReply(source: OpenPresenceState, presenceId: 
 
 function conversationFor(state: OpenPresenceState, presenceId: string, threadId?: string): OperatorConversation {
   const existing = state.operatorConversations?.find((item) => item.presenceId === presenceId && (!threadId || item.threadId === threadId || item.id === threadId || (!item.threadId && `thread:${item.id}` === threadId)))
-    ?? (!threadId ? state.operatorConversations?.find((item) => item.presenceId === presenceId && item.status !== "archived") : undefined);
+    ?? (!threadId ? state.operatorConversations?.find((item) => item.presenceId === presenceId && item.status !== "archived" && (item.title === "Main" || item.title === "Main thread" || !item.threadId)) : undefined);
   if (existing) return existing;
   const timestamp = now();
-  const created: OperatorConversation = { id: `operator_conversation_${randomUUID()}`, agentId: state.agent?.id ?? "", presenceId, threadId: threadId ?? `thread:${presenceId}`, scope: { kind: "presence", presenceId }, status: "active", title: threadId ? "New conversation" : "Main", createdAt: timestamp, updatedAt: timestamp, messages: [] };
+  // The implicit Chat route uses the Presence-scoped fallback thread when an
+  // older workspace has not yet materialized its Main conversation. Keep that
+  // boundary stable: the first message must never become the conversation
+  // title (or accidentally turn Chat into a named work surface).
+  const isImplicitMainThread = !threadId || threadId === `thread:${presenceId}`;
+  const created: OperatorConversation = { id: `operator_conversation_${randomUUID()}`, agentId: state.agent?.id ?? "", presenceId, threadId: threadId ?? `thread:${presenceId}`, scope: { kind: "presence", presenceId }, status: "active", title: isImplicitMainThread ? "Main" : "New conversation", createdAt: timestamp, updatedAt: timestamp, messages: [] };
   state.operatorConversations = [created, ...(state.operatorConversations ?? [])];
   return created;
 }
 
 /** Record a normal private turn without creating an attention request. */
-export function recordOperatorConversationMessage(source: OpenPresenceState, input: { presenceId: string; threadId?: string; content: string; role?: "operator" | "presence"; clientRequestId?: string }) {
+export function recordOperatorConversationMessage(source: OpenPresenceState, input: { presenceId: string; threadId?: string; content: string; role?: "operator" | "presence" | "system"; replyToMessageId?: string; clientRequestId?: string }) {
   const state = clone(source);
   const presence = state.presences.find((item) => item.id === input.presenceId) ?? state.presence;
   if (!presence) throw new Error("That Presence is not available.");
@@ -66,7 +144,7 @@ export function recordOperatorConversationMessage(source: OpenPresenceState, inp
     if (existing) return state;
   }
   const timestamp = now();
-  conversation.messages.push({ id: `${input.role === "presence" ? "presence" : "operator"}_message_${randomUUID()}`, role: input.role ?? "operator", content: input.content.trim(), timestamp, clientRequestId: input.role === "presence" ? undefined : input.clientRequestId });
+  conversation.messages.push({ id: `${input.role === "presence" ? "presence" : "operator"}_message_${randomUUID()}`, role: input.role ?? "operator", replyToMessageId: input.replyToMessageId, content: input.content.trim(), timestamp, clientRequestId: input.role === "presence" ? undefined : input.clientRequestId });
   if (conversation.title === "New conversation" && input.role !== "presence") conversation.title = input.content.replace(/\s+/g, " ").slice(0, 52) + (input.content.length > 52 ? "…" : "");
   conversation.updatedAt = timestamp;
   return state;
@@ -90,7 +168,7 @@ export function directWatchQuery(content: string) {
   return match?.[1]?.replace(/^@/, "") || (operatorRequestsWatch(content) ? mentionedHandle?.replace(/^@/, "") : undefined);
 }
 
-export function createOperatorNudge(source: OpenPresenceState, input: { presenceId: string; threadId?: string; content: string; attachments?: SandboxAssetInput[]; clientRequestId?: string }) {
+export function createOperatorNudge(source: OpenPresenceState, input: { presenceId: string; threadId?: string; content: string; attachments?: SandboxAssetInput[]; clientRequestId?: string; privateConversation?: boolean }) {
   const state = clone(source);
   const presence = state.presences.find((item) => item.id === input.presenceId) ?? state.presence;
   if (!presence) throw new Error("That Presence is not available.");
@@ -105,25 +183,26 @@ export function createOperatorNudge(source: OpenPresenceState, input: { presence
   const nudgeId = `operator_nudge_${randomUUID()}`;
   const attachments: PresenceChatAttachment[] = (input.attachments ?? []).map((item) => ({ id: `operator_attachment_${randomUUID()}`, name: item.name, kind: item.kind, mimeType: item.mimeType, dataUrl: item.dataUrl, sourceUrl: item.sourceUrl }));
   conversation.messages.push({ id: messageId, role: "operator", content: input.content.trim(), timestamp, nudgeId, attachments, clientRequestId: input.clientRequestId });
-  if (presence.status === "paused") {
+  if (presence.status === "paused" && !input.privateConversation) {
     conversation.messages.push({ id: `operator_system_${randomUUID()}`, role: "system", content: `${presence.name} is paused. Your note is saved and will be considered after you wake this Presence.`, timestamp, nudgeId });
   }
   if (conversation.title === "New conversation") conversation.title = input.content.replace(/\s+/g, " ").slice(0, 52) + (input.content.length > 52 ? "…" : "");
   conversation.updatedAt = timestamp;
   const nudge: OperatorNudge = {
     id: nudgeId,
+    privateConversation: input.privateConversation,
     agentId: state.agent?.id ?? "",
     presenceId: input.presenceId,
     conversationId: conversation.id,
     messageId,
     content: input.content.trim(),
-    status: presence.status === "paused" ? "held_paused" : "acknowledged",
+    status: presence.status === "paused" && !input.privateConversation ? "held_paused" : "acknowledged",
     sourceUrls: [...new Set([...urlsIn(input.content), ...attachments.flatMap((item) => item.sourceUrl ? [item.sourceUrl] : [])])],
     attachmentIds: attachments.map((item) => item.id),
     createdAt: timestamp,
     updatedAt: timestamp,
     attentionEpisodeIds: [],
-    acknowledgedAt: presence.status === "paused" ? undefined : timestamp,
+    acknowledgedAt: presence.status === "paused" && !input.privateConversation ? undefined : timestamp,
     clientRequestId: input.clientRequestId,
   };
   state.operatorNudges = [nudge, ...(state.operatorNudges ?? [])];
@@ -132,7 +211,7 @@ export function createOperatorNudge(source: OpenPresenceState, input: { presence
 
 export function startQueuedNudge(source: OpenPresenceState, presenceId: string, episode: AttentionEpisode) {
   const state = clone(source);
-  const nudge = [...(state.operatorNudges ?? [])].reverse().find((item) => item.presenceId === presenceId && ["queued", "acknowledged"].includes(item.status));
+  const nudge = [...(state.operatorNudges ?? [])].reverse().find((item) => !item.privateConversation && item.presenceId === presenceId && ["queued", "acknowledged"].includes(item.status));
   if (!nudge) return { state, nudge: undefined };
   const timestamp = now();
   nudge.status = "working";
@@ -211,5 +290,26 @@ export function releasePausedNudges(source: OpenPresenceState, presenceId: strin
       nudge.updatedAt = timestamp;
     }
   }
+  return state;
+}
+
+
+/** Link an existing private turn to responsibility without duplicating input. */
+export function linkOperatorChatAssignment(state: OpenPresenceState, conversationId: string, messageId: string, assignmentId: string) {
+  const conversation = state.operatorConversations?.find((item) => item.id === conversationId);
+  const message = conversation?.messages.find((item) => item.id === messageId && item.role === "operator");
+  const assignment = state.assignments.find((item) => item.id === assignmentId && item.presenceId === conversation?.presenceId);
+  if (!conversation || !message || !assignment) throw new Error("The Chat responsibility could not be linked to its operator turn.");
+  let nudge = message.nudgeId ? state.operatorNudges?.find((item) => item.id === message.nudgeId) : undefined;
+  if (!nudge) {
+    nudge = { id: `operator_nudge_${randomUUID()}`, privateConversation: true, agentId: conversation.agentId, presenceId: conversation.presenceId, conversationId: conversation.id, messageId: message.id, content: message.content, status: "assignment_created", sourceUrls: urlsIn(message.content), attachmentIds: message.attachments?.map((item) => item.id) ?? [], createdAt: message.timestamp, updatedAt: now(), attentionEpisodeIds: [], clientRequestId: message.clientRequestId };
+    state.operatorNudges = [nudge, ...(state.operatorNudges ?? [])];
+    message.nudgeId = nudge.id;
+  }
+  nudge.assignmentId = assignment.id;
+  nudge.status = "assignment_created";
+  nudge.updatedAt = now();
+  const thread = state.operatorThreads?.find((item) => item.communicationThreadId === conversation.id);
+  if (thread) thread.assignmentIds = [...new Set([...thread.assignmentIds, assignment.id])];
   return state;
 }

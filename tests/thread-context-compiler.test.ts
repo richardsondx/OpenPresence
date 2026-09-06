@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { compileThreadContext } from "@/lib/thread-context-compiler";
 import { applyOperation, cloneState, createAgent } from "@/lib/runtime";
-import { recordOperatorConversationMessage } from "@/lib/operator-chat";
+import { createOperatorNudge, recordOperatorConversationMessage } from "@/lib/operator-chat";
 import type { Assignment, OperatorConversation, OperatorThread } from "@/lib/types";
 
 const thread: OperatorThread = {
@@ -79,5 +79,26 @@ describe("ThreadContextCompiler", () => {
     const archived = applyOperation(renamed, { type: "archiveOperatorThread", threadId: thread!.id });
     expect(archived.operatorThreads?.find((item) => item.id === thread!.id)?.status).toBe("archived");
     expect(archived.operatorThreads?.find((item) => item.title === "Main")?.status).toBe("active");
+  });
+
+  it("keeps an implicit Chat send on Main when legacy named conversations exist", () => {
+    const state = createAgent({ name: "Genny", description: "A useful Agent", mode: "agent", handle: "@genny", accent: "#d68754" });
+    const presenceId = state.presence!.id;
+    state.operatorConversations = [{
+      id: "legacy-project-conversation",
+      agentId: state.agent!.id,
+      presenceId,
+      title: "First message became a work title",
+      threadId: "thread:legacy-project",
+      scope: { kind: "presence", presenceId },
+      status: "active",
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-01T00:00:00.000Z",
+      messages: [],
+    }];
+    const result = createOperatorNudge(state, { presenceId, threadId: `thread:${presenceId}`, content: "What are you working on?", clientRequestId: "client-1" });
+    expect(result.state.operatorConversations?.[0]).toMatchObject({ title: "Main", threadId: `thread:${presenceId}` });
+    expect(result.state.operatorConversations?.[0]?.messages[0]?.content).toBe("What are you working on?");
+    expect(result.state.operatorConversations?.some((item) => item.title === "First message became a work title")).toBe(true);
   });
 });

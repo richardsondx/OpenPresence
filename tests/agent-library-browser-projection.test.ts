@@ -43,6 +43,28 @@ describe("Agent library browser projections", () => {
     expect(Buffer.byteLength(JSON.stringify(projection))).toBeLessThan(Buffer.byteLength(JSON.stringify(state)));
   });
 
+  it("preserves the local media contract used by the Asset browser", () => {
+    const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
+    state.assets = [{
+      id: "asset-local",
+      agentId: state.agent!.id,
+      type: "image",
+      status: "ready",
+      storagePath: "local-image.png",
+      provenance: { origin: "operator_upload", importedAt: "2026-09-02T00:00:00.000Z" },
+      sourceOccurrences: [{ id: "occurrence-local", fileName: "local-image.png", observedAt: "2026-09-02T00:00:00.000Z", status: "present" }],
+    }] as never;
+
+    const projection = agentLibraryBrowserProjection(state, "assets");
+
+    expect(projection.assets).toMatchObject([{
+      id: "asset-local",
+      storagePath: "local-image.png",
+      provenance: { origin: "operator_upload" },
+      sourceOccurrences: [{ fileName: "local-image.png" }],
+    }]);
+  });
+
   it("keeps People relationship evidence scoped to the active Presence", () => {
     const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
     const presenceId = state.presence!.id;
@@ -192,6 +214,35 @@ describe("Agent library browser projections", () => {
     expect(projection.presenceChatSessions).toHaveLength(1);
     expect(projection.files).toHaveLength(2);
     expect(projection.mirrorObjects).toEqual([]);
+  });
+
+  it("keeps the Scenario library and run evidence in Agent Lab", () => {
+    const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
+    const presenceId = state.presence!.id;
+    const otherPresenceId = "other-presence";
+    const builtIn = state.scenarios[0];
+    const builtInVersion = state.scenarioVersions[0];
+    state.scenarios.unshift({ ...builtIn, id: "scenario-current", ownerScope: "presence", presenceId, currentVersionId: "version-current" });
+    state.scenarios.unshift({ ...builtIn, id: "scenario-other", ownerScope: "presence", presenceId: otherPresenceId, currentVersionId: "version-other" });
+    state.scenarioVersions.unshift({ ...builtInVersion, id: "version-current", scenarioId: "scenario-current" });
+    state.scenarioVersions.unshift({ ...builtInVersion, id: "version-other", scenarioId: "scenario-other" });
+    state.scenarioRuns = [{ id: "run-current", scenarioId: "scenario-current", presenceId, playgroundSessionId: "session-current", provenanceId: "provenance-current" }] as never;
+    state.scenarioRuns.push({ id: "run-other", scenarioId: "scenario-other", presenceId: otherPresenceId, playgroundSessionId: "session-other", provenanceId: "provenance-other" } as never);
+    state.scenarioEvaluations = [{ id: "evaluation-current", runId: "run-current" }] as never;
+    state.scenarioRunProvenance = [{ id: "provenance-current", runId: "run-current" }] as never;
+    state.playgroundSessions = [{ id: "session-current", presenceId }] as never;
+
+    const projection = agentLibraryBrowserProjection(state, "rehearsal");
+
+    expect(projection.responseProjection).toBe("rehearsal");
+    expect(projection.scenarios.map((scenario) => scenario.id)).toContain("scenario-current");
+    expect(projection.scenarios.map((scenario) => scenario.id)).not.toContain("scenario-other");
+    expect(projection.scenarioVersions.map((version) => version.id)).toContain("version-current");
+    expect(projection.scenarioVersions.map((version) => version.id)).not.toContain("version-other");
+    expect(projection.scenarioRuns.map((run) => run.id)).toEqual(["run-current"]);
+    expect(projection.scenarioEvaluations.map((evaluation) => evaluation.id)).toEqual(["evaluation-current"]);
+    expect(projection.scenarioRunProvenance.map((provenance) => provenance.id)).toEqual(["provenance-current"]);
+    expect(projection.playgroundSessions.map((session) => session.id)).toEqual(["session-current"]);
   });
 
   it("keeps Brain configuration and mind-file context without operational history", () => {

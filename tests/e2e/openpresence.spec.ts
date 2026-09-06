@@ -668,39 +668,37 @@ test("Teach submits an explicit Presence identity instruction for review", async
   await expect(page.getByLabel("Presence name")).toHaveValue("Jenny Presence");
 });
 
-test("Schedule stores an Assignment and shows its readiness contract", async ({ page }) => {
+test("Schedule stores an Assignment and shows its work contract", async ({ page }) => {
   await createAgent(page);
   await navigate(page, "Schedule");
   await page.getByRole("button", { name: "List", exact: true }).click();
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
   await expect(page.getByLabel("Assignment window")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "When should it work?" })).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByText("How long is this relevant?", { exact: true })).toHaveCount(0);
   await page.getByLabel("What should Jenny accomplish?").fill("Teach the audience one useful idea about persistent agents.");
+  await page.getByLabel("Assignment date").fill(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto" }).format(new Date()));
   await page.getByRole("textbox", { name: "Time", exact: true }).fill("09:15");
-  await page.getByRole("button", { name: "Review responsibility" }).click();
+  await page.getByRole("button", { name: "Create assignment", exact: true }).click();
   await expect(page.getByText("Teach the audience one useful idea about persistent agents.")).toBeVisible();
-  await expect(page.getByText("Ready to activate", { exact: true })).toBeVisible();
+  await expect(page.getByText("Ready to work", { exact: true })).toBeVisible();
   await expect(page.getByText("The post is live on X and confirmed.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Activate Assignment" }).click();
   await expect(page.getByText("active", { exact: true })).toBeVisible();
 });
 
-test("Schedule reveals a custom Assignment window only when requested", async ({ page }) => {
+test("Schedule keeps Assignment timing to one exact start", async ({ page }) => {
   await createAgent(page);
   await navigate(page, "Schedule");
   await page.getByRole("button", { name: "List", exact: true }).click();
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
-  await page.getByRole("button", { name: "When should it work?" }).click();
-  await expect(page.getByText("How long is this relevant?", { exact: true })).toBeVisible();
-  await expect(page.getByText("Recommended · Jenny can work within a few hours.", { exact: true })).toBeVisible();
-  await page.getByRole("radio", { name: /Custom/ }).check();
-  await page.getByLabel("Assignment starts").fill("07:00");
-  await page.getByLabel("Assignment ends").fill("10:30");
+  await expect(page.getByText("One time only", { exact: true })).toBeVisible();
+  await expect(page.getByText("Weekly", { exact: true })).toBeVisible();
+  await page.getByRole("radio", { name: /Weekly/ }).check();
+  await page.getByRole("combobox", { name: "Day", exact: true }).selectOption("Tuesday");
+  await page.getByRole("textbox", { name: "Time", exact: true }).fill("07:00");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByLabel("What should Jenny accomplish?").fill("Review one useful idea for the audience.");
-  await page.getByRole("button", { name: "Review responsibility" }).click();
-  await expect(page.getByText("07:00–10:30", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Create assignment", exact: true }).click();
+  await expect(page.getByText("Weekly · Tuesday · 07:00", { exact: true })).toBeVisible();
 });
 
 test("Activity explains current work and next attention", async ({ page }) => {
@@ -974,14 +972,16 @@ test("Activity does not guess a repeated post for legacy unlinked decisions", as
   await expect(rows.first().locator(".event-context-preview")).toHaveCount(0);
 });
 
-test("Schedule reviews and activates delegated work", async ({ page }) => {
+test("Schedule creates delegated work without a separate activation step", async ({ page }) => {
   await createAgent(page);
   await navigate(page, "Schedule");
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
   await page.getByLabel("What should Jenny accomplish?").fill("Produce one useful idea before it is sent.");
-  await page.getByRole("button", { name: "Review responsibility" }).click();
-  await expect(page.getByRole("heading", { name: "Ready to activate" })).toBeVisible();
-  await page.getByRole("button", { name: "Activate Assignment" }).click();
+  await page.getByLabel("Assignment date").fill(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto" }).format(new Date()));
+  await page.getByRole("textbox", { name: "Time", exact: true }).fill("09:30");
+  await page.getByRole("button", { name: "Create assignment", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Ready to work" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Activate Assignment", exact: true })).toHaveCount(0);
   await expect(page.getByText("active", { exact: true })).toBeVisible();
 });
 
@@ -990,7 +990,8 @@ test("legacy calendar links open the canonical Schedule surface", async ({ page 
   const state = await (await page.request.get("/api/state")).json();
   await page.goto(`/calendar?agentId=${state.activeAgentId}&presenceId=${state.activePresenceId}`);
   await expect(page.getByRole("heading", { name: "Schedule", exact: true })).toBeVisible();
-  await expect(page.locator(".schedule-plan-overview")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Schedule list" })).toBeVisible();
+  await expect(page.getByText("publishing rhythm", { exact: false })).toHaveCount(0);
   await expect(page.locator(".loading-screen")).toHaveCount(0);
 });
 
@@ -1727,9 +1728,10 @@ test("Custom Channel connects a Bridge, receives Mirror events, and completes qu
   await navigate(page, "Schedule");
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
   await page.getByLabel("What should Jenny in Founders accomplish?").fill("Share one useful memory idea with the founders.");
-  await page.getByRole("button", { name: "Review responsibility" }).click();
+  await page.getByLabel("Assignment date").fill(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto" }).format(new Date()));
+  await page.getByRole("textbox", { name: "Time", exact: true }).fill("09:45");
+  await page.getByRole("button", { name: "Create assignment", exact: true }).click();
   await expect(page.getByText("post is available through the Presence execution envelope.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Activate Assignment" }).click();
   await expect(page.getByText("active", { exact: true })).toBeVisible();
 
   await navigate(page, "Settings");

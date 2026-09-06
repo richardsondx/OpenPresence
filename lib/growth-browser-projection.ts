@@ -158,7 +158,20 @@ export function growthBrowserProjection(state: OpenPresenceState, presenceId?: s
   projection.assignments = scoped(state.assignments).map((assignment) => ({
     id: assignment.id,
     presenceId: assignment.presenceId,
+    // The shared Agent shell is rendered around Analytics too. Keep the
+    // compact identity/status fields it needs for the growth surface and inspector,
+    // and the sidebar instead of returning an opaque assignment shell that
+    // crashes when it tries to render a fallback title.
+    title: assignment.title,
+    instruction: compactText(assignment.instruction, 420),
+    environment: assignment.environment,
     status: assignment.status,
+    progress: assignment.progress,
+    activation: assignment.activation,
+    recurrence: assignment.recurrence,
+    schedule: assignment.schedule,
+    work: assignment.work,
+    deliverable: assignment.deliverable,
     audienceObjective: assignment.audienceObjective,
     successEvidence: assignment.successEvidence,
     plan: assignment.plan
