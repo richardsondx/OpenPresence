@@ -60,7 +60,7 @@ function nativeConnectionCanWrite(connection: OpenPresenceState["nativeConnectio
   if (!canAct) return false;
   // Keep reads available while routing writes away from an API app with no
   // credits. A connected-but-creditless API must not strand browser work.
-  return !/no API credits remaining|credits remaining|billing and usage|quota exhausted/i.test(`${connection.deliveryError ?? ""} ${connection.healthMessage ?? ""}`);
+  return !xCreditsExhausted(connection);
 }
 
 /**

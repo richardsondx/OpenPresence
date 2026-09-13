@@ -9,7 +9,7 @@ describe("Presence account binding", () => {
       ...initial,
       presence: { ...initial.presence!, environment: "live" as const, connectionMode: "native" as const },
       presences: [{ ...initial.presence!, environment: "live" as const, connectionMode: "native" as const }],
-      nativeConnections: [{ id: "native-x", presenceId, channelId: "x" as const, kind: "x" as const, status: "connected" as const, access: "read-write" as const, account: { username: "jenny_ai" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }],
+      nativeConnections: [{ id: "native-x", presenceId, channelId: "x" as const, kind: "x" as const, status: "connected" as const, access: "read-write" as const, account: { id: "account-jenny", username: "jenny_ai", name: "Jenny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }],
       bridges: [{ id: "bridge-x", presenceId, channelId: "x" as const, name: "X Bridge", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, capabilities: { inbound: true, reconcile: true, affordances: ["post"], formats: ["x.post"], metrics: [] }, accountIdentity: { username: "jenny_ai", status: "verified" as const, observedAt: new Date().toISOString() }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }],
     };
 

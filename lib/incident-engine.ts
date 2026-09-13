@@ -17,6 +17,7 @@ import type {
   RecoveryIncident,
 } from "./types";
 import { scheduleProviderResetWake } from "./temporal";
+import { isXCreditsError } from "./x-credits";
 
 // ============================================================================
 // Recovery Budgets & Configuration
@@ -95,10 +96,10 @@ export function classifyFailureRootCause(
   }
 
   // Credits / Billing exhaustion
-  if (/no api credits|credits depleted|credit balance|credits remaining|billing and usage|quota exhausted/i.test(lower)) {
+  if (isXCreditsError(msg)) {
     return {
       rootCauseKey: `${dependency}.credits_exhausted`,
-      safeSummary: `${dependency === "native_x" ? "X API" : "Provider"} credits are exhausted. Add credits or choose an API plan to continue.`,
+      safeSummary: `${dependency === "native_x" ? "X API" : "Provider"} billing is blocking access. Review available credits and spending limits to restore it.`,
       retryable: false,
       requiresOperator: true,
       requiresAuth: false,

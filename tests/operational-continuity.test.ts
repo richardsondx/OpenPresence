@@ -30,12 +30,12 @@ function seedTestState(): OpenPresenceState {
       follow: "auto",
     },
     capabilities: [
-      { id: "post", label: "Post", affordance: "post" },
-      { id: "reply", label: "Reply", affordance: "reply" },
-      { id: "quote", label: "Quote", affordance: "quote" },
+      { id: "post", label: "Post", description: "Create a new post." },
+      { id: "reply", label: "Reply", description: "Join a conversation." },
+      { id: "quote", label: "Quote", description: "Add context to another post." },
     ],
   };
-  base.presences = [base.presence];
+  base.presences = [base.presence!];
   return base;
 }
 
@@ -82,7 +82,6 @@ describe("Operational Continuity & Responsibility Invariant Test Suite", () => {
         access: "read-write",
         status: "connected",
         channelId: "x",
-        handle: "jenny_ai",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
@@ -200,6 +199,8 @@ describe("Operational Continuity & Responsibility Invariant Test Suite", () => {
       deadlineAt: new Date(now + 3_600_000).toISOString(),
       maxVerifiedActions: 40,
       status: "active",
+      createdAt: new Date(now - 300_000).toISOString(),
+      updatedAt: new Date(now - 300_000).toISOString(),
     }];
     const run: AssignmentRun = {
       id: "stalled-adaptive-run",
@@ -250,8 +251,8 @@ describe("Operational Continuity & Responsibility Invariant Test Suite", () => {
       leaseOwner: "worker-1",
       leaseExpiresAt: new Date(Date.now() - 100_000).toISOString(),
       lastProgressAt: new Date(Date.now() - 300_000).toISOString(),
-      attempts: 3,
-      maxAttempts: 4, // 3 + 1 = 4 -> exhausted
+      attempts: 4,
+      maxAttempts: 4, // All four claimed attempts have been used
       rejectedCandidates: 0,
       createdAt: new Date(Date.now() - 300_000).toISOString(),
       updatedAt: new Date(Date.now() - 300_000).toISOString(),
@@ -273,7 +274,6 @@ describe("Operational Continuity & Responsibility Invariant Test Suite", () => {
         access: "read-write",
         status: "needs-attention",
         channelId: "x",
-        handle: "jenny_ai",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },

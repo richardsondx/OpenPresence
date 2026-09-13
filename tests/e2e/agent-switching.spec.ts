@@ -75,6 +75,10 @@ test("Agent wake controls are Presence-scoped when handles overlap", async ({ pa
 
   await expect(jennyToggle).toHaveAccessibleName(/Jenny is asleep/, { timeout: 15000 });
   await expect(gennyToggle).toHaveAccessibleName(/Genny is awake/, { timeout: 15000 });
+  await jennyToggle.click();
+  await expect(jennyToggle).toHaveAccessibleName(/Jenny is awake/, { timeout: 15000 });
+  await jennyToggle.click();
+  await expect(jennyToggle).toHaveAccessibleName(/Jenny is asleep/, { timeout: 15000 });
   const after = await request.get("/api/state").then((response) => response.json());
   const directory = after.agentPresenceDirectory as Array<{ agentId: string; presence: { status: string } }>;
   expect(directory.find((entry) => entry.agentId === jenny.id)?.presence.status).toBe("paused");

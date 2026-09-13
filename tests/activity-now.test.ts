@@ -3,9 +3,11 @@ import { deriveActivityNow } from "../lib/activity-now";
 import { activityRefreshIntervalMs } from "../lib/activity-polling";
 import { createOperatorNudge, directWatchQuery, isBurstStatusQuestion, operatorBurstStatusReply, operatorNudgeReceipt, operatorRequestsWatch, recordOperatorConversationMessage, recordNudgeAssignmentHandoff, releasePausedNudges, settleNudgeForEpisode, settleNudgeFromAssignment, startQueuedNudge } from "../lib/operator-chat";
 import { operatorConversationActionEvents } from "../lib/operator-chat-projection";
-import { createAgent, formXActionIntent } from "../lib/runtime";
-import { closeNonRetryableVerificationExecutions, dueLiveAssignmentsWithoutWorkers, pauseExhaustedAssignmentPursuits, repairMissingAssignmentWakes, repairMissingOperatorNudgeWakes, repairPendingBridgeVerificationWakes } from "../lib/temporal";
-import { listScheduledWakes, upsertOperationalRun } from "../lib/db";
+import { applyOperation, createAgent, formXActionIntent, initialState } from "../lib/runtime";
+import { deferQueuedAssignmentRunsOutsideWindow } from "../lib/assignment-recovery";
+import { closeNonRetryableVerificationExecutions, dueLiveAssignmentsWithoutWorkers, pauseExhaustedAssignmentPursuits, queuedLiveAssignmentRunsWithoutWorkers, repairMissingAssignmentWakes, repairMissingOperatorNudgeWakes, repairPendingBridgeVerificationWakes } from "../lib/temporal";
+import { listScheduledWakes, readState, readStateVersion, upsertOperationalRun, writeState } from "../lib/db";
+import { POST as statePost } from "../app/api/state/route";
 import type { OperationalRun } from "../lib/types";
 
 describe("truthful Activity right-now projection", () => {
@@ -47,6 +49,158 @@ describe("truthful Activity right-now projection", () => {
     state.assignments = [{ ...base, id: "due:first" }, { ...base, id: "due:second" }] as never;
 
     expect(dueLiveAssignmentsWithoutWorkers(state, now).map((assignment) => assignment.id)).toEqual(["due:first"]);
+  });
+
+  it("rediscovers a queued live AssignmentRun after a process or fetch loss", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, environment: "live" as const, status: "live" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    const now = new Date("2026-09-08T23:30:00.000Z");
+    const assignment = {
+      id: "queued-assignment",
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      environment: "live" as const,
+      status: "working" as const,
+      deliverable: { type: "original_publication" as const },
+      progress: { required: 1, verified: 0 },
+      work: { phase: "researching" as const, attempts: 1, maxAttempts: 4, storiesResearched: 0 },
+      schedule: { day: "Monday", time: "08:00", executionWindow: "08:00–11:00" },
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+    state.assignments = [assignment] as never;
+    state.assignmentRuns = [{
+      id: "queued-run",
+      assignmentId: assignment.id,
+      agentId: assignment.agentId,
+      presenceId: presence.id,
+      sessionId: `live:${presence.id}`,
+      status: "queued",
+      currentStage: "researching",
+      attempts: 1,
+      maxAttempts: 4,
+      rejectedCandidates: 0,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    }];
+
+    expect(queuedLiveAssignmentRunsWithoutWorkers(state).map((run) => run.id)).toEqual(["queued-run"]);
+  });
+
+  it("does not rediscover queued rows after responsibility is paused or terminal", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, environment: "live" as const, status: "live" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    const statuses = ["paused", "completed", "cancelled"] as const;
+    state.assignments = statuses.map((status, index) => ({
+      id: `stale-assignment-${status}`,
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      environment: "live" as const,
+      status,
+      deliverable: { type: "original_publication" as const },
+      progress: { required: 1, verified: 0 },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date(Date.now() + index).toISOString(),
+    })) as never;
+    state.assignmentRuns = statuses.map((status) => ({
+      id: `stale-run-${status}`,
+      assignmentId: `stale-assignment-${status}`,
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      sessionId: `live:${presence.id}`,
+      status: "queued" as const,
+      currentStage: "candidate_review" as const,
+      attempts: 0,
+      maxAttempts: 4,
+      rejectedCandidates: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }));
+
+    expect(queuedLiveAssignmentRunsWithoutWorkers(state)).toEqual([]);
+  });
+
+  it("acknowledges an internal wake selected before an Assignment was cancelled", async () => {
+    let state = fixture();
+    const presence = { ...state.presence!, environment: "live" as const, status: "live" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    state = applyOperation(state, { type: "createAssignment", presenceId: presence.id, environment: "live", instruction: "Publish one useful original note." });
+    const assignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "cancelAssignment", id: assignment.id });
+    state.assignmentRuns = [{
+      id: "cancelled-after-selection",
+      assignmentId: assignment.id,
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      sessionId: `live:${presence.id}`,
+      status: "queued",
+      currentStage: "researching",
+      attempts: 1,
+      maxAttempts: 4,
+      rejectedCandidates: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }];
+    writeState(state);
+    const beforeVersion = readStateVersion();
+    try {
+      const response = await statePost(new Request("http://localhost/api/state", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-openpresence-internal-dispatch": "assignment" },
+        body: JSON.stringify({ type: "runLiveAssignment", assignmentId: assignment.id, presenceId: presence.id }),
+      }));
+      expect(response.status).toBe(202);
+      expect(await response.json()).toMatchObject({ accepted: true, assignmentId: assignment.id, paused: true });
+      expect(readStateVersion()).toBe(beforeVersion);
+      expect(readState().assignmentRuns?.[0]?.status).toBe("queued");
+    } finally {
+      writeState(initialState());
+    }
+  });
+
+  it("settles a queued scheduled run after its window closes", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, environment: "live" as const, status: "live" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    const assignment = {
+      id: "closed-assignment",
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      environment: "live" as const,
+      status: "working" as const,
+      deliverable: { type: "original_publication" as const },
+      progress: { required: 1, verified: 0 },
+      work: { phase: "researching" as const, attempts: 1, maxAttempts: 4, storiesResearched: 0 },
+      schedule: { day: "Monday", time: "08:00", executionWindow: "08:00–11:00" },
+      createdAt: "2026-09-07T08:00:00.000Z",
+      updatedAt: "2026-09-07T08:00:00.000Z",
+    };
+    state.assignments = [assignment] as never;
+    state.assignmentRuns = [{
+      id: "closed-run",
+      assignmentId: assignment.id,
+      agentId: assignment.agentId,
+      presenceId: presence.id,
+      sessionId: `live:${presence.id}`,
+      status: "queued",
+      currentStage: "researching",
+      attempts: 1,
+      maxAttempts: 4,
+      rejectedCandidates: 0,
+      createdAt: "2026-09-08T12:05:26.088Z",
+      updatedAt: "2026-09-08T12:05:26.088Z",
+    }];
+
+    const settled = deferQueuedAssignmentRunsOutsideWindow(state, assignment.id, presence.id, Date.parse("2026-09-08T23:30:00.000Z"));
+    expect(settled.deferredRunIds).toEqual(["closed-run"]);
+    expect(settled.state.assignmentRuns?.[0]).toMatchObject({ status: "deferred", currentStage: "candidate_review" });
+    expect(settled.state.assignments[0]).toMatchObject({ status: "active", work: { phase: "candidate_review" } });
   });
 
   it("shows a running checkpoint and marks an overdue heartbeat stuck", () => {
@@ -258,7 +412,7 @@ describe("truthful Activity right-now projection", () => {
     const now = new Date("2026-08-29T01:00:00.000Z");
     state.assignments.unshift({ id: "budgeted_burst_assignment", agentId: state.agent!.id, presenceId: presence.id, environment: "live", status: "active", instruction: "Find a worthwhile conversation to engage with.", deliverable: { type: "meaningful_engagement" }, progress: { required: 1, verified: 0 }, createdAt: now.toISOString(), updatedAt: now.toISOString() } as never);
     state.assignmentPursuitWindows = [{ id: "budgeted_burst", assignmentId: "budgeted_burst_assignment", agentId: state.agent!.id, presenceId: presence.id, startsAt: "2026-08-29T00:00:00.000Z", deadlineAt: "2026-08-29T02:00:00.000Z", maxVerifiedActions: 10, resourceBudget: { maxModelCalls: 1 }, status: "active", nextRunAt: now.toISOString(), createdAt: now.toISOString(), updatedAt: now.toISOString() }];
-    state.resourceUsageEvents = [{ id: "model_budget", agentId: state.agent!.id, presenceId: presence.id, invocationId: "run", originKind: "assignment", originId: "budgeted_burst_assignment", attentionSource: "assignment", category: "model", usage: { requests: 1 }, createdAt: now.toISOString() }];
+    state.resourceUsageEvents = [{ id: "model_budget", agentId: state.agent!.id, presenceId: presence.id, invocationId: "run", originKind: "assignment", originId: "budgeted_burst_assignment", attentionSource: "assignment", category: "model", provider: "openai", usage: { requests: 1 }, createdAt: now.toISOString() }];
 
     expect(pauseExhaustedAssignmentPursuits(state, now)).toBe(0);
     expect(state.assignmentPursuitWindows[0]).toMatchObject({ status: "active", nextRunAt: now.toISOString() });
@@ -286,7 +440,7 @@ describe("truthful Activity right-now projection", () => {
     const now = new Date("2026-08-29T01:00:00.000Z");
     state.assignments.unshift({ id: "due_exhausted_burst", agentId: state.agent!.id, presenceId: presence.id, environment: "live", status: "active", deliverable: { type: "meaningful_engagement" }, progress: { required: 1, verified: 0 }, createdAt: now.toISOString(), updatedAt: now.toISOString() } as never);
     state.assignmentPursuitWindows = [{ id: "due_exhausted", assignmentId: "due_exhausted_burst", agentId: state.agent!.id, presenceId: presence.id, startsAt: "2026-08-29T00:00:00.000Z", deadlineAt: "2026-08-29T02:00:00.000Z", maxVerifiedActions: 10, resourceBudget: { maxModelCalls: 1 }, status: "active", nextRunAt: now.toISOString(), createdAt: now.toISOString(), updatedAt: now.toISOString() }];
-    state.resourceUsageEvents = [{ id: "model_budget", agentId: state.agent!.id, presenceId: presence.id, invocationId: "run", originKind: "assignment", originId: "due_exhausted_burst", attentionSource: "assignment", category: "model", usage: { requests: 1 }, createdAt: now.toISOString() }];
+    state.resourceUsageEvents = [{ id: "model_budget", agentId: state.agent!.id, presenceId: presence.id, invocationId: "run", originKind: "assignment", originId: "due_exhausted_burst", attentionSource: "assignment", category: "model", provider: "openai", usage: { requests: 1 }, createdAt: now.toISOString() }];
 
     expect(dueLiveAssignmentsWithoutWorkers(state, now)).toEqual([]);
   });

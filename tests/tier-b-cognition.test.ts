@@ -100,6 +100,8 @@ describe("Tier B: Real-Cognition Closed-Loop Sandbox Lifecycle", () => {
           purpose: "Explore cognitive memory architectures",
           audience: "AI researchers",
           primaryTerritory: ["agent memory", "cognitive persistence", "social presence"],
+          adjacentTerritory: [],
+          boundaries: [],
         },
         execution: {
           post: "auto",

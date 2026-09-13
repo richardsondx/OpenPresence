@@ -1,12 +1,15 @@
+import { inspectionReportSummary } from "@/lib/chat-activity-presentation";
+import { assignmentInspectionEvidence, persistAssignmentReport } from "@/lib/assignment-private-report";
+import { isPrivateInspectionInstruction } from "@/lib/runtime";
 import { recentChatItems } from "@/lib/operator-chat-history";
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { z } from "zod";
-import { dbSelectionSource, deleteBridgeCredential, deleteChannelSecret, deleteProviderSecret, getRecoveryIncident, listOperationalRuns, readAgentPresenceDirectory, readProviderSecret, readState, readStateForContext, readStateReadToken, readStateSnapshotForContext, readStateViewForContext, resolvedDbPath, saveProviderSecret, WorkspaceConflictError, writeState } from "@/lib/db";
+import { AgentPresenceScopeConflictError, dbSelectionSource, deleteBridgeCredential, deleteChannelSecret, deleteProviderSecret, getRecoveryIncident, listOperationalRuns, readAgentPresenceDirectory, readProviderSecret, readState, readStateForContext, readStateReadToken, readStateSnapshotForContext, readStateViewForContext, resolvedDbPath, saveProviderSecret, upsertOperationalRun, WorkspaceConflictError, writeState } from "@/lib/db";
 import { EvidenceVisualAssetDiscoveryProvider, materializeCandidate, previewCandidate, TavilyAssetDiscoveryProvider } from "@/lib/asset-discovery";
 import { assessVisualFit } from "@/lib/visual-fit";
-import { checkModelProviderAccess, generateAgentReply, generateAgentSocialDecision, generateAgentSocialEdit, generateAgentSocialJudgment, generateAssetPublicationReview, generateAssetResearchPlannerDecision, generateEvidenceLedDraft, generateEvidenceLedPublication, generateExplorationTriage, generateGrowthReview, generateIndependentModelText, generatePlaygroundTestStimulus, generatePresenceChatReply, generatePublishingPlan, generateTextOnlyAssignmentPublication } from "@/lib/ai";
+import { AiRuntimeError, checkModelProviderAccess, generateAgentReply, generateAgentSocialDecision, generateAgentSocialEdit, generateAgentSocialJudgment, generateAssetPublicationReview, generateAssetResearchPlannerDecision, generateEvidenceLedDraft, generateEvidenceLedPublication, generateExplorationTriage, generateGrowthReview, generateIndependentModelText, generatePlaygroundTestStimulus, generatePresenceChatReply, generatePublishingPlan, generateTextOnlyAssignmentPublication } from "@/lib/ai";
 import type { AgentSocialDecision } from "@/lib/ai";
 import { validateScenarioFidelity } from "@/lib/scenarios";
 import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, assertRuntimeScope, assignmentIsSatisfied, beginOriginalPostRehearsal, cleanSandboxDraft, compileAgendaWork, completeOriginalPostRehearsal, confirmAutoMode, createRuntimeScope, declineSandboxIntroduction, deleteScenario, deliverSandboxExecution, deriveGrowthEvidenceSnapshot, derivePresenceCapabilityManifest, derivePublishingProgress, derivePublicHistory, deriveSelfDirectedDiscoveryPlan, duePublishingPlanWindows, ensureCapabilityRequests, expireSandboxIntents, finishExplorationSession, finishPulse, formAssignmentPostIntent, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, formXDeleteIntent, formXActionIntent, createScenarioFromPrompt, generateMissingScenarioEvents, identityLeakageReason, importScenarioDefinition, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, markCalendarSlotEvaluated, markInboundJudged, markScenarioStimulus, nativeDeliveryFailureIsConnectionScoped, openAgentRequest, publicSelfGuidance, publishingInitiativeGuidance, recordAttentionTestDecision, recordImportedXMirror, recordNativeMirror, recordNativeMirrorDeletion, recordPreferenceEvidence, recordPublishingPlanFailure, recordPublishingPlanWork, recordResourceUsageEvent, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, recordScenarioEvaluation, recordScenarioReview, renameScenario, replacePublishingPlan, resetPlaygroundSession, settleCapabilityTrialNoOpportunity, startAttentionTest, failAttentionTest, startExplorationSession, startScenarioRunState, completeScenarioRunState, stopScenarioRunState, stateForContext, structuralScenarioEvaluation, startPlaygroundSession, syncPlaygroundTime, syncPublishingInitiativeAssignment, targetIsBlockedByPerson, targetLanguageValidationForAction, unblockNativeExecutions, updateScenarioEvents, updateScenarioRequirements, recordVerifiedXReply, externalUrlForMirrorObject } from "@/lib/runtime";
@@ -47,7 +50,7 @@ import { recordVerifiedBridgeReaction } from "@/lib/bridge";
 import { reassessPublishingPlan } from "@/lib/publishing-plan-reassessment";
 import { duplicatePublicOutcomeEvidence } from "@/lib/duplicate-public-outcome";
 import { nextSelfDirectedAttentionAt, selectBridgeDiscoveryCandidates, selectGrowthDiscoverySource } from "@/lib/growth-scheduler";
-import { reconcileOrphanedAssignmentStatuses, recoverStaleAssignmentRuns } from "@/lib/assignment-recovery";
+import { resumeRecoverableAssignmentFailures, deferRecoverableAssignmentFailure, deferQueuedAssignmentRunsOutsideWindow, reconcileOrphanedAssignmentStatuses, recoverStaleAssignmentRuns } from "@/lib/assignment-recovery";
 import { expireElapsedPursuitWindows } from "@/lib/state-projection";
 import { assignmentRunBlocksNewWork, assignmentRunIsActive, classifyLiveAssignmentRun, isAutonomousPreWriteDeliveryFailure, liveAssignmentRunStage, maxConcurrentPursuitDeliveries, reconcileLiveAssignmentRuns } from "@/lib/live-assignment-run";
 import { dispatchAutonomyWorker, queueAutonomyRun } from "@/lib/autonomy-worker";
@@ -894,7 +897,7 @@ function nativeConnectionCanWrite(connection: OpenPresenceState["nativeConnectio
   if (!nativeConnectionCanAct(connection, expectedHandle)) return false;
   // Keep read access available while routing writes away from an API app with
   // no credits. A connected-but-creditless API must not strand browser work.
-  return !/no API credits remaining|credits remaining|billing and usage|quota exhausted/i.test(`${connection.deliveryError ?? ""} ${connection.healthMessage ?? ""}`);
+  return !xCreditsExhausted(connection);
 }
 
 type ChromeDeliveryReconciliation = {
@@ -925,18 +928,16 @@ async function qualityCheckedSocialAct(state: OpenPresenceState, presence: NonNu
   if (toneCorrected !== act.text && !socialReplyQualityIssue(target.content?.text ?? "", toneCorrected)) return { ...act, text: toneCorrected };
   const issue = socialReplyQualityIssue(target.content?.text ?? "", act.text);
   if (!issue) return act;
-  try {
-    const revision = await generateAgentSocialEdit(
-      state,
-      `The proposed ${act.action} failed a social-language check: ${issue}\n\nRe-express the same ${act.action} as a brief, clear response from one person to another. Follow BRAIN.md for the Agent's stance. Use realistic optimism only when BRAIN.md is silent; preserve any stance BRAIN.md specifies. Let SOUL.md, TASTE.md, and the active Style Guidance control how that stance is expressed. Use ordinary words, complete sentences, and one concrete detail or sincere acknowledgment from this author's actual post. Remove teacher voice, canned empathy, slang, workplace jargon, bureaucratic phrasing, stock formulas, repeated contrasts, vague "interesting/useful bit" frames, and language about heroic or heavy lifting. Preserve the selected act and stay under 240 characters.\n\nAuthor's post:\n${target.content?.text ?? "[no source text]"}\n\nDraft:\n${act.text}`,
-      act.action,
-      { presence, operational: true, socialEvidence: JSON.stringify({ target: { author: target.author, text: target.content?.text }, issue }), socialThreadContext: target.content?.text },
-    );
-    const repaired = revision?.status === "ok" && revision.action === act.action ? revision.text.trim() : "";
-    return repaired && repaired.length <= 240 && !socialReplyQualityIssue(target.content?.text ?? "", repaired) ? { ...act, text: repaired } : undefined;
-  } catch {
-    return undefined;
-  }
+  // Provider failures propagate so the inbound candidate remains unjudged.
+  const revision = await generateAgentSocialEdit(
+    state,
+    `The proposed ${act.action} failed a social-language check: ${issue}\n\nRe-express the same ${act.action} as a brief, clear response from one person to another. Follow BRAIN.md for the Agent's stance. Use realistic optimism only when BRAIN.md is silent; preserve any stance BRAIN.md specifies. Let SOUL.md, TASTE.md, and the active Style Guidance control how that stance is expressed. Use ordinary words, complete sentences, and one concrete detail or sincere acknowledgment from this author's actual post. Remove teacher voice, canned empathy, slang, workplace jargon, bureaucratic phrasing, stock formulas, repeated contrasts, vague "interesting/useful bit" frames, and language about heroic or heavy lifting. Preserve the selected act and stay under 240 characters.\n\nAuthor's post:\n${target.content?.text ?? "[no source text]"}\n\nDraft:\n${act.text}`,
+    act.action,
+    { presence, operational: true, socialEvidence: JSON.stringify({ target: { author: target.author, text: target.content?.text }, issue }), socialThreadContext: target.content?.text },
+  );
+  const repaired = revision?.status === "ok" && revision.action === act.action ? revision.text.trim() : "";
+  if (repaired && repaired.length <= 240 && !socialReplyQualityIssue(target.content?.text ?? "", repaired)) return { ...act, text: repaired };
+  throw new AiRuntimeError(`Social expression repair failed: ${issue}. The source remains unjudged for recovery.`, { code: "invalid_response" });
 }
 
 function canSafelyRetryChromeReply(execution: OpenPresenceState["executions"][number], bridgeReady: boolean) {
@@ -1300,6 +1301,34 @@ async function runScheduledLiveAssignments(source: OpenPresenceState, presenceId
     && assignment?.deliverable.type === "meaningful_engagement"
     && ["completed", "completed_with_adaptation"].includes(assignment.status));
   if (!assignment || (["completed", "completed_with_adaptation", "cancelled", "failed", "expired_incomplete"].includes(assignment.status) && !pursuitMayContinueCompletedAssignment)) return source;
+
+  // Reconsider relevance after recovery before constructing any new intent.
+  // More than 26 hours is outside the original "today" in every local day,
+  // including a daylight-saving transition. Pending writes still reconcile.
+  if (!assignment.schedule && /\btoday\b|first post of the day/i.test(assignment.instruction)
+    && Date.now() - Date.parse(assignment.createdAt) > 26 * 60 * 60_000
+    && !source.executions.some((execution) => execution.assignmentId === assignment.id
+      && ["claimed", "executing", "verification-pending"].includes(execution.status))) {
+    const at = new Date().toISOString();
+    assignment.status = "expired_incomplete";
+    assignment.lastOutcome = { class: "incomplete", message: "The requested day elapsed before completion. Recovery will not publish this expired request.", at };
+    assignment.nextDueAt = undefined;
+    assignment.updatedAt = at;
+    return source;
+  }
+
+  // Private evaluations do not require a public delivery route or target.
+  if (assignment.deliverable.type === "decision_report" || isPrivateInspectionInstruction(assignment.instruction)) {
+    assignment.deliverable = { type: "decision_report", quantity: 1, quantityMode: "exact" };
+    const evidence = assignmentInspectionEvidence(source, assignment);
+    const report = isPrivateInspectionInstruction(assignment.instruction)
+      ? inspectionReportSummary(evidence)
+      : await generateIndependentModelText(source,
+        "Write a concise private decision report for the requested assignment using only supplied evidence. Distinguish observed state from unknowns. Do not claim external checks or actions. Return the report text.",
+        JSON.stringify({ instruction: assignment.instruction, evidence }));
+    if (!report.trim()) throw new Error("The private evaluation returned an empty response.");
+    return persistAssignmentReport(source, assignment, report);
+  }
 
   const adaptiveCapability = assignment.deliverable?.type === "meaningful_engagement"
     ? derivePresenceCapabilityManifest(source, presenceId).items.find((item) => ["post", "reply", "quote", "repost", "like", "follow"].includes(item.capability) && item.canExecute && item.canVerify && (presence.execution[item.capability] ?? "off") !== "off")?.capability
@@ -2038,6 +2067,12 @@ function queueLiveAssignmentRun(source: OpenPresenceState, assignmentId: string,
     && assignmentRunIsActive(run));
   if (otherActiveRun) return { state: next, run: otherActiveRun };
   const pursuitWindow = pursuitWindowId ? next.assignmentPursuitWindows?.find((item) => item.id === pursuitWindowId && item.assignmentId === assignmentId && item.presenceId === presenceId) : undefined;
+  const activePursuit = pursuitWindow && activeAssignmentPursuitWindow(next, assignmentId);
+  const resumableCompletedPursuit = Boolean(activePursuit?.id === pursuitWindow?.id && ["completed", "completed_with_adaptation"].includes(assignment.status));
+  if (["paused", "awaiting_review", "completed", "completed_with_adaptation", "cancelled", "failed", "expired_incomplete"].includes(assignment.status)
+    && !resumableCompletedPursuit) {
+    throw new Error("That live Assignment is paused or no longer eligible for new work.");
+  }
   if (!pursuitWindowId && assignmentPursuitBlocksNormalScheduling(next, assignmentId, presenceId)) throw new Error("That Assignment is currently owned by its open distribution push.");
   if (pursuitWindow && (!activeAssignmentPursuitWindow(next, assignmentId) || !assignmentPursuitHasHardResourceCapacity(next, pursuitWindow))) throw new Error("That distribution push is paused, expired, or out of resource capacity.");
   const timestamp = new Date().toISOString();
@@ -2251,7 +2286,7 @@ async function processLiveAssignmentRun(runId: string) {
     return;
   }
   try {
-    const worked = await runScheduledLiveAssignments(claimed, queued.presenceId, queued.assignmentId, { onProgress: (phase) => persistAssignmentProgress(runId, phase, owner), runId });
+    const worked = await runScheduledLiveAssignments(JSON.parse(JSON.stringify(claimed)) as OpenPresenceState, queued.presenceId, queued.assignmentId, { onProgress: (phase) => persistAssignmentProgress(runId, phase, owner), runId });
     const latest = readState();
     // A stale worker can finish after the watchdog has superseded its run.
     // Its result must not overwrite the recovery worker's newer snapshot.
@@ -2307,10 +2342,13 @@ async function processLiveAssignmentRun(runId: string) {
       status: "awaiting_execution",
       work: { ...assignmentWorkDefaults(resultingAssignment ?? assignment), phase: "publishing" },
     } : undefined);
-    const outcomeSummary = workerStatus === "published"
+    const retryScheduled = deferRecoverableAssignmentFailure(completed, runId);
+    const outcomeSummary = resultingAssignment?.deliverable.type === "decision_report" && resultingAssignment.completionReport
+      ? resultingAssignment.completionReport
+      : workerStatus === "published"
       ? `I sent the requested ${linkedExecution?.affordance.replace(/^x\./, "") ?? "public action"}.`
       : failureOutcome?.message;
-    completed = settleNudgeFromAssignment(completed, queued.assignmentId, workerStatus, outcomeSummary);
+    completed = settleNudgeFromAssignment(completed, queued.assignmentId, retryScheduled ? "deferred" : workerStatus, outcomeSummary);
     writeState(completed);
     // Verification can lag behind the browser/API write. Keep an explicit
     // pursuit moving through a small bounded set of distinct candidates
@@ -2353,7 +2391,8 @@ async function processLiveAssignmentRun(runId: string) {
       status: "blocked",
       work: { ...assignmentWorkDefaults(assignment), phase: "blocked", blockedReason: error instanceof Error ? error.message : "The live Assignment worker failed." },
     });
-    failed = settleNudgeFromAssignment(failed, queued.assignmentId, "failed", error instanceof Error ? error.message : "I couldn't complete that Assignment.");
+    const retryScheduled = deferRecoverableAssignmentFailure(failed, runId);
+    failed = settleNudgeFromAssignment(failed, queued.assignmentId, retryScheduled ? "deferred" : "failed", error instanceof Error ? error.message : "I couldn't complete that Assignment.");
     try { writeState(failed); } catch { /* A newer operator/worker snapshot is authoritative. */ }
   }
 }
@@ -4872,6 +4911,7 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("lookNow"), id: z.string().min(1).optional(), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("retryOperatorChat"), presenceId: z.string().min(1), messageId: z.string().min(1) }),
   z.object({ type: z.literal("sendPresenceNudge"), presenceId: z.string().min(1), threadId: z.string().min(1).optional(), content: z.string().trim().min(1).max(20_000), attachments: z.array(presenceChatAsset).max(12).optional(), clientRequestId: z.string().trim().min(1).max(160).optional() }),
+  z.object({ type: z.literal("cancelOperatorChat"), presenceId: z.string().min(1), runId: z.string().min(1) }),
   z.object({ type: z.literal("retryPresenceNudge"), presenceId: z.string().min(1), nudgeId: z.string().min(1) }),
   z.object({ type: z.literal("createAssignmentFromNudge"), presenceId: z.string().min(1), nudgeId: z.string().min(1), title: z.string().trim().min(1).max(240).optional() }),
   z.object({ type: z.literal("runAttentionWorker"), presenceId: z.string().min(1).optional(), scheduled: z.boolean().optional() }),
@@ -5052,6 +5092,14 @@ export async function GET(request: Request) {
       stored = readStateViewForContext({ agentId: requestedAgentId, presenceId: requestedPresenceId });
     }
   }
+  const repairedFailures = resumeRecoverableAssignmentFailures(stored);
+  if (repairedFailures.length) {
+    try { writeState(stored); }
+    catch (error) {
+      if (!(error instanceof WorkspaceConflictError)) throw error;
+      stored = readStateViewForContext({ agentId: requestedAgentId, presenceId: requestedPresenceId });
+    }
+  }
   const recovery = recoverStaleAssignmentRuns(stored, Date.now(), new Set([...assignmentWorkers.keys(), ...liveAssignmentWorkers.keys()]));
   if (recovery.recoveredRunIds.length > 0) {
     try {
@@ -5160,6 +5208,9 @@ export async function GET(request: Request) {
   try { setRuntimeScopeCookie(response, createRuntimeScope(contextualState, { presenceId: contextualState.presence?.id })); } catch { /* onboarding has no RuntimeScope yet */ }
   return response;
   } catch (error) {
+    if (error instanceof AgentPresenceScopeConflictError) {
+      return NextResponse.json({ error: error.message, conflict: true, scope: "agent-presence", requestedAgentId: error.agentId, presenceId: error.presenceId, ownerAgentId: error.ownerAgentId, ownerAgentName: error.ownerAgentName, recovery: error.ownerAgentId ? "switch-to-owner" : "operator-resolve-ownership" }, { status: error.status });
+    }
     console.error("OpenPresence state read failed; no workspace data was changed", error);
     return NextResponse.json({ error: "The workspace could not be read safely. No data was changed." }, { status: 503 });
   }
@@ -5234,7 +5285,9 @@ export async function POST(request: Request) {
     // the workspace currently rendered in the browser. Resolve it from the
     // latest durable directory snapshot so a background Activity/health poll
     // cannot turn a harmless switch into a false stale-revision conflict.
-    if (parsed.type !== "selectAgent" && context.workspaceRevision !== undefined) {
+    const crossAgentPresenceMutation = (parsed.type === "pausePresence" || parsed.type === "wakePresence")
+      && Boolean(scopedAgentId && context.agentId && scopedAgentId !== context.agentId);
+    if (parsed.type !== "selectAgent" && context.workspaceRevision !== undefined && !crossAgentPresenceMutation) {
       current.workspaceRevision = context.workspaceRevision;
     }
     validateRequestLineage(current, parsed as unknown as RuntimeOperation);
@@ -5459,12 +5512,46 @@ export async function POST(request: Request) {
       const conversation = current.operatorConversations?.find((item) => item.presenceId === parsed.presenceId && item.messages.some((message) => message.id === parsed.messageId && message.role === "operator"));
       if (!conversation) throw new Error("That Chat turn is not available in this Presence.");
       if (conversation.messages.some((message) => message.role === "presence" && message.replyToMessageId === parsed.messageId)) return stateResponse(request, current);
-      const active = listOperationalRuns(parsed.presenceId).find((run) => run.kind === "operator_chat" && run.metadata?.operatorMessageId === parsed.messageId && !["failed", "succeeded", "cancelled"].includes(run.state));
-      if (active) return stateResponse(request, current, { runId: active.id });
+      const previous = listOperationalRuns(parsed.presenceId).find((run) => run.kind === "operator_chat" && run.metadata?.operatorMessageId === parsed.messageId);
+      if (previous && !["failed", "succeeded", "cancelled", "needs_operator"].includes(previous.state)) return stateResponse(request, current, { runId: previous.id });
+      if (previous && ["failed", "needs_operator"].includes(previous.state)) {
+        previous.state = "queued";
+        previous.stage = "operator_chat.queued";
+        previous.recoveryCount = 0;
+        previous.eligibleAt = new Date().toISOString();
+        previous.lastProgressAt = previous.eligibleAt;
+        delete previous.leaseOwner;
+        delete previous.leaseExpiresAt;
+        upsertOperationalRun(previous);
+        if (isTestRuntime()) await dispatchAutonomyWorker(previous.id);
+        else scheduleOperationalSweep();
+        return stateResponse(request, readStateSnapshotForContext({ agentId: current.agent!.id, presenceId: parsed.presenceId }), { runId: previous.id });
+      }
       const queued = queueAutonomyRun(parsed.presenceId, "operator_chat", { stage: "operator_chat.queued", metadata: { source: "operator", operatorMessageId: parsed.messageId } });
       if (isTestRuntime()) await dispatchAutonomyWorker(queued.run.id);
       else scheduleOperationalSweep();
       return stateResponse(request, readStateSnapshotForContext({ agentId: current.agent!.id, presenceId: parsed.presenceId }), { runId: queued.run.id });
+    }
+    if (parsed.type === "cancelOperatorChat") {
+      const run = listOperationalRuns(parsed.presenceId).find((item) => item.id === parsed.runId && item.kind === "operator_chat");
+      if (!run) throw new Error("That Chat task is no longer available.");
+      if (["succeeded", "failed", "cancelled"].includes(run.state)) return stateResponse(request, current);
+      run.state = "cancelled";
+      run.stage = "operator_chat.cancelled";
+      run.lastErrorCode = "OPERATOR_CHAT_CANCELLED";
+      run.lastProgressAt = new Date().toISOString();
+      delete run.leaseOwner;
+      delete run.leaseExpiresAt;
+      upsertOperationalRun(run);
+      const operatorMessageId = typeof run.metadata?.operatorMessageId === "string" ? run.metadata.operatorMessageId : undefined;
+      const conversation = current.operatorConversations?.find((item) => item.messages.some((message) => message.id === operatorMessageId));
+      let next = current;
+      if (conversation && operatorMessageId && !conversation.messages.some((message) => message.role === "system" && message.replyToMessageId === operatorMessageId && /stopped/i.test(message.content))) {
+        next = recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, threadId: conversation.threadId ?? conversation.id, role: "system", content: "Stopped. I won’t continue this Chat turn.", replyToMessageId: operatorMessageId });
+      }
+      next.operationalRuns = [...(next.operationalRuns ?? []).filter((item) => item.id !== run.id), run];
+      writeState(next);
+      return stateResponse(request, next);
     }
     if (parsed.type === "sendPresenceNudge") {
       const conversationPresence = current.presences.find((item) => item.id === parsed.presenceId) ?? current.presence;
@@ -6067,7 +6154,16 @@ export async function POST(request: Request) {
       const presenceId = parsed.presenceId ?? current.presence?.id;
       const targetPresence = presenceId ? current.presences.find((item) => item.id === presenceId) ?? current.presence : current.presence;
       const hasNativeRead = Boolean(presenceId && targetPresence?.channel === "x" && current.nativeConnections.some((item) => item.presenceId === presenceId && (item.kind === "x" || item.channelId === "x") && nativeConnectionCanObserve(item, targetPresence.handle)));
-      if (!presenceId || !hasNativeRead) throw new Error("No readable native X connection is configured for this Presence.");
+      if (!presenceId) throw new Error("A Presence is required to sync X.");
+      if (!hasNativeRead) {
+        const hasBridge = current.bridges.some((bridge) => bridge.presenceId === presenceId && bridge.channelId === "x");
+        if (targetPresence?.connectionMode === "bridge" || hasBridge) {
+          const held = recordRuntimeEvent(current, presenceId, "Native X sync skipped", "This Presence is connected through its browser Bridge, so native API reconciliation was not started. The Bridge remains the active observation and delivery route.", "quiet");
+          writeState(held);
+          return stateResponse(request, held);
+        }
+        throw new Error("No readable native X connection is configured for this Presence.");
+      }
       if (parsed.manual) {
         // An operator-initiated credit check must reach X and return its
         // result. The normal observation queue intentionally skips paused
@@ -6206,6 +6302,18 @@ export async function POST(request: Request) {
       const assignment = current.assignments.find((item) => item.id === parsed.assignmentId && item.presenceId === presenceId);
       const presence = current.presences.find((item) => item.id === presenceId) ?? current.presence;
       if (!assignment || !presence || assignment.environment === "sandbox") throw new Error("That live Assignment is no longer available.");
+      const internalDispatch = request.headers.get("x-openpresence-internal-dispatch") === "assignment";
+      const pursuit = activeAssignmentPursuitWindow(current, parsed.assignmentId);
+      // The scheduler can select work and lose the race to an operator pause
+      // or terminal decision before its POST arrives. A stale internal wake is
+      // acknowledged and held so the scheduler does not retry-loop or mutate
+      // a cancelled responsibility. An active pursuit is the one explicit
+      // exception that may continue a completed daily Assignment.
+      const heldByAssignmentDecision = ["paused", "awaiting_review", "cancelled", "failed", "expired_incomplete"].includes(assignment.status)
+        || (["completed", "completed_with_adaptation"].includes(assignment.status) && !pursuit);
+      if (internalDispatch && heldByAssignmentDecision) {
+        return NextResponse.json({ accepted: true, assignmentId: parsed.assignmentId, paused: true }, { status: 202 });
+      }
       // A scheduler sweep normally pauses exhausted pursuits. Re-check at the
       // queue boundary too: a worker can race with that sweep and write an
       // older snapshot, but it must never turn exhausted capacity into a
@@ -6217,16 +6325,15 @@ export async function POST(request: Request) {
         }
         return stateResponse(request, current);
       }
-      const pursuit = activeAssignmentPursuitWindow(current, parsed.assignmentId);
       if (!pursuit && assignmentPursuitBlocksNormalScheduling(current, parsed.assignmentId, presenceId)) {
         if (request.headers.get("x-openpresence-internal-dispatch") === "assignment") {
           return NextResponse.json({ accepted: true, assignmentId: parsed.assignmentId, paused: true }, { status: 202 });
         }
         return stateResponse(request, current);
       }
-      const internalDispatch = request.headers.get("x-openpresence-internal-dispatch") === "assignment";
       if (!pursuit && internalDispatch && assignment.schedule && !scheduledAssignmentIsDue(assignment)) {
-        const held = recordRuntimeEvent(current, presenceId, "Assignment schedule closed", "The internal scheduler suppressed this Assignment run because its declared execution window is closed.", "quiet", { sourceObjectId: assignment.id });
+        const deferred = deferQueuedAssignmentRunsOutsideWindow(current, assignment.id, presenceId);
+        const held = recordRuntimeEvent(deferred.state, presenceId, "Assignment schedule closed", "The internal scheduler deferred this queued Assignment because its declared execution window is closed. The next scheduled window remains eligible.", "quiet", { sourceObjectId: assignment.id });
         writeState(held);
         return NextResponse.json({ accepted: true, assignmentId: parsed.assignmentId, paused: true }, { status: 202 });
       }
@@ -6860,8 +6967,6 @@ export async function POST(request: Request) {
       if (connection) deleteProviderSecret(connection.id);
     }
     next = recordCapabilityFeedback(current, next, next.presence?.id);
-    const crossAgentPresenceMutation = (parsed.type === "pausePresence" || parsed.type === "wakePresence")
-      && Boolean(scopedAgentId && context.agentId && scopedAgentId !== context.agentId);
     writeState(next, parsed.type === "setAgentAccent" || crossAgentPresenceMutation
       ? { persistAgentWorkspaces: parsed.type === "setAgentAccent", persistActiveWorkspace: crossAgentPresenceMutation }
       : parsed.type === "selectAgent"
@@ -6870,6 +6975,9 @@ export async function POST(request: Request) {
     for (const runId of liveAssignmentRunIdsToDispatch) dispatchLiveAssignmentWorker(runId);
     return stateResponse(request, next);
   } catch (error) {
+    if (error instanceof AgentPresenceScopeConflictError) {
+      return NextResponse.json({ error: error.message, conflict: true, scope: "agent-presence", requestedAgentId: error.agentId, presenceId: error.presenceId, ownerAgentId: error.ownerAgentId, ownerAgentName: error.ownerAgentName, recovery: error.ownerAgentId ? "switch-to-owner" : "operator-resolve-ownership" }, { status: error.status });
+    }
     if (error instanceof WorkspaceConflictError) {
       return NextResponse.json({ error: error.message, conflict: true, state: stateForResponse(request, readStateSnapshotForContext(requestContext(request))) }, { status: error.status });
     }

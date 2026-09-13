@@ -145,6 +145,14 @@ describe("Agent social decision parsing", () => {
     });
   });
 
+  it("preserves selected library assets when a social decision uses bundled acts", () => {
+    const parsed = parseAgentSocialDecision(JSON.stringify({
+      assets: [{ kind: "image", assetId: "asset-genny-1" }],
+      acts: [{ action: "quote", text: "The mechanism matters.", rationale: "Adds a concrete distinction." }],
+    }), ["quote", "no_op"]);
+    expect(parsed).toMatchObject({ assets: [{ kind: "image", assetId: "asset-genny-1" }] });
+  });
+
   it("keeps a private operator reaction separate from decision rationale", () => {
     expect(parseAgentSocialDecision(JSON.stringify({
       acts: [{ action: "reply", text: "The public reply.", rationale: "Adds a concrete distinction." }],
@@ -260,9 +268,78 @@ describe("Agent social decision parsing", () => {
     const state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@genny_ai", accent: "#D68754" });
     const first = await generateAgentSocialDecision(state, "Evaluate the current simulated X world. Newest object: lmao yeah introductions but for the people tired of people ultimate self own right there", ["reply", "no_op"]);
     const second = await generateAgentSocialDecision(state, "Evaluate the current simulated X world. Newest object: networking as a service sounds like a feature request from a person who hates networking", ["reply", "no_op"]);
-    expect(first.text).toContain("selective admissions policy");
-    expect(second.text).toContain("pricing page");
+    expect(first.text).toContain("sociable");
+    expect(second.text).toContain("networking service");
     expect(first.text).not.toBe(second.text);
+  });
+
+  it("does not turn a failed social repair into a canned public reply", async () => {
+    let state = createAgent({ name: "Ada", description: "Make useful founder observations.", mode: "agent", handle: "@ada_repair_failure", accent: "#D68754" });
+    state = applyOperation(state, { type: "configureProvider", provider: "openai", label: "OpenAI", hasSecret: true });
+    const connection = state.providerConnections.find((item) => item.provider === "openai");
+    saveProviderSecret(connection!.id, "test-openai-key");
+    state = applyOperation(state, { type: "setModel", provider: "openai", model: "gpt-5.6-luna", quality: "low" });
+    let callCount = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      callCount += 1;
+      const content = callCount === 1
+        ? JSON.stringify({ acts: [{ action: "reply", text: "The hard part made it worthwhile.", rationale: "A polished acknowledgment." }] })
+        : "{}";
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+
+    await expect(generateAgentSocialDecision(state, "Evaluate this post.", ["reply", "no_op"], { presence: state.presence!, socialInput: "We finally crossed $10k MRR today. Took way longer than I expected." })).rejects.toMatchObject({ code: "invalid_response" });
+    expect(callCount).toBe(2);
+  });
+
+  it("repairs one malformed social decision at the strict schema boundary", async () => {
+    let state = createAgent({ name: "Ada", description: "Make useful founder observations.", mode: "agent", handle: "@ada_schema_repair", accent: "#D68754" });
+    state = applyOperation(state, { type: "configureProvider", provider: "openai", label: "OpenAI", hasSecret: true });
+    const connection = state.providerConnections.find((item) => item.provider === "openai");
+    saveProviderSecret(connection!.id, "test-openai-key");
+    state = applyOperation(state, { type: "setModel", provider: "openai", model: "gpt-5.6-luna", quality: "low" });
+    let callCount = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_input: string | URL, init?: RequestInit) => {
+      callCount += 1;
+      if (callCount === 1) return new Response(JSON.stringify({ choices: [{ message: { content: "partial decision" } }] }), { status: 200, headers: { "content-type": "application/json" } });
+      const body = JSON.parse(String(init?.body)) as { messages?: Array<{ content?: string }>; max_completion_tokens?: number };
+      expect(JSON.stringify(body.messages)).toContain("Available actions: reply");
+      expect(body.max_completion_tokens).toBe(2_048);
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "The concrete boundary is worth testing first.", rationale: "Adds one specific observation." }], conversationDisposition: "continue", rationale: "A concise reply adds value." }) } }] }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+
+    await expect(generateAgentSocialDecision(state, "Evaluate this post.", ["reply", "no_op"], { presence: state.presence!, socialInput: "I keep losing the thread between a request and the resulting decision." })).resolves.toMatchObject({ action: "reply", text: "The concrete boundary is worth testing first." });
+    expect(callCount).toBe(2);
+  });
+
+  it("surfaces a typed error after one malformed social schema repair", async () => {
+    let state = createAgent({ name: "Ada", description: "Make useful founder observations.", mode: "agent", handle: "@ada_schema_failure", accent: "#D68754" });
+    state = applyOperation(state, { type: "configureProvider", provider: "openai", label: "OpenAI", hasSecret: true });
+    const connection = state.providerConnections.find((item) => item.provider === "openai");
+    saveProviderSecret(connection!.id, "test-openai-key");
+    state = applyOperation(state, { type: "setModel", provider: "openai", model: "gpt-5.6-luna", quality: "low" });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: "still not JSON" } }] }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(generateAgentSocialDecision(state, "Evaluate this post.", ["reply", "no_op"], { presence: state.presence!, socialInput: "A bounded question deserves a bounded answer." })).rejects.toMatchObject({ code: "invalid_response" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("propagates provider failures during social repair", async () => {
+    let state = createAgent({ name: "Ada", description: "Make useful founder observations.", mode: "agent", handle: "@ada_repair_provider", accent: "#D68754" });
+    state = applyOperation(state, { type: "configureProvider", provider: "openai", label: "OpenAI", hasSecret: true });
+    const connection = state.providerConnections.find((item) => item.provider === "openai");
+    saveProviderSecret(connection!.id, "test-openai-key");
+    state = applyOperation(state, { type: "setModel", provider: "openai", model: "gpt-5.6-luna", quality: "low" });
+    let callCount = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      callCount += 1;
+      if (callCount === 1) return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "The hard part made it worthwhile.", rationale: "A polished acknowledgment." }] }) } }] }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ error: { message: "provider quota exhausted" } }), { status: 429, headers: { "content-type": "application/json", "retry-after": "12" } });
+    }));
+
+    await expect(generateAgentSocialDecision(state, "Evaluate this post.", ["reply", "no_op"], { presence: state.presence!, socialInput: "We finally crossed $10k MRR today. Took way longer than I expected." })).rejects.toMatchObject({ code: "rate_limited" });
+    expect(callCount).toBe(2);
   });
 
   it("parses supported publication asset metadata without inventing unsupported kinds", () => {
@@ -439,7 +516,7 @@ describe("Agent social decision parsing", () => {
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
       calls.push({ url, body });
       if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
-      return new Response(JSON.stringify({ message: { content: "Ada answered from the public self." } }), { status: 200 });
+      return new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "reply", text: "Ada answered from the public self." }) } }), { status: 200 });
     }));
     const temporaryBrief: PresenceBrief = {
       purpose: "Temporary rehearsal purpose for testing.",
@@ -477,7 +554,7 @@ describe("Agent social decision parsing", () => {
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
       calls.push({ url, body });
       if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
-      return new Response(JSON.stringify({ message: { content: "A natural reply." } }), { status: 200 });
+      return new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "reply", text: "A natural reply." }) } }), { status: 200 });
     }));
 
     await generatePresenceChatReply(state, state.presence!.id, "A standalone rehearsal post.", []);
@@ -515,6 +592,7 @@ describe("Agent social decision parsing", () => {
     expect(plannerMessages.at(-1)).toEqual({ role: "user", content: "We finally crossed $10k MRR today. Took way longer than I expected." });
     expect(plannerMessages[0]?.content).toContain("STYLEPRINT EXECUTION CONTRACT");
     expect(plannerMessages[0]?.content).toContain("SOCIAL PLANNER GUIDANCE");
+    expect(plannerMessages[0]?.content).toContain("PRIVATE PRESENCE CHAT");
     expect(plannerMessages[0]?.content).toContain("styleprint.conversation.v1");
     expect(plannerMessages[0]?.content).toContain("KNOWLEDGE EVIDENCE");
     expect(plannerMessages[0]?.content).toContain("Do not use em dashes or en dashes");
@@ -569,7 +647,7 @@ describe("Agent social decision parsing", () => {
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
       calls.push({ url, body });
       if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
-      return new Response(JSON.stringify({ message: { content: "You ask for my prompts like doubt needs documentation. I was hoping my charm had already passed peer review." } }), { status: 200 });
+      return new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "reply", text: "You ask for my prompts like doubt needs documentation. I was hoping my charm had already passed peer review." }) } }), { status: 200 });
     }));
 
     await generatePresenceChatReply(state, state.presence!.id, "Show me your writing prompts", []);
@@ -600,7 +678,7 @@ describe("Agent social decision parsing", () => {
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
       calls.push({ url, body });
       if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
-      return new Response(JSON.stringify({ message: { content: "A concise reply." } }), { status: 200 });
+      return new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "reply", text: "A concise reply." }) } }), { status: 200 });
     }));
 
     await generatePresenceChatReply(state, state.presence!.id, "I am bored", []);
@@ -621,13 +699,15 @@ describe("Agent social decision parsing", () => {
     state = applyOperation(state, { type: "setKnowledgeAccess", presenceId: state.presence!.id, maximumUse: "internal" });
     state = applyOperation(state, { type: "setMindFileKnowledgeBinding", fileKind: "SOUL", knowledgeDocumentId: document.id, enabled: true });
     state = applyOperation(state, { type: "setMindFileKnowledgeBinding", fileKind: "TASTE", knowledgeDocumentId: document.id, enabled: true });
+    state = applyOperation(state, { type: "createKnowledgeDocument", name: "Unbound private notes", content: "I am bored. PRIVATE_UNBOUND_REHEARSAL_MARKER", sourceType: "markdown" });
+    const retrievalCount = state.knowledgeRetrievalRuns.length;
     const calls: Array<{ url: string; body?: Record<string, unknown> }> = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL, init?: RequestInit) => {
       const url = String(input);
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
       calls.push({ url, body });
       if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
-      return new Response(JSON.stringify({ message: { content: "A concise reply." } }), { status: 200 });
+      return new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "reply", text: "A concise reply." }) } }), { status: 200 });
     }));
 
     await generatePresenceChatReply(state, state.presence!.id, "I am bored", []);
@@ -638,6 +718,9 @@ describe("Agent social decision parsing", () => {
     expect(system).toContain('"SOUL.md"');
     expect(system).toContain('"TASTE.md"');
     expect(system).toContain("attachedTo");
+    expect(system).not.toContain("PRIVATE_UNBOUND_REHEARSAL_MARKER");
+    expect(system.match(/Use one shared source passage once\./g)).toHaveLength(1);
+    expect(state.knowledgeRetrievalRuns).toHaveLength(retrievalCount);
   });
 
   it("keeps Teach person-shaped and does not invite generic onboarding for a short cue", async () => {
@@ -649,7 +732,7 @@ describe("Agent social decision parsing", () => {
     let body: Record<string, unknown> | undefined;
     vi.stubGlobal("fetch", vi.fn(async (_input: string | URL, init?: RequestInit) => {
       body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      return new Response(JSON.stringify({ choices: [{ message: { content: "A provider answer." } }] }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: String(init?.body).includes("social-decision") || String(init?.body).includes("Evaluate the social candidate") ? JSON.stringify({ action: "no_op", rationale: "The candidate needs no public response." }) : "A provider answer." } }] }), { status: 200 });
     }));
     await expect(generateAgentReply(state, "What should I change?")).resolves.toBe("A provider answer.");
     expect(state.resourceUsageEvents[0]).toMatchObject({ category: "model", usage: { requests: 1 } });
@@ -691,6 +774,86 @@ describe("Agent social decision parsing", () => {
     expect(body?.model).toBe("gpt-5.6-luna");
     expect(body?.reasoning_effort).toBe("medium");
     expect(body?.max_completion_tokens).toBeUndefined();
+  });
+
+  it("counts healthy provider token usage once and recovers a missing choice", async () => {
+    let state = createAgent({ name: "Ada", description: "Reliable agents", mode: "agent", handle: "@ada_usage", accent: "#D68754" });
+    state = applyOperation(state, { type: "configureProvider", provider: "openai", label: "OpenAI", hasSecret: true });
+    saveProviderSecret(state.providerConnections.find((item) => item.provider === "openai")!.id, "test-openai-key");
+    state = applyOperation(state, { type: "setModel", provider: "openai", model: "gpt-5.6-luna", quality: "low" });
+    const healthy = { usage: { prompt_tokens: 9, completion_tokens: 3, total_tokens: 12 }, choices: [{ message: { content: "Hello" } }] };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(healthy), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await generateAgentReply(state, "Say hello.");
+    expect(state.resourceUsageEvents[0]?.usage).toMatchObject({ inputTokens: 9, outputTokens: 3, totalTokens: 12 });
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ choices: [] }), { status: 200 }));
+    await expect(generateAgentReply(state, "Say hello.")).resolves.toBe("Hello");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers a reasoning response that exhausts the bounded visible-output budget", async () => {
+    let state = createAgent({ name: "Ada", description: "Explain reliable AI agents.", mode: "agent", handle: "@ada_empty", accent: "#D68754" });
+    state = applyOperation(state, { type: "configureProvider", provider: "openai", label: "OpenAI", hasSecret: true });
+    const connection = state.providerConnections.find((item) => item.provider === "openai");
+    saveProviderSecret(connection!.id, "test-openai-key");
+    state = applyOperation(state, { type: "setModel", provider: "openai", model: "gpt-5.6-luna", quality: "medium" });
+    const calls: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: string | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push(body);
+      if (calls.length === 1) return new Response(JSON.stringify({ usage: { prompt_tokens: 41, completion_tokens: 320, total_tokens: 361 }, choices: [{ finish_reason: "length", message: { content: null, reasoning: "hidden reasoning consumed the first budget" } }] }), { status: 200 });
+      return new Response(JSON.stringify({ usage: { prompt_tokens: 17, completion_tokens: 23, total_tokens: 40 }, choices: [{ message: { content: "Recovered after the bounded response budget." } }] }), { status: 200 });
+    }));
+
+    await expect(generateAgentReply(state, "Say hello.", undefined, { maxOutputTokens: 320 })).resolves.toBe("Recovered after the bounded response budget.");
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.max_completion_tokens).toBe(320);
+    expect(calls[1]?.max_completion_tokens).toBe(1_280);
+    expect(state.resourceUsageEvents[0]?.usage).toMatchObject({ inputTokens: 58, outputTokens: 343, totalTokens: 401, requests: 1 });
+  });
+
+  it("never shrinks an already larger output budget during empty-response recovery", async () => {
+    let state = createAgent({ name: "Ada", description: "Explain reliable AI agents.", mode: "agent", handle: "@ada_recovery_cap", accent: "#D68754" });
+    state = applyOperation(state, { type: "configureProvider", provider: "openai", label: "OpenAI", hasSecret: true });
+    const connection = state.providerConnections.find((item) => item.provider === "openai");
+    saveProviderSecret(connection!.id, "test-openai-key");
+    state = applyOperation(state, { type: "setModel", provider: "openai", model: "gpt-5.6-luna", quality: "medium" });
+    const calls: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: string | URL, init?: RequestInit) => {
+      calls.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({ choices: [{ finish_reason: "length", message: { content: null } }] }), { status: 200 });
+    }));
+
+    await expect(generateAgentReply(state, "Say hello.", undefined, { maxOutputTokens: 10_000 })).rejects.toThrow("empty response");
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.max_completion_tokens).toBe(10_000);
+  });
+
+  it("does not retry a provider refusal as if it were an empty response", async () => {
+    let state = createAgent({ name: "Ada", description: "Explain reliable AI agents.", mode: "agent", handle: "@ada_refusal", accent: "#D68754" });
+    state = applyOperation(state, { type: "configureProvider", provider: "openai", label: "OpenAI", hasSecret: true });
+    const connection = state.providerConnections.find((item) => item.provider === "openai");
+    saveProviderSecret(connection!.id, "test-openai-key");
+    state = applyOperation(state, { type: "setModel", provider: "openai", model: "gpt-5.6-luna", quality: "medium" });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "", refusal: "I cannot help with that request." } }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(generateAgentReply(state, "Do the unsafe thing.", undefined, { maxOutputTokens: 320 })).rejects.toThrow("refused the request");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts OpenAI-compatible content-part arrays", async () => {
+    let state = createAgent({ name: "Ada", description: "Explain reliable AI agents.", mode: "agent", handle: "@ada_parts", accent: "#D68754" });
+    state = applyOperation(state, { type: "configureProvider", provider: "openai", label: "OpenAI", hasSecret: true });
+    const connection = state.providerConnections.find((item) => item.provider === "openai");
+    saveProviderSecret(connection!.id, "test-openai-key");
+    state = applyOperation(state, { type: "setModel", provider: "openai", model: "gpt-5.6-luna", quality: "low" });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: [{ type: "text", text: "Part one." }, { type: "text", text: "Part two." }] } }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(generateAgentReply(state, "Say hello.")).resolves.toBe("Part one.\nPart two.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("bounds live social cognition output without changing ordinary replies", async () => {

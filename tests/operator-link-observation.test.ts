@@ -98,7 +98,7 @@ describe("operator-shared X link observation", () => {
       const judged = await judgeOperatorNudgeTargets(created.state, presence.id, created.nudge);
       expect(judged.perceptions[0]).toMatchObject({ providerId: "openai", level: "inspect", result: { observation: expect.any(String) } });
       expect(calls.some((call) => call.url.includes("pbs.twimg.com"))).toBe(true);
-      const modelCall = calls.find((call) => call.url.includes("api.openai.com") && call.body?.includes("Judge this exact post"));
+      const modelCall = calls.find((call) => call.url.includes("api.openai.com") && call.body?.includes("Judge the exact post"));
       expect(modelCall?.body).toContain("A visual joke is visible");
       expect(modelCall?.body).toContain("The image carries the punchline");
       expect(judged.socialDecisions[0]?.operatorReaction).toContain("image");

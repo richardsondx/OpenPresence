@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialState } from "@/lib/runtime";
+import { createAgent, initialState } from "@/lib/runtime";
 import {
   classifyFeedbackLayers,
   evaluateTasteProposalOnHeldOutSet,
@@ -20,6 +20,7 @@ import type {
 
 describe("Curation Lab Production Parity & Invariants", () => {
   const dummyPresence: Presence = {
+    ...createAgent({ name: "Macro Parity Bot", description: "Macro data charts and analysis", mode: "agent", handle: "macroparity", accent: "#D68754" }).presence!,
     id: "presence_macro_parity",
     name: "Macro Parity Bot",
     handle: "macroparity",
@@ -46,8 +47,11 @@ describe("Curation Lab Production Parity & Invariants", () => {
     state.files = [
       {
         kind: "TASTE",
+        title: "Visual Taste",
+        subtitle: "Visual editorial guidance",
         content: "# Visual Taste\nPrefer clear charts with primary provenance.",
-        status: "active",
+        protected: false,
+        revision: 1,
         updatedAt: new Date().toISOString(),
       },
     ];

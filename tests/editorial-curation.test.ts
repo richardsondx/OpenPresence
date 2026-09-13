@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialState } from "@/lib/runtime";
+import { createAgent, initialState } from "@/lib/runtime";
 import {
   classifyFeedbackLayers,
   evaluateTasteProposalOnHeldOutSet,
@@ -25,6 +25,7 @@ import type {
 
 describe("Editorial Curation Architecture & Lineage", () => {
   const dummyPresence: Presence = {
+    ...createAgent({ name: "Kobeissi Macro", description: "Macroeconomic charts and decisive financial commentary", mode: "agent", handle: "kobeissimacro", accent: "#D68754" }).presence!,
     id: "presence_kobeissi_test",
     name: "Kobeissi Macro",
     handle: "kobeissimacro",
@@ -54,8 +55,11 @@ describe("Editorial Curation Architecture & Lineage", () => {
     state.files = [
       {
         kind: "TASTE",
+        title: "Kobeissi Letter Taste",
+        subtitle: "Visual editorial guidance",
         content: "# Kobeissi Letter Taste\nLet the graphic dominate. One clear takeaway.",
-        status: "active",
+        protected: false,
+        revision: 1,
         updatedAt: new Date().toISOString(),
       },
     ];
@@ -229,6 +233,7 @@ describe("Editorial Curation Architecture & Lineage", () => {
 
   it("discovers domain-specific leads for tech/AI presences when tech sources are configured", async () => {
     const techPresence: Presence = {
+      ...createAgent({ name: "Open Weights Tech", description: "AI open source architecture, latency benchmarks, and code release analysis", mode: "agent", handle: "openweights", accent: "#D68754" }).presence!,
       id: "presence_tech_test",
       name: "Open Weights Tech",
       handle: "openweights",

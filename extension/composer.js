@@ -141,5 +141,66 @@
     return false;
   }
 
-  root.OpenPresenceComposer = { fillComposer };
+  function composerScope(composer, submitSelector) {
+    if (!composer?.isConnected) return null;
+    let current = composer;
+    while (current && current !== root.document.documentElement) {
+      if (current.matches?.('[role="dialog"], form, [data-testid*="tweetComposer"], [data-testid*="composer"]')) return current;
+      if (current.querySelector?.(submitSelector) && current.querySelector?.('[contenteditable="true"], textarea')) return current;
+      current = current.parentElement;
+    }
+    return null;
+  }
+
+  function mediaInput(scope) {
+    return scope?.querySelector?.('input[type="file"]');
+  }
+
+  function mediaButton(scope) {
+    return [...(scope?.querySelectorAll?.('button,[role="button"]') || [])].find((node) => {
+      const label = `${node.getAttribute?.("aria-label") || ""} ${node.getAttribute?.("data-testid") || ""} ${visibleText(node)}`.toLowerCase();
+      return /(add (photos|images|media)|media|attach)/i.test(label) && !node.disabled && node.getAttribute?.("aria-disabled") !== "true";
+    });
+  }
+
+  function attachmentEvidence(scope, count, submitSelector) {
+    if (!scope || count < 1) return false;
+    const previews = scope.querySelectorAll?.('[data-testid*="mediaPreview"], [data-testid*="preview"], [aria-label*="Remove media"], [aria-label*="Remove photo"], [aria-label*="Remove image"], img[src^="blob:"], video[src^="blob:"]');
+    const removeControls = scope.querySelectorAll?.('[aria-label*="Remove media"], [aria-label*="Remove photo"], [aria-label*="Remove image"]');
+    const pendingUpload = scope.querySelectorAll?.('[aria-busy="true"], [data-testid*="progress"], [data-testid*="uploading"]');
+    const submit = [...(scope.querySelectorAll?.('button,[role="button"]') || [])].find((node) => {
+      const matches = submitSelector.split(",").some((selector) => node.matches?.(selector.trim()));
+      return matches && !node.disabled && node.getAttribute?.("aria-disabled") !== "true";
+    });
+    // X may render several nested preview nodes for one file. The per-file
+    // remove controls are the stable one-to-one evidence; generic preview
+    // counts would let a wrapper and thumbnail masquerade as two uploads.
+    return Boolean(submit && removeControls.length === count && pendingUpload.length === 0 && previews.length >= count);
+  }
+
+  async function attachFiles({ files, composer, submitSelector = '[data-testid*="tweetButton"], [data-testid*="postButton"], [data-testid="tweetButtonInline"], [data-testid="tweetButton"], [data-testid="tweetButtonInline_reply"], [role="button"][data-testid*="tweetButton"]', timeoutMs = 8_000 }) {
+    if (!Array.isArray(files) || !files.length) return true;
+    const scope = composerScope(composer, submitSelector);
+    if (!scope) return false;
+    let input = mediaInput(scope);
+    if (!input) {
+      const button = mediaButton(scope);
+      if (button) button.click();
+      input = await waitFor(() => Boolean(mediaInput(scope)), timeoutMs).then(() => mediaInput(scope));
+    }
+    if (!input) return false;
+    const transfer = new root.DataTransfer();
+    for (const file of files) transfer.items.add(file);
+    try { input.files = transfer.files; } catch {
+      try { Object.defineProperty(input, "files", { configurable: true, value: transfer.files }); } catch { return false; }
+    }
+    input.dispatchEvent(new root.Event("change", { bubbles: true }));
+    try { input.dispatchEvent(new root.InputEvent("input", { bubbles: true, inputType: "insertFromDrop" })); } catch {}
+    // The input is only the handoff. X must render the attachments in this
+    // exact composer before text can be submitted; a page-wide input or a
+    // cleared composer is never proof that the upload was accepted.
+    return Boolean(await waitFor(() => input.files?.length === files.length && attachmentEvidence(scope, files.length, submitSelector), timeoutMs));
+  }
+
+  root.OpenPresenceComposer = { attachFiles, fillComposer };
 })(window);

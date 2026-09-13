@@ -5,7 +5,7 @@ import { parseAgentSocialDecision } from "../lib/ai";
 
 async function runAutonomyEvidenceHarness() {
   console.log("=== STARTING AUTONOMY EVIDENCE HARNESS ===");
-  const results: Record<string, any> = {};
+  const results: Record<string, Record<string, unknown>> = {};
 
   // 1. Setup Presence
   let state = createAgent({

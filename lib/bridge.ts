@@ -8,7 +8,7 @@ import { bridgeAdapterStatus, bridgeIdentityReady } from "./bridge-contract";
 // Chrome refreshes the signed-in identity on its own cadence. Keep the
 // verified identity valid across a model-generation + browser-delivery turn;
 // the bridge heartbeat still proves that the controlled adapter is alive.
-const BRIDGE_IDENTITY_MAX_AGE_MS = 1_800_000;
+export const BRIDGE_IDENTITY_MAX_AGE_MS = 1_800_000;
 import { PublicationSecurityError, sealExecutionForDelivery, verifyExecutionPermit } from "./publication-security";
 import { cleanMirrorText, normalizeMirrorAuthor } from "./mirror-content";
 import { languagesMatch } from "./language-policy";
@@ -19,6 +19,7 @@ import { recordOperationalSuccess } from "./incident-engine";
 import { detectDuplicatePublicOutcomes, detectDuplicateVerifiedExecutionOutcomes } from "./public-action-safety";
 import { hasObservedOwnReplyForTarget } from "./duplicate-public-outcome";
 import { authorizeAssetSelection, liveAssetReuseReason } from "./asset-library";
+import { isXCreditsError } from "./x-credits";
 
 const entityRef = z.object({ type: z.string().min(1).max(80), id: z.string().min(1).max(240) });
 const author = z.object({ externalRef: entityRef.optional(), displayName: z.string().min(1).max(160), handle: z.string().max(160).optional(), avatarUrl: z.string().url().max(2_000).optional() }).optional();
@@ -31,7 +32,17 @@ export const heartbeatInput = z.object({ executorId: z.string().min(1).max(160) 
 export const identityInput = z.object({ executorId: z.string().min(1).max(160), username: z.string().trim().max(160).optional() });
 export const ackInput = z.object({ executorId: z.string().min(1).max(160), externalRef: entityRef, observedAt: z.string().datetime().optional() });
 export const failInput = z.object({ executorId: z.string().min(1).max(160), code: z.string().max(80).optional(), message: z.string().min(1).max(1_000), retryable: z.boolean().default(false) });
-export const verifyInput = z.object({ executorId: z.string().min(1).max(160), candidateExternalRef: entityRef.optional(), observedAt: z.string().datetime().optional() });
+const domProof = z.object({
+  permalink: z.string().url().max(4_000),
+  externalRef: entityRef,
+  authorHandle: z.string().trim().min(1).max(160),
+  text: z.string().max(100_000),
+  parentId: z.string().min(1).max(240).optional(),
+  quotedTargetId: z.string().min(1).max(240).optional(),
+  mediaCount: z.number().int().min(0).max(8),
+  assetIds: z.array(z.string().min(1).max(240)).max(8).optional(),
+});
+export const verifyInput = z.object({ executorId: z.string().min(1).max(160), candidateExternalRef: entityRef.optional(), domProof: domProof.optional(), observedAt: z.string().datetime().optional() });
 export const closeVerificationInput = z.object({ executorId: z.string().min(1).max(160), note: z.string().trim().min(1).max(1_000) });
 export const outcomeInput = z.object({ executionId: z.string().min(1), status: z.enum(["succeeded", "failed", "unknown"]), metrics: z.record(z.number()).default({}), evidence: z.array(entityRef).default([]) });
 export const metricsInput = z.object({ audience: z.object({ followers: z.number().int().min(0), following: z.number().int().min(0).optional(), observedAt: z.string().datetime().optional() }).optional(), publications: z.array(z.object({ externalRef: entityRef, publicationAgeSeconds: z.number().int().min(0), metrics: z.object({ impressions: z.number().int().min(0).optional(), likes: z.number().int().min(0).optional(), replies: z.number().int().min(0).optional(), reposts: z.number().int().min(0).optional(), quotes: z.number().int().min(0).optional() }) })).max(100).default([]) });
@@ -797,7 +808,7 @@ export function failExecution(bridge: Bridge, executionId: string, input: z.infe
   const identityBlocked = execution.environment === "live" && ["ACCOUNT_MISMATCH", "ACCOUNT_NOT_READY"].includes(input.code ?? "");
   const blockedByPerson = isPersonBlockingError(input.message, input.code);
   execution.failure = { code: blockedByPerson ? "TARGET_BLOCKED_PRESENCE" : input.code, message: input.message, retryable: blockedByPerson ? false : identityBlocked ? true : input.retryable }; execution.lease = undefined;
-  const provenPreWriteFailure = identityBlocked || ["COMPOSER_INPUT_FAILED", "COMPOSER_UNAVAILABLE", "ACCOUNT_NOT_READY", "ACCOUNT_MISMATCH"].includes(input.code ?? "");
+  const provenPreWriteFailure = identityBlocked || ["COMPOSER_INPUT_FAILED", "COMPOSER_UNAVAILABLE", "ACCOUNT_NOT_READY", "ACCOUNT_MISMATCH", "UNSUPPORTED_ASSET", "ASSET_UPLOAD_FAILED"].includes(input.code ?? "");
   const retrying = !blockedByPerson && (identityBlocked || (provenPreWriteFailure && input.retryable)) && execution.attempts < 5;
   if (provenPreWriteFailure) releasePublicActionDelivery(execution.id);
   else updatePublicActionDelivery(execution.id, "uncertain");
@@ -854,10 +865,13 @@ function leaveExecutionVerificationPending(bridge: Bridge, state: OpenPresenceSt
   return { state, execution, verified: false, nextAttemptAt };
 }
 
+const normalizeHandleForBridge = (value: string | undefined) => (value ?? "").replace(/^@/, "").trim().toLowerCase();
+
 /**
- * Reconcile a Chrome-written X reply or quote through the official X API. DOM
- * visibility is intentionally only a submission hint: X's API must confirm
- * the exact author, parent post, and text before OpenPresence counts success.
+ * Reconcile a Chrome-written X reply or quote through the official X API.
+ * Browser DOM readback is retained in the request as diagnostic evidence, but
+ * never counts as delivery because it cannot independently prove public
+ * lineage or that rendered media bytes match a sealed Asset.
  */
 export async function verifyChromeExecution(bridge: Bridge, executionId: string, input: z.infer<typeof verifyInput>) {
   let state = readStateForBridge(bridge.id);
@@ -869,8 +883,8 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
     || (execution.status === "failed" && ["RESULT_NOT_VERIFIED", "X_API_VERIFICATION_PENDING"].includes(execution.failure?.code ?? ""));
   if (!canVerify) throw new Error("Execution is not waiting for X verification");
   const action = execution.affordance.replace(/^x\./, "");
-  if (action !== "reply" && action !== "quote" && action !== "delete") throw new Error("Only X replies, quotes, and deletions submitted through Chrome can be API-verified");
-  if (execution.target?.type !== "x.post" || !execution.target.id) throw new Error(`The Chrome ${action} has no target X post`);
+  if (action !== "post" && action !== "reply" && action !== "quote" && action !== "delete") throw new Error("Only X posts, replies, quotes, and deletions submitted through Chrome can be API-verified");
+  if (action !== "post" && (execution.target?.type !== "x.post" || !execution.target.id)) throw new Error(`The Chrome ${action} has no target X post`);
 
   const presence = state.presences.find((item) => item.id === execution.presenceId) ?? state.presence;
   // The native X connection is the API credential source, not the browser
@@ -882,6 +896,55 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
     && ["connected", "needs-attention"].includes(item.status)
   );
   const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
+  if (action === "post") {
+    const payload = execution.publication?.payload;
+    const payloadText = payload && typeof payload === "object" && !Array.isArray(payload) && typeof payload.text === "string" ? payload.text : undefined;
+    const text = typeof execution.publication?.publicExpression?.text === "string" ? execution.publication.publicExpression.text : payloadText;
+    const handle = connection?.account?.username ?? presence?.handle;
+    const candidateId = input.candidateExternalRef?.type === "x.post" ? input.candidateExternalRef.id : undefined;
+    // The X API does not expose a stable mapping from a returned media key to
+    // OpenPresence's sealed Asset ID. Keep image posts unresolved until a
+    // provider receipt can prove that linkage; text-only originals can use a
+    // strict readback of the exact authored post.
+    if (execution.publication?.assetIds?.length) {
+      return leaveExecutionVerificationPending(bridge, state, execution, "Chrome showed the original post, but X API verification cannot prove that each rendered attachment matches the sealed Asset IDs. OpenPresence did not count the image post.", input, { code: "X_API_MEDIA_VERIFICATION_PENDING", retryable: false });
+    }
+    if (!credentials || !handle || !text || !candidateId) {
+      return leaveExecutionVerificationPending(bridge, state, execution, "Chrome submitted the original post, but the connected X API cannot yet verify the expected account, approved text, or returned post ID.", input);
+    }
+    let candidate;
+    try {
+      candidate = (await readXPostsByIds(credentials, [candidateId])).find((post) => {
+        const createdAt = post.createdAt ? Date.parse(post.createdAt) : NaN;
+        const formedAt = Date.parse(execution.createdAt);
+        return post.id === candidateId
+          && normalizeHandleForBridge(post.authorUsername) === normalizeHandleForBridge(handle)
+          && post.text === text
+          && !post.parentId
+          && !post.referencedPosts?.length
+          && Number.isFinite(createdAt)
+          && (!Number.isFinite(formedAt) || createdAt >= formedAt - 120_000);
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "X did not return a verification response.";
+      return leaveExecutionVerificationPending(bridge, state, execution, isXCreditsError(message)
+        ? "Chrome submitted the original post, but X API verification is paused because the X API has no credits remaining. Restore X API access before checking this outcome again."
+        : `Chrome submitted the original post, but X verification is temporarily unavailable: ${message}`, input, isXCreditsError(message) ? { code: "X_API_CREDITS_EXHAUSTED", retryable: false } : undefined);
+    }
+    if (!candidate) return leaveExecutionVerificationPending(bridge, state, execution, "Chrome submitted the original post, but X did not return a matching authored post with the expected text and publication time. OpenPresence did not count delivery.", input, { code: "PUBLIC_POST_NOT_VERIFIED", retryable: false });
+    state = readStateForBridge(bridge.id);
+    const latest = state.executions.find((item) => item.id === executionId && item.bridgeId === bridge.id);
+    if (!latest) throw new Error("Execution not found");
+    if (latest.status === "verification-pending" || latest.status === "failed") {
+      latest.status = "claimed";
+      latest.lease = { executorId: input.executorId, claimedAt: timestamp(), expiresAt: new Date(Date.now() + 30_000).toISOString() };
+      latest.updatedAt = timestamp();
+      writeState(state);
+    }
+    const result = acknowledgeExecution(bridge, executionId, { executorId: input.executorId, externalRef: { type: "x.post", id: candidate.id }, observedAt: input.observedAt ?? timestamp() }, { apiVerified: true });
+    return { ...result, verified: true, nextAttemptAt: undefined };
+  }
+  if (execution.target?.type !== "x.post" || !execution.target.id) throw new Error(`The Chrome ${action} has no target X post`);
   if (action === "delete") {
     const targetMirror = state.mirrorObjects.find((item) => item.presenceId === execution.presenceId
       && item.channelId === "x"
@@ -934,7 +997,7 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
     const latest = state.executions.find((item) => item.id === executionId && item.bridgeId === bridge.id);
     if (!latest) throw new Error("Execution not found");
     const message = error instanceof Error ? error.message : "X did not return a verification response.";
-    const creditsExhausted = /no api credits|credits remaining|billing and usage|quota exhausted/i.test(message);
+    const creditsExhausted = isXCreditsError(message);
     return leaveExecutionVerificationPending(bridge, state, latest, creditsExhausted
       ? `Chrome submitted the ${action}, but X API verification is paused because the X API has no credits remaining. Restore X API access before checking this outcome again.`
       : `Chrome submitted the ${action}, but X API verification is temporarily unavailable: ${message}`, input, creditsExhausted ? { code: "X_API_CREDITS_EXHAUSTED", retryable: false } : undefined);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAgent, deliverSandboxExecution, formSandboxIntent, normalizeState, recordVerifiedFollow, startPlaygroundSession } from "../lib/runtime";
+import { applyOperation, createAgent, deliverSandboxExecution, formSandboxIntent, normalizeState, recordVerifiedFollow, startPlaygroundSession } from "../lib/runtime";
 import { isPlaceholderIdentity, deriveIdentityHydrationState, extractIdentityHydrationLeads, resolveCanonicalPerson, createRememberedPerson, peopleForPresence } from "../lib/network-memory";
 import { routeExecutionIntent } from "../lib/execution-router";
 import type { Presence, SocialIntent } from "../lib/types";
@@ -8,6 +8,7 @@ describe("Presence platform identity", () => {
   it("keeps the platform handle in Presence context and Social Mirror authorship", () => {
     const input = { name: "Ada", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@ada_presence", accent: "#D68754" };
     let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
     expect(state.presence?.context.publicIdentity.handle).toBe(input.handle);
 
     state = startPlaygroundSession(state);
@@ -32,7 +33,7 @@ describe("Channel, Environment, Access, Capability Taxonomy", () => {
       destination: {
         handle: "genny_skool",
         displayName: "Acme Founders Community",
-        spaceUrl: "https://www.skool.com/acme-founders",
+        destinationUrl: "https://www.skool.com/acme-founders",
       },
       accessBindings: [
         { kind: "managed_browser", channel: "skool", status: "healthy" },
@@ -46,7 +47,7 @@ describe("Channel, Environment, Access, Capability Taxonomy", () => {
     const hydrated = state.presences.find((p) => p.id === "presence_skool_test")!;
     expect(hydrated.channel).toBe("skool");
     expect(hydrated.environment).toBe("live");
-    expect(hydrated.destination?.spaceUrl).toBe("https://www.skool.com/acme-founders");
+    expect(hydrated.destination?.destinationUrl).toBe("https://www.skool.com/acme-founders");
     
     // Native connector is absent
     expect(hydrated.accessBindings?.some((b) => b.kind === "native")).toBe(false);
@@ -200,7 +201,7 @@ describe("Person Identity & Hydration Provenance", () => {
 
   it("does not crash when a lightweight browser projection omits identity arrays", () => {
     const state = createAgent({ name: "Genny", description: "Test", mode: "agent", handle: "genny", accent: "#D68754" });
-    const partial = { ...state, personIdentities: undefined, relationships: undefined } as typeof state;
+    const partial = { ...state, personIdentities: [], relationships: [] };
     expect(() => peopleForPresence(partial, state.presence!)).not.toThrow();
   });
 });

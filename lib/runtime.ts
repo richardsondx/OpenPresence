@@ -302,7 +302,7 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
   // Action-specific rejections (like "not permitted to perform this action"
   // for a specific reply) do NOT block all native write actions — they might
   // succeed for a different target post.
-  const nativeGlobalDeliveryBlocked = Boolean(native?.deliveryError && /no API credits remaining|check your app permissions|fetch failed/i.test(native.deliveryError));
+  const nativeGlobalDeliveryBlocked = xCreditsExhausted(native) || Boolean(native?.deliveryError && /check your app permissions|fetch failed/i.test(native.deliveryError));
   const targetObject = context?.target?.type === "x.post"
     ? state.mirrorObjects.find((object) => object.presenceId === presence.id && object.externalRef.type === "x.post" && object.externalRef.id === context.target?.id)
     : undefined;
@@ -358,7 +358,7 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
   items.push(measurement("follower_measurement", presence.channel === "x", "followers"));
   items.push(measurement("post_performance", presence.channel === "x", "public_metrics"));
   const mediaItem = (kind: "image" | "video"): PresenceCapability => {
-    const nativeCan = Boolean(nativeWritable && presence.channel === "x");
+    const nativeCan = Boolean(nativeWritable && !nativeGlobalDeliveryBlocked && presence.channel === "x");
     const bridgeCan = Boolean(bridgeConnected && bridge?.capabilities.assetKinds?.includes(kind));
     const canExecute = nativeCan || bridgeCan;
     const canVerify = canExecute && (nativeCan || Boolean(bridge?.capabilities.reconcile));
@@ -1745,22 +1745,14 @@ export function markNativeConnectionNeedsAttention(source: OpenPresenceState, pr
       ? { ...connection, status: "connected" as const, healthMessage: undefined, deliveryError: message, updatedAt: now() }
       : { ...connection, status: "needs-attention" as const, healthMessage: message, deliveryError: undefined, updatedAt: now() }
     : connection);
-  if (creditsExhausted) {
-    state.presences = state.presences.map((presence) => {
-    if (presence.id === presenceId && presence.channel === "x" && presence.connectionMode !== "bridge" && presence.status !== "paused") {
-        return { ...presence, status: "paused" as const };
-      }
-      return presence;
-    });
-    if (state.presence?.id === presenceId && state.presence.channel === "x" && state.presence.connectionMode !== "bridge" && state.presence.status !== "paused") {
-      state.presence = { ...state.presence, status: "paused" as const };
-    }
-  }
+  // Billing is a connector boundary, not an operator request to put the
+  // Presence to sleep. Preserve wake state so authorized alternative routes
+  // and recovered responsibilities remain eligible for worker execution.
   return recordRuntimeEvent(
     state,
     presenceId,
     creditsExhausted ? "X credits exhausted" : deliveryOnlyFailure ? "X delivery needs attention" : "X connection needs attention",
-    creditsExhausted ? `X API credits are exhausted. External actions and observation were paused automatically. ${message}` : message,
+    creditsExhausted ? `X API billing is blocking the native connection. An authorized browser route can continue available work. ${message}` : message,
     "warning"
   );
 }
@@ -4077,7 +4069,45 @@ function repairOrphanedAssignmentExecution(execution: Execution, assignmentIds: 
 }
 
 function normalizeState(raw: OpenPresenceState): OpenPresenceState {
-  const state = raw as OpenPresenceState & { presences?: Presence[]; conversations?: import("./types").Conversation[]; activeConversationId?: string | null; activePresenceId?: string | null; presenceChatSessions?: import("./types").PresenceChatSession[] };
+  const state = {
+    ...raw,
+    agentWorkspaces: (raw.agentWorkspaces ?? []).map((workspace) => ({ ...workspace }))
+  } as OpenPresenceState & { presences?: Presence[]; conversations?: import("./types").Conversation[]; activeConversationId?: string | null; activePresenceId?: string | null; presenceChatSessions?: import("./types").PresenceChatSession[] };
+  // A Presence is the ownership boundary for operational history. Older
+  // workspace snapshots could retain the previous Agent ID on records that
+  // still pointed at the Presence's canonical ID, making the UI and scheduler
+  // disagree about who owned the work. Repair the denormalized Agent field at
+  // the read boundary as well as in the migration script.
+  const ownerByPresenceId = new Map<string, string>();
+  for (const workspace of state.agentWorkspaces ?? []) {
+    const owner = workspace.agent?.id;
+    if (!owner) continue;
+    const entries = workspace.presences?.length ? workspace.presences : workspace.presence ? [workspace.presence] : [];
+    for (const presence of entries) if (presence.id) ownerByPresenceId.set(presence.id, owner);
+  }
+  const activeOwner = state.activeAgentId ?? state.agent?.id;
+  for (const presence of state.presences ?? []) if (activeOwner && presence.id && !ownerByPresenceId.has(presence.id)) ownerByPresenceId.set(presence.id, activeOwner);
+  if (activeOwner && state.presence?.id && !ownerByPresenceId.has(state.presence.id)) ownerByPresenceId.set(state.presence.id, activeOwner);
+  const repairScopedAgentIds = (target: Record<string, unknown>, owners: Map<string, string>) => {
+    for (const [key, value] of Object.entries(target)) {
+      if (!Array.isArray(value) || key === "presences" || key === "agents" || key === "agentWorkspaces") continue;
+      target[key] = value.map((item) => {
+        if (!item || typeof item !== "object" || typeof (item as { presenceId?: unknown }).presenceId !== "string") return item;
+        const presenceId = (item as { presenceId: string }).presenceId;
+        const owner = owners.get(presenceId);
+        if (!owner || typeof (item as { agentId?: unknown }).agentId !== "string") return item;
+        return { ...(item as Record<string, unknown>), agentId: owner };
+      });
+    }
+  };
+  repairScopedAgentIds(state as unknown as Record<string, unknown>, ownerByPresenceId);
+  for (const workspace of state.agentWorkspaces ?? []) {
+    const owner = workspace.agent?.id;
+    if (!owner) continue;
+    const entries = workspace.presences?.length ? workspace.presences : workspace.presence ? [workspace.presence] : [];
+    const workspaceOwners = new Map(entries.filter((presence) => presence.id).map((presence) => [presence.id, owner] as const));
+    repairScopedAgentIds(workspace as unknown as Record<string, unknown>, workspaceOwners);
+  }
   const agents = (state.agents?.length ? state.agents : state.agent ? [state.agent] : []).map((agent) => ({ ...agent, conversationStyleId: agent.conversationStyleId ?? DEFAULT_CONVERSATION_STYLE_ID, languagePolicy: normalizeLanguagePolicy((agent as Agent & { languagePolicy?: LanguagePolicy }).languagePolicy) }));
   const activeAgentId = state.activeAgentId ?? state.agent?.id ?? agents[0]?.id ?? null;
   const activeAgent = agents.find((item) => item.id === activeAgentId) ?? agents[0];
@@ -4117,10 +4147,6 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   const normalizedPresences = presences.map((item) => {
     const inferredCreatedAt = item.createdAt ?? presenceGrowthBoundary(lifecycleState, item.id).startAt;
     const migrated = { ...migrateBuiltInXCapabilities(item), ...(inferredCreatedAt ? { createdAt: inferredCreatedAt } : {}), conversationStyleId: item.conversationStyleId ?? DEFAULT_CONVERSATION_STYLE_ID, languagePolicy: normalizeLanguagePolicy((item as Presence & { languagePolicy?: LanguagePolicy }).languagePolicy), requestPolicy: item.requestPolicy ?? defaultPresenceRequestPolicy(item.id) };
-    const nativeConn = (state.nativeConnections ?? []).find((c) => c.presenceId === item.id && (c.kind === "x" || c.channelId === "x"));
-    if (migrated.status === "live" && migrated.channel === "x" && migrated.connectionMode !== "bridge" && migrated.environment !== "sandbox" && xCreditsExhausted(nativeConn)) {
-      return { ...migrated, status: "paused" as const };
-    }
     return migrated;
   });
   const hydratedPresence = normalizedPresences.find((item) => item.id === activePresenceId) ?? normalizedPresences[0] ?? null;
@@ -4164,6 +4190,28 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
       settleTerminalDuplicateAssignment(normalized, assignment, duplicateExecution, duplicateExecution.updatedAt || assignment.updatedAt);
       return assignment;
     }
+    const latestRun = [...(normalized.assignmentRuns ?? [])]
+      .filter((run) => run.assignmentId === assignment.id && run.presenceId === assignment.presenceId)
+      .sort((left, right) => (right.updatedAt ?? right.createdAt).localeCompare(left.updatedAt ?? left.createdAt))[0];
+    if (latestRun && ["failed", "blocked"].includes(latestRun.status)
+      && /ended without a delivery, deferral, or explicit completion result/i.test(latestRun.lastError ?? "")
+      && ["active", "working", "awaiting_execution"].includes(assignment.status)
+      && !assignment.lastOutcome) {
+      const message = latestRun.lastError ?? "The live work cycle ended without a verified result.";
+      return {
+        ...assignment,
+        status: "needs_operator",
+        work: {
+          ...(assignment.work ?? { phase: "blocked", attempts: latestRun.attempts, maxAttempts: latestRun.maxAttempts, storiesResearched: 0 }),
+          phase: "blocked",
+          blockedReason: message,
+        },
+        lastOutcome: { class: "incomplete", message, at: latestRun.updatedAt ?? assignment.updatedAt },
+        updatedAt: latestRun.updatedAt ?? assignment.updatedAt,
+      };
+    }
+    // A persisted retry is owned by the scheduler, not the Review queue.
+    if (latestRun?.status === "deferred" && assignment.nextDueAt && assignment.status === "active") return assignment;
     if (!assignment.lastOutcome || !["evaluation_failed", "delivery_failed", "language_policy_failed"].includes(assignment.lastOutcome.class)) return assignment;
     if (!["active", "working", "awaiting_execution"].includes(assignment.status)) return assignment;
     const hasActiveRun = normalized.assignmentRuns.some((run) => run.assignmentId === assignment.id && activeAssignmentRunStatuses.has(run.status));
@@ -4201,6 +4249,19 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   // successful execution was left as failed because its parent Assignment
   // correctly remained active while awaiting Social Mirror verification.
   normalized.assignmentRuns = (normalized.assignmentRuns ?? []).map((run) => {
+    const assignment = normalized.assignments.find((item) => item.id === run.assignmentId && item.presenceId === run.presenceId);
+    if (assignment?.status === "cancelled" && assignmentRunIsActive(run)) {
+      return {
+        ...run,
+        status: "cancelled" as const,
+        currentStage: "completed" as const,
+        lastError: "The Assignment was cancelled before this work cycle completed.",
+        completedAt: run.completedAt ?? assignment.updatedAt ?? new Date().toISOString(),
+        leaseOwner: undefined,
+        leaseExpiresAt: undefined,
+        updatedAt: assignment.updatedAt ?? new Date().toISOString(),
+      };
+    }
     if (!["failed", "blocked"].includes(run.status)) return run;
     const startedAt = run.startedAt ? new Date(run.startedAt).getTime() : Number.NaN;
     const completedAt = run.completedAt ? new Date(run.completedAt).getTime() : Number.POSITIVE_INFINITY;
@@ -4840,7 +4901,15 @@ function assignmentQuantity(instruction: string): { quantity: number; quantityMo
   return { quantity, quantityMode };
 }
 
+export function isPrivateInspectionInstruction(instruction: string): boolean {
+  return /\b(?:check|inspect|review|audit|report|baseline)\b/i.test(instruction)
+    && /\b(?:keep (?:the )?result private|private (?:baseline|check|report|inspection)|read.only)\b/i.test(instruction);
+}
+
 function assignmentDeliverableType(instruction: string): Assignment["deliverable"]["type"] {
+  if (isPrivateInspectionInstruction(instruction)) return "decision_report";
+  // Prohibited actions describe constraints, never the requested deliverable.
+  instruction = instruction.replace(/\b(?:do not|don't|never)\b[^.!?]*(?:[.!?]|$)/gi, "");
   if (growthTarget(instruction)) return "audience_growth";
   if (/(?:https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/)/i.test(instruction) && /\b(?:promot|amplif|distribut|surface|share|reach|right people|genuinely care)\b/i.test(instruction)) return "meaningful_engagement";
   const evaluationOnly = /\b(?:evaluate|assess|review|recommend|decide\s+whether|tell\s+me\s+whether)\b/i.test(instruction)
@@ -8036,13 +8105,14 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
           if (action) { action.status = "skipped"; action.reason = "The operator stopped this Assignment before delivery."; }
           stopped += 1;
         } else if (unresolvedStatuses.includes(execution.status)) {
-          execution.status = "verification-closed";
-          execution.failure = { ...execution.failure, message: "The operator stopped this Assignment while the external outcome was unresolved. Check the channel before attempting a new reply.", reviewedAt: now(), reviewDisposition: "operator_action_required", reviewNote: "Stopped by the operator to prevent a possible duplicate delivery." };
-          execution.reviewReason = "Stopped by the operator while delivery was in progress or awaiting verification.";
-          execution.lease = undefined;
+          // Cancelling responsibility cannot undo a connector handoff. Keep
+          // its receipt path alive, but remove the execution from all write
+          // queues so only reconciliation can resolve the uncertain outcome.
+          execution.status = "verification-pending";
+          execution.failure = { code: "ASSIGNMENT_CANCELLED_DURING_DELIVERY", message: "The Assignment was cancelled during delivery. Only verification of the existing attempt may continue; it must not be sent again.", retryable: false };
+          execution.reviewReason = "Assignment cancelled; checking the existing delivery outcome.";
           execution.updatedAt = now();
-          if (intent && intent.state === "active") { intent.state = "expired"; intent.updatedAt = execution.updatedAt; }
-          if (action) { action.status = "skipped"; action.reason = "The operator stopped this Assignment while the external outcome was unresolved."; }
+          if (action) action.reason = "The Assignment was cancelled; the existing delivery is awaiting verification.";
           unresolved += 1;
         }
       }
@@ -8054,9 +8124,12 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       assignment.revision = (assignment.revision ?? 0) + 1;
       assignment.updatedAt = now();
       const stopDetail = stopped || unresolved
-        ? ` ${stopped + unresolved} pending delivery${stopped + unresolved === 1 ? "" : "ies"} stopped${unresolved ? "; any external outcome remains unresolved" : ""}.`
+        ? ` ${stopped} unsent deliveries stopped${unresolved ? `; ${unresolved} existing delivery outcomes still await verification` : ""}.`
         : "";
       assignment.lastOutcome = { class: "assignment_cancelled", message: `${assignment.progress.verified} / ${assignment.progress.required} verified publications remain recorded, but this Assignment will not continue.${stopDetail}`, at: assignment.updatedAt };
+      state.assignmentRuns = (state.assignmentRuns ?? []).map((run) => run.assignmentId === assignment.id && assignmentRunIsActive(run)
+        ? { ...run, status: "cancelled" as const, currentStage: "completed" as const, lastError: "The Assignment was cancelled before this work cycle completed.", completedAt: assignment.updatedAt, leaseOwner: undefined, leaseExpiresAt: undefined, updatedAt: assignment.updatedAt }
+        : run);
       if (assignment.origin === "publishing_initiative") {
         const owner = state.presences.find((presence) => presence.id === assignment.presenceId);
         if (owner) {
@@ -8156,13 +8229,11 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       // the previous Agent.
       const storedTargetWorkspace = state.agentWorkspaces.find((item) => item.agent?.id === target.id);
       const legacyTargetWorkspace = legacyWorkspaceForAgent(state, target);
-      // Prefer the deterministic legacy Agent → Presence mapping when an old
-      // compatibility snapshot was created while the browser URL pointed at
-      // another Presence. This repairs the common pre-migration case where a
-      // Jenny workspace accidentally retained Poko's channel context.
-      const targetWorkspace = storedTargetWorkspace && (!legacyTargetWorkspace || storedTargetWorkspace.presence?.id === legacyTargetWorkspace.presence?.id)
-        ? storedTargetWorkspace
-        : legacyTargetWorkspace ?? storedTargetWorkspace;
+      // A durable Agent workspace is already scoped to its own Presence. Do
+      // not let a name/handle heuristic replace it with a similarly named
+      // legacy Presence; that can move a browser tab into another Agent's
+      // mind. Use the heuristic only when the durable workspace is absent.
+      const targetWorkspace = storedTargetWorkspace ?? legacyTargetWorkspace;
       if (!targetWorkspace) return state;
       const currentPresence = state.agent ? legacyPresenceForAgent(state, state.agent) : undefined;
       const currentState = currentPresence && currentPresence.id !== state.presence?.id
@@ -8589,8 +8660,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     case "addSandboxEvent":
     case "advanceSandboxTime":
     case "runSandboxPulse":
-    case "considerOriginalPublication":
-    case "recordPreferenceEvidence": return state;
+    case "considerOriginalPublication": return state;
     case "approveSandboxIntroduction":
     case "declineSandboxIntroduction": return state;
     case "saveConversationStyle": {

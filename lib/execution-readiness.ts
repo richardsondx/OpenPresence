@@ -1,5 +1,6 @@
 import type { ChannelAffordance, ChannelId, ExecutionMode, OpenPresenceState, Presence } from "./types";
 import { bridgeExecutionStatus } from "./bridge-contract";
+import { xCreditsExhausted } from "./x-credits";
 
 export type ExecutionAuthorityMode = ExecutionMode; // "auto" | "review" | "manual" | "off"
 
@@ -19,7 +20,7 @@ export interface ExecutionReadiness {
   availableRoutes: ("native" | "bridge" | "simulated")[];
   disposition: ExecutionOperationalDisposition;
   blockerReason?: string;
-  requiredAction?: "operator_auth" | "policy_change" | "connector_reconnect";
+  requiredAction?: "operator_auth" | "policy_change" | "connector_reconnect" | "billing";
 }
 
 export function normalizeAffordanceKey(affordance: string): string {
@@ -34,7 +35,7 @@ export function nativeConnectionCanAct(connection: OpenPresenceState["nativeConn
 
 export function nativeConnectionCanWrite(connection: OpenPresenceState["nativeConnections"][number], expectedHandle?: string): boolean {
   if (!nativeConnectionCanAct(connection, expectedHandle)) return false;
-  return !/no API credits remaining|credits remaining|billing and usage|quota exhausted/i.test(`${connection.deliveryError ?? ""} ${connection.healthMessage ?? ""}`);
+  return !xCreditsExhausted(connection);
 }
 
 /**
@@ -143,6 +144,19 @@ export function evaluateExecutionReadiness(input: {
   }
 
   if (availableRoutes.length === 0) {
+    const billingBlocked = state.nativeConnections?.find((item) => item.presenceId === presence.id && item.kind === "x" && xCreditsExhausted(item));
+    if (billingBlocked) {
+      return {
+        affordance: input.affordance,
+        normalizedAffordance,
+        authority,
+        executableNow: false,
+        availableRoutes: [],
+        disposition: "needs_you",
+        blockerReason: "X API billing is blocking this action. Restore API credits or the spending allowance, or connect an authorized browser route.",
+        requiredAction: "billing",
+      };
+    }
     // Check if connector needs operator auth vs temporary connection loss
     const brokenConn = state.nativeConnections?.find((item) => item.presenceId === presence.id && item.status === "needs-attention");
     if (brokenConn) {

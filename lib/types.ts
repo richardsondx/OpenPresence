@@ -3001,6 +3001,7 @@ export type PresenceChatRehearsalOperation =
 export type OperatorConversationOperation =
   | { type: "retryOperatorChat"; presenceId: string; messageId: string }
   | { type: "sendPresenceNudge"; presenceId: string; content: string; threadId?: string; attachments?: SandboxAssetInput[]; clientRequestId?: string }
+  | { type: "cancelOperatorChat"; presenceId: string; runId: string }
   | { type: "retryPresenceNudge"; presenceId: string; nudgeId: string }
   | { type: "createAssignmentFromNudge"; presenceId: string; nudgeId: string; title?: string }
   | { type: "lookNow"; presenceId?: string };

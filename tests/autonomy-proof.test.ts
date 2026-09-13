@@ -4,7 +4,7 @@ import { parseAgentSocialDecision } from "../lib/ai";
 
 describe("Empirical Autonomy Evidence Harness", () => {
   it("executes end-to-end closed loop and extracts durable trace records", async () => {
-    const results: Record<string, any> = {};
+    const results: Record<string, Record<string, unknown>> = {};
 
     // 1. Setup Presence
     let state = createAgent({

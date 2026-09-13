@@ -29,11 +29,11 @@ describe("execution compatibility projection", () => {
     const raw = database.prepare("SELECT payload FROM app_state WHERE id = 1").get() as { payload: string };
     const rawState = JSON.parse(raw.payload) as Record<string, unknown>;
     expect(rawState.executions).toBeUndefined();
-    expect(database.prepare("SELECT COUNT(*) AS count FROM executions WHERE id = ?").get(execution.id)).toMatchObject({ count: 1 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM executions WHERE id = ?").get("execution-projection-test")).toMatchObject({ count: 1 });
     database.prepare("UPDATE app_state SET updated_at = ? WHERE id = 1").run(new Date(Date.now() + 1_000).toISOString());
     database.close();
 
     const reopened = readStateSnapshot();
-    expect(reopened.executions.find((item) => item.id === execution.id)).toMatchObject({ id: execution.id, status: "queued" });
+    expect(reopened.executions.find((item) => item.id === "execution-projection-test")).toMatchObject({ id: "execution-projection-test", status: "queued" });
   });
 });

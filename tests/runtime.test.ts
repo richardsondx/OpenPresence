@@ -967,14 +967,14 @@ describe("OpenPresence runtime boundaries", () => {
     const assignment = state.assignments.find((item) => item.migration?.sourceId === "directive-inflight-cancel")!;
     state = formXReplyIntent(state, "A reply that is already in flight on the wire.", target.id, "directive-inflight-cancel");
     const execution = state.executions[0]!;
-    // Dispatch has started: execution is in flight (status = "working")
-    execution.status = "working";
+    // Dispatch has started: execution is in flight
+    execution.status = "executing";
 
     // Operator cancels the Assignment
     const stopped = applyOperation(state, { type: "cancelAssignment", id: assignment.id });
     expect(stopped.assignments.find((item) => item.id === assignment.id)?.status).toBe("cancelled");
-    // Already-dispatched child execution remains "working" so Social Mirror can reconcile its outcome
-    expect(stopped.executions.find((item) => item.id === execution.id)?.status).toBe("working");
+    // Already-dispatched child execution enters reconciliation-only state
+    expect(stopped.executions.find((item) => item.id === execution.id)?.status).toBe("verification-pending");
   });
 
   it("handles uncertain execution during connector handoff without blind retries or false cancellation claims", () => {
@@ -987,8 +987,8 @@ describe("OpenPresence runtime boundaries", () => {
     const assignment = state.assignments.find((item) => item.migration?.sourceId === "directive-uncertain")!;
     state = formXReplyIntent(state, "Reply sent during uncertain network window.", target.id, "directive-uncertain");
     const execution = state.executions[0]!;
-    // Status is in flight/uncertain (working, 1 attempt in progress)
-    execution.status = "working";
+    // Status is in flight/uncertain (1 attempt in progress)
+    execution.status = "executing";
     execution.attempts = 1;
 
     // Operator cancels parent Assignment during uncertain handoff
@@ -997,7 +997,7 @@ describe("OpenPresence runtime boundaries", () => {
     expect(stopped.assignments.find((item) => item.id === assignment.id)?.status).toBe("cancelled");
     // Invariant 2: In-flight execution is NOT falsely marked cancelled or retryable
     const inFlightExecution = stopped.executions.find((item) => item.id === execution.id)!;
-    expect(inFlightExecution.status).toBe("working");
+    expect(inFlightExecution.status).toBe("verification-pending");
     expect(inFlightExecution.attempts).toBe(1);
     // Invariant 3: Intent remains in flight so reconciliation can finish
     const intent = stopped.socialIntents.find((item) => item.id === execution.socialIntentId)!;
@@ -1065,7 +1065,7 @@ describe("OpenPresence runtime boundaries", () => {
     const state = applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { reply: "auto", like: "auto" } } });
     const presenceId = state.presence!.id;
     const target = { type: "x.post" as const, id: "outer-quote" };
-    state.mirrorObjects.unshift({ id: "mirror-outer-quote", bridgeId: "bridge:test", presenceId, channelId: "x", externalRef: target, referencedExternalRefs: [{ type: "x.post", id: "missing-quoted-post" }], objectType: "post", author: { displayName: "Outer Author", handle: "outer" }, content: { text: "Commentary over a quote." }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "live", source: "bridge", trust: "untrusted_world_content" });
+    state.mirrorObjects.unshift({ id: "mirror-outer-quote", bridgeId: "bridge:test", presenceId, channelId: "x", externalRef: target, referencedExternalRefs: [{ type: "x.post", id: "missing-quoted-post" }], objectType: "post", author: { displayName: "Outer Author", handle: "outer" }, content: { text: "Commentary over a quote." }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "live", source: "native", trust: "untrusted_world_content" });
 
     const afterReply = formXReplyIntent(state, "A reply that would otherwise be valid.", target.id);
     expect(afterReply.executions).toHaveLength(state.executions.length);
@@ -1295,17 +1295,21 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.events[0]?.title).toBe("Retry requested");
   });
 
-  it("keeps the Social Mirror connected and pauses the presence when delivery is blocked by X billing", () => {
+  it("keeps operator wake state when native delivery is blocked by X billing", () => {
     let state = createAgent(input);
     state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     state = markNativeConnectionNeedsAttention(state, state.presence!.id, "X has no API credits remaining for this app.");
     expect(state.nativeConnections[0]?.status).toBe("connected");
     expect(state.nativeConnections[0]?.deliveryError).toContain("no API credits");
     expect(state.nativeConnections[0]?.healthMessage).toBeUndefined();
-    expect(state.presence?.status).toBe("paused");
+    expect(state.presence?.status).toBe("live");
+    const manifest = derivePresenceCapabilityManifest(state, state.presence!.id);
+    for (const capability of ["post", "quote", "reply", "like", "image", "video"]) {
+      expect(manifest.items.find((item) => item.capability === capability)?.canExecute).toBe(false);
+    }
   });
 
-  it("normalizes a live presence to paused when its native X connection has exhausted credits", () => {
+  it("preserves both awake and operator-paused state across normalization during an X billing block", () => {
     const state = createAgent(input);
     state.presence!.status = "live";
     state.presence!.environment = "live";
@@ -1313,8 +1317,10 @@ describe("OpenPresence runtime boundaries", () => {
     state.presences[0]!.environment = "live";
     state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", deliveryError: "X has no API credits remaining for this app.", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     const normalized = normalizeState(state);
-    expect(normalized.presence?.status).toBe("paused");
-    expect(normalized.presences[0]?.status).toBe("paused");
+    expect(normalized.presence?.status).toBe("live");
+    expect(normalized.presences[0]?.status).toBe("live");
+    const paused = applyOperation(normalized, { type: "pausePresence", presenceId: normalized.presence!.id });
+    expect(normalizeState(paused).presence?.status).toBe("paused");
   });
 
   it("keeps the native connection healthy when X rejects a reply target", () => {
@@ -2010,7 +2016,7 @@ describe("OpenPresence runtime boundaries", () => {
     });
     expect(state.proposals).toHaveLength(1);
     expect(state.proposals[0]?.proposed).toContain("## Contextual humor and emoji");
-    expect(state.proposals[0]?.proposed).toContain("at most one familiar emoji");
+    expect(state.proposals[0]?.proposed).toContain("use one familiar emoji");
     expect(state.files.find((file) => file.kind === "TASTE")?.content).not.toContain("## Contextual humor and emoji");
 
     state = applyOperation(state, { type: "sendMessage", content: "can you update taste with that" });

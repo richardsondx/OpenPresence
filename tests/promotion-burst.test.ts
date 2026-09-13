@@ -86,7 +86,7 @@ describe("OwnTheHype promotion burst contract", () => {
     const { state, assignment, presence } = fixture();
     state.assignmentPursuitWindows = [];
     assignment.deliverable = { type: "meaningful_engagement", quantity: 40, quantityMode: "exact" };
-    const started = applyOperation(state, { type: "startAssignmentPursuit", assignmentId: assignment.id, presenceId: presence.id, deadlineAt: "2026-09-02T00:00:00.000Z", maxVerifiedActions: 40, purpose: "promotion_burst", sourcePostId: sourceId, sourcePostUrl: sourceUrl, requiredVerifiedPromotionalActions: 40 });
+    const started = applyOperation(state, { type: "startAssignmentPursuit", assignmentId: assignment.id, presenceId: presence.id, deadlineAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), maxVerifiedActions: 40, purpose: "promotion_burst", sourcePostId: sourceId, sourcePostUrl: sourceUrl, requiredVerifiedPromotionalActions: 40 });
     const window = started.assignmentPursuitWindows!.find((item) => item.assignmentId === assignment.id && item.status === "active")!;
     expect(window).toMatchObject({ purpose: "promotion_burst", sourcePostId: sourceId, requiredVerifiedPromotionalActions: 40 });
   });

@@ -9,7 +9,7 @@ describe("native observation transitions", () => {
     const next = recordNativeObservationInPlace(state, presenceId, { status: "syncing" });
 
     expect(next).toBe(state);
-    expect(next.nativeConnections.find((connection) => connection.presenceId === presenceId)?.observation.status).toBe("syncing");
+    expect(next.nativeConnections.find((connection) => connection.presenceId === presenceId)?.observation?.status).toBe("syncing");
   });
 
   it("keeps the public transition wrapper defensive", () => {
@@ -20,6 +20,6 @@ describe("native observation transitions", () => {
 
     expect(next).not.toBe(state);
     expect(state.nativeConnections.find((connection) => connection.presenceId === presenceId)?.observation?.status).not.toBe("up-to-date");
-    expect(next.nativeConnections.find((connection) => connection.presenceId === presenceId)?.observation.status).toBe("up-to-date");
+    expect(next.nativeConnections.find((connection) => connection.presenceId === presenceId)?.observation?.status).toBe("up-to-date");
   });
 });

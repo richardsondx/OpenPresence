@@ -14,7 +14,6 @@ describe("social-decision compatibility projection", () => {
       presenceId: state.presence!.id,
       decision: "reply",
       summary: "A concrete reply earned its place.",
-      rationale: "The post contains a useful question.",
       confidence: "high",
     });
     writeState(next);

@@ -24,11 +24,11 @@ describe("Conversation Episodes", () => {
     const first = createConversationEpisode(state, external);
     state.conversationEpisodes.push(first);
     updateConversationEpisodeFromMirror(state, agent);
-    const same = updateConversationEpisodeFromMirror(state, followUp);
+    const same = updateConversationEpisodeFromMirror(state, followUp)!;
     expect(same.id).toBe(first.id);
     expect(same.agentTurnCount).toBe(1);
     expect(same.externalTurnCount).toBe(2);
-    const other = updateConversationEpisodeFromMirror(state, unrelated);
+    const other = updateConversationEpisodeFromMirror(state, unrelated)!;
     expect(other.id).not.toBe(first.id);
   });
 

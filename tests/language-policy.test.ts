@@ -146,6 +146,7 @@ describe("Language & phrasing policy", () => {
 
   it("rechecks the current policy immediately before Sandbox delivery", () => {
     let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
     state = startPlaygroundSession(state, state.presence!.id, "fresh");
     const session = state.playgroundSessions[0]!;
     state = formSandboxIntent(state, { sessionId: session.id, affordance: "post", text: "A clean note." });
@@ -159,6 +160,7 @@ describe("Language & phrasing policy", () => {
 
   it("blocks a native completion recheck and permits only an explicit operator override", () => {
     let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
     state = applyOperation(state, { type: "setAgentLanguagePolicy", policy: { avoid: [], prohibited: ["secret"] } });
     state.presence = { ...state.presence!, connectionMode: "native" };
     state.presences = state.presences.map((item) => item.id === state.presence?.id ? state.presence! : item);

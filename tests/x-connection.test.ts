@@ -1,4 +1,14 @@
 import crypto from "node:crypto";
+import { dispatchAutonomyWorker } from "../lib/autonomy-worker";
+
+async function attentionResult(response: Response) {
+  const body = await response.json();
+  if (!body.receiptOnly) return body;
+  expect(body.accepted).toBe(true);
+  if (body.runId) await dispatchAutonomyWorker(body.runId);
+  return readState();
+}
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readChannelSecret, readProviderSecret, readState, shouldRecordNativeOperationalFailure, writeState } from "../lib/db";
 import { deleteXPost, findVerifiedXQuote, findVerifiedXReply, matchesXQuote, matchesXReply, mergeXCredentials, normalizeXText, readRecentXMentions, readRecentXPosts, readXPostsByIds } from "../lib/x";
@@ -16,7 +26,7 @@ import { readOperationalHealth } from "../lib/operational-context";
 beforeEach(() => {
   process.env.OPENPRESENCE_X_API_MOCK = "1";
   delete process.env.OPENPRESENCE_AI_MOCK;
-  const state = createAgent({ name: "Jenny", description: "Useful ideas", audience: "builders", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
+  const state = applyOperation(createAgent({ name: "Jenny", description: "Useful ideas", audience: "builders", mode: "agent", handle: "@jenny_ai", accent: "#D68754" }), { type: "setPresence", patch: { execution: { post: "auto", reply: "auto" } } });
   state.presence!.environment = "live";
   state.presence!.connectionMode = "native";
   state.presences = state.presences.map((item) => item.id === state.presence!.id ? { ...item, environment: "live" as const, connectionMode: "native" as const } : item);
@@ -24,6 +34,34 @@ beforeEach(() => {
 });
 
 describe("native X connection", () => {
+  it("keeps an inbound candidate unjudged when its model re-expression fails", async () => {
+    const presenceId = readState().presence!.id;
+    await POST(new Request("http://localhost/api/x/manage", { method: "POST", body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_access", accessTokenSecret: "test_access_secret" } }), headers: { "content-type": "application/json" } }));
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "configureProvider", provider: "openai", label: "OpenAI", secret: "test-provider", hasSecret: true }), headers: { "content-type": "application/json" } }));
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setModel", provider: "openai", model: "gpt-5.6-luna" }), headers: { "content-type": "application/json" } }));
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    let modelCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => {
+      if (String(url).includes("api.openai.com")) {
+        modelCalls += 1;
+        return modelCalls === 1
+          ? new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ action: "reply", text: "The useful bit is the tradeoff. What would you test next?", rationale: "Answer the question." }) } }] }), { status: 200 })
+          : new Response(JSON.stringify({ error: { message: "provider unavailable" } }), { status: 503 });
+      }
+      return new Response(JSON.stringify({ data: String(url).includes("/users/")
+        ? [{ id: "own-footing", text: "Existing post", author_id: "mock-x-user", created_at: new Date().toISOString() }]
+        : [{ id: "repair-failure-target", text: "@jenny_ai How should I test this tradeoff?", lang: "en", author_id: "builder-1", created_at: new Date().toISOString() }], includes: { users: [{ id: "builder-1", username: "builder", name: "Builder" }] } }), { status: 200 });
+    }));
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "syncNativeX", presenceId }), headers: { "content-type": "application/json" } }));
+    expect(response.ok).toBe(false);
+    expect(modelCalls).toBeGreaterThan(1);
+    const persisted = readState();
+    expect(persisted.presence?.context.publicFooting?.judgedInboundIds ?? []).not.toContain("repair-failure-target");
+    expect(persisted.socialDecisions.filter((decision) => decision.origin?.refId === "repair-failure-target")).toEqual([]);
+    expect(persisted.executions).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
   it("reads direct replies to the Presence's posts, including media-only GIF replies", async () => {
     process.env.OPENPRESENCE_X_API_MOCK = "0";
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
@@ -185,8 +223,8 @@ describe("native X connection", () => {
     state = applyOperation(state, { type: "activateAssignment", id: assignment.id });
     writeState(state);
 
-    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "runAttentionWorker" }), headers: { "content-type": "application/json" } }));
-    const body = await response.json();
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "syncNativeX", presenceId }), headers: { "content-type": "application/json" } }));
+    const body = await attentionResult(response);
     const updated = body.assignments.find((item: { id: string }) => item.id === assignment.id);
     expect(response.status).toBe(200);
     expect(updated.lastEvaluatedAt).toBeUndefined();
@@ -235,13 +273,15 @@ describe("native X connection", () => {
     const saved = await save.json();
     const connectionId = saved.state.nativeConnections[0].id;
     let seeded = readState();
-    seeded = recordNativeMirror(seeded, { connectionId, presenceId, own: true, post: { id: "deleted-post", text: "This was deleted on X.", createdAt: "2026-08-15T11:00:00.000Z", authorId: "mock-x-user", authorUsername: "jenny_ai", authorName: "Jenny" } });
+    seeded = recordNativeMirror(seeded, { connectionId, presenceId, own: true, post: { id: "deleted-post", text: "This was deleted on X.", createdAt: new Date(Date.now() + 1_000).toISOString(), authorId: "mock-x-user", authorUsername: "jenny_ai", authorName: "Jenny" } });
     seeded = recordPublicFooting(seeded, presenceId, { postsPublished: 1, recentPostIds: ["deleted-post"], recentInboundIds: [], observedAt: new Date().toISOString() });
     writeState(seeded);
 
     process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const currentPostAt = new Date(Date.now() + 2_000).toISOString();
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "current-post", text: "Still public", created_at: "2026-08-16T11:00:00.000Z", author_id: "mock-x-user" }] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "current-post", text: "Still public", created_at: currentPostAt, author_id: "mock-x-user" }] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
@@ -250,7 +290,7 @@ describe("native X connection", () => {
     expect(response.status).toBe(200);
     expect(body.mirrorObjects.find((item: { externalRef: { id: string } }) => item.externalRef.id === "deleted-post").archived).toBe(true);
     expect(derivePublicHistory(body, presenceId)).toEqual(expect.arrayContaining([expect.objectContaining({ externalRef: expect.objectContaining({ id: "deleted-post" }), availability: "deleted", externalUrl: "https://x.com/jenny_ai/status/deleted-post" })]));
-    expect(body.mirrorEvents.some((item: { event: string; externalRef: { id: string } }) => item.event === "deleted" && item.externalRef.id === "deleted-post")).toBe(true);
+    expect(readState().mirrorEvents.some((item) => item.event === "deleted" && item.externalRef.id === "deleted-post")).toBe(true);
     expect(body.events.some((item: { detail?: string }) => item.detail?.includes("reconciled 1 deleted post"))).toBe(true);
     vi.unstubAllGlobals();
   });
@@ -441,9 +481,12 @@ describe("native X connection", () => {
     expect(repaired.mirrorObjects.find((item) => item.externalRef.id === reply.id)?.objectType).toBe("reply");
   });
 
-  it("turns exhausted X credits into an actionable error", async () => {
+  it.each([
+    { status: 402, body: { title: "credits depleted" }, expected: "no API credits remaining" },
+    { status: 403, body: { detail: "Your monthly spend cap has been reached." }, expected: "review the spending allowance" },
+  ])("turns exhausted X credits or spend caps into an actionable error ($status)", async ({ status, body, expected }) => {
     process.env.OPENPRESENCE_X_API_MOCK = "0";
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ title: "credits depleted" }), { status: 402, headers: { "content-type": "application/json" } })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })));
     const request = new Request("http://localhost/api/x/manage", {
       method: "POST",
       body: JSON.stringify({ action: "test", presenceId: readState().presence?.id, credentials: { apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" } }),
@@ -451,7 +494,7 @@ describe("native X connection", () => {
     });
     const response = await POST(request);
     expect(response.status).toBe(400);
-    expect((await response.json()).error).toContain("no API credits remaining");
+    expect((await response.json()).error).toContain(expected);
     vi.unstubAllGlobals();
   });
 
@@ -529,18 +572,19 @@ describe("native X connection", () => {
     let state = (await save.json()).state;
     state = recordPublicFooting(state, presenceId!, { postsPublished: 1, recentPostIds: ["prior-post"], observedAt: new Date().toISOString() });
     process.env.OPENPRESENCE_AI_MOCK = "1";
-    state = applyOperation(state, { type: "setPresence", patch: { execution: { ...state.presence!.execution, post: "auto" }, publishingInitiative: { ...state.presence!.publishingInitiative, mode: "pace", target: { count: 1, period: "day" }, timezone: "UTC" } } });
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { ...state.presence!.execution, post: "auto" }, publishingInitiative: { ...state.presence!.publishingInitiative, mode: "pace", target: { count: 2, period: "day" }, timezone: "UTC" } } });
     writeState(state);
 
     process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const priorPostAt = new Date(Date.now() + 1_000).toISOString();
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "prior-post", text: "A prior public contribution", created_at: "2026-08-14T12:00:00.000Z", conversation_id: "prior-post" }] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "prior-post", text: "A prior public contribution", created_at: priorPostAt, conversation_id: "prior-post" }] }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: { id: "mock-post-1" } }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "runAttentionWorker" }), headers: { "content-type": "application/json" } }));
-    const delivered = await response.json();
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "syncNativeX", presenceId }), headers: { "content-type": "application/json" } }));
+    const delivered = await attentionResult(response);
     expect(response.status).toBe(200);
     const assignmentId = delivered.presence.publishingInitiative.assignmentId;
     const execution = delivered.executions.find((item: { id: string; assignmentId?: string }) => item.assignmentId === assignmentId);
@@ -564,7 +608,7 @@ describe("native X connection", () => {
 
     const reconciled = recordNativeMirror(state, { connectionId: "native-reconcile", presenceId, own: true, post: { id: "public-reply", parentId: "parent-post", text: "@someone A truthful exact reply.", createdAt: "2026-08-25T20:16:16.000Z", authorUsername: "reconcile_reply" } });
     expect(reconciled.executions[0]).toMatchObject({ id: "execution_lost_ack", status: "succeeded", externalRef: { type: "x.reply", id: "public-reply" } });
-    expect(reconciled.outcomes.some((outcome) => outcome.executionId === "execution_lost_ack" && outcome.evidence.some((evidence) => evidence.id === "public-reply"))).toBe(true);
+    expect(reconciled.outcomes.some((outcome) => outcome.executionId === "execution_lost_ack" && outcome.evidence?.some((evidence) => evidence.id === "public-reply"))).toBe(true);
     expect(reconciled.actions[0]).toMatchObject({ status: "executed" });
     expect(reconciled.mirrorObjects.find((object) => object.externalRef.id === "public-reply")?.originExecutionId).toBe("execution_lost_ack");
   });
@@ -623,19 +667,34 @@ describe("native X connection", () => {
     await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "configureProvider", provider: "openai", label: "OpenAI workspace", secret: "provider-secret-test", hasSecret: true }), headers: { "content-type": "application/json" } }));
     await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setModel", model: "gpt-5.6-luna", provider: "openai", quality: "high" }), headers: { "content-type": "application/json" } }));
     await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setPresence", patch: { status: "paused" } }), headers: { "content-type": "application/json" } }));
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ action: "post", text: "I am here to make complicated AI systems feel more understandable. What are you trying to build?", rationale: "A concise first contribution invites a concrete conversation." }) } }] }), { status: 200, headers: { "content-type": "application/json" } }));
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      const requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      if (url.includes("/chat/completions")) {
+        const prompt = JSON.stringify(requestBody.messages ?? []);
+        const content = prompt.includes("working plan") || prompt.includes("Publishing Planner")
+          ? JSON.stringify({ horizonStart: new Date().toISOString(), horizonEnd: new Date(Date.now() + 86_400_000).toISOString(), expectedOriginals: { min: 0, max: 1 }, windows: [], currentWork: [], nextReassessmentAt: new Date(Date.now() + 3_600_000).toISOString(), rationaleSummary: "First wake can wait for a grounded opening." })
+          : JSON.stringify({ action: "post", text: "I am here to make complicated AI systems feel more understandable. What are you trying to build?", rationale: "A concise first contribution invites a concrete conversation." });
+        return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.includes("/users/")) return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.includes("search/recent")) return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
     vi.stubGlobal("fetch", fetchMock);
-    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "wakePresence", presenceId }), headers: { "content-type": "application/json" } }));
-    const body = await response.json();
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "wakePresence", presenceId }), headers: { "content-type": "application/json" } }));
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "syncNativeX", presenceId }), headers: { "content-type": "application/json" } }));
+    const body = await attentionResult(response);
     expect(response.status).toBe(200);
     expect(body.presence.context.publicFooting.postsPublished).toBe(0);
     expect(body.events.some((event: { title: string }) => event.title === "Considering first public move")).toBe(true);
     expect(body.socialIntents[0].affordance).toBe("x.post");
     expect(body.executions[0].status).toBe("blocked");
     expect(body.executions[0].failure.code).toBe("LIVE_WRITE_BLOCKED_NON_PRODUCTION_RUNTIME");
-    expect(JSON.stringify(fetchMock.mock.calls[0]?.[1]?.body)).toContain("publicFooting");
-    expect(JSON.stringify(fetchMock.mock.calls[0]?.[1]?.body)).toContain("postsPublished");
+    const cognitionCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/chat/completions"));
+    expect(JSON.stringify(cognitionCall?.[1]?.body)).toContain("publicFooting");
+    expect(JSON.stringify(cognitionCall?.[1]?.body)).toContain("postsPublished");
     vi.unstubAllGlobals();
   });
 
@@ -646,27 +705,32 @@ describe("native X connection", () => {
     await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setModel", model: "gpt-5.6-luna", provider: "openai", quality: "high" }), headers: { "content-type": "application/json" } }));
     await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setPresence", patch: { execution: { reply: "auto" } } }), headers: { "content-type": "application/json" } }));
     process.env.OPENPRESENCE_X_API_MOCK = "0";
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "post-1", text: "Jenny's first post", lang: "en", created_at: "2026-08-13T01:00:00.000Z", conversation_id: "post-1" }] }), { status: 200, headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "mention-1", text: "@jenny_ai I'm building an AI product for founders. What are you interested in discussing?", lang: "en", created_at: "2026-08-13T01:01:00.000Z", author_id: "user-1", conversation_id: "post-1", referenced_tweets: [{ type: "replied_to", id: "post-1" }] }], includes: { users: [{ id: "user-1", username: "builder" }] } }), { status: 200, headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ action: "reply", text: "I care about thoughtful AI products, durable relationships, and the ideas that help people build with more clarity. What are you working on?", rationale: "The mention contains an open question worth answering." }) } }] }), { status: 200, headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { id: "reply-1" } }), { status: 200, headers: { "content-type": "application/json" } }));
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/chat/completions")) {
+        const messages = (JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>).messages;
+        const isPlan = Array.isArray(messages) && messages.some((message) => message && typeof message === "object" && String((message as Record<string, unknown>).content ?? "").includes("Create a bounded working plan"));
+        const content = isPlan
+          ? JSON.stringify({ horizonStart: new Date().toISOString(), horizonEnd: new Date(Date.now() + 86_400_000).toISOString(), expectedOriginals: { min: 0, max: 1 }, windows: [], currentWork: [], nextReassessmentAt: new Date(Date.now() + 3_600_000).toISOString(), rationaleSummary: "Keep the social response focused on the inbound conversation." })
+          : JSON.stringify({ acts: [{ action: "reply", text: "I care about thoughtful AI products, durable relationships, and the ideas that help people build with more clarity. What are you working on?", rationale: "The mention contains an open question worth answering." }], conversationDisposition: "continue", rationale: "The mention contains an open question worth answering." });
+        return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.includes("/users/")) return new Response(JSON.stringify({ data: [{ id: "post-1", text: "Jenny's first post", lang: "en", created_at: "2026-08-13T01:00:00.000Z", conversation_id: "post-1" }] }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.includes("search/recent")) return new Response(JSON.stringify({ data: [{ id: "mention-1", text: "@jenny_ai I'm building an AI product for founders. What are you interested in discussing?", lang: "en", created_at: "2026-08-13T01:01:00.000Z", author_id: "user-1", conversation_id: "post-1", referenced_tweets: [{ type: "replied_to", id: "post-1" }] }], includes: { users: [{ id: "user-1", username: "builder" }] } }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ data: { id: "reply-1" } }), { status: 200, headers: { "content-type": "application/json" } });
+    });
     vi.stubGlobal("fetch", fetchMock);
     const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "runPulse", presenceId }), headers: { "content-type": "application/json" } }));
-    const body = await response.json();
+    const body = await attentionResult(response);
     expect(response.status).toBe(200);
-    expect(body.events.some((event: { title: string }) => event.title === "Worth responding to")).toBe(true);
+    expect(body.events.some((event: { title: string }) => event.title === "A reply intention was formed")).toBe(true);
     expect(body.executions[0].affordance).toBe("x.reply");
     expect(body.executions[0].status).toBe("blocked");
     expect(body.executions[0].failure.code).toBe("LIVE_WRITE_BLOCKED_NON_PRODUCTION_RUNTIME");
-    expect(body.presence.context.publicFooting.judgedInboundIds).toContain("mention-1");
-    expect(body.events.find((event: { title: string }) => event.title === "Pulse completed")).toMatchObject({
-      intentId: body.executions[0].socialIntentId,
-      executionId: body.executions[0].id,
-    });
-    const cognitionRequest = JSON.stringify(fetchMock.mock.calls[2]?.[1]?.body);
+    expect(body.socialDecisions.some((decision: { origin?: { refId?: string }; decision?: string }) => decision.origin?.refId === "mention-1" && decision.decision === "reply")).toBe(true);
+    const cognitionCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/chat/completions") && String((call[1] as RequestInit | undefined)?.body).includes("Evaluate the current X world"));
+    const cognitionRequest = JSON.stringify(cognitionCall?.[1]?.body);
     expect(cognitionRequest).toContain("Jenny's first post");
-    expect(cognitionRequest).toContain("Thread context (complete)");
     vi.unstubAllGlobals();
   });
 
@@ -682,18 +746,18 @@ describe("native X connection", () => {
     });
     writeState(mirrorEvidence);
     process.env.OPENPRESENCE_X_API_MOCK = "0";
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "own-post-1", text: "Jenny's existing public footing", created_at: "2026-08-15T11:00:00.000Z", author_id: "mock-x-user", conversation_id: "own-post-1" }] }), { status: 200, headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }));
+    const fetchMock = vi.fn(async (input: string | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/users/")) return new Response(JSON.stringify({ data: [{ id: "own-post-1", text: "Jenny's existing public footing", created_at: "2026-08-15T11:00:00.000Z", author_id: "mock-x-user", conversation_id: "own-post-1" }] }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
     vi.stubGlobal("fetch", fetchMock);
     const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "runPulse", presenceId }), headers: { "content-type": "application/json" } }));
-    const body = await response.json();
+    const body = await attentionResult(response);
     expect(response.status).toBe(200);
     expect(body.executions).toHaveLength(0);
     expect(body.events.some((event: { title: string }) => event.title === "Worth responding to")).toBe(false);
     expect(body.presence.context.publicFooting.recentInboundIds).toEqual([]);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
     vi.unstubAllGlobals();
   });
 
@@ -704,12 +768,14 @@ describe("native X connection", () => {
     await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setModel", model: "gpt-5.6-luna", provider: "openai", quality: "high" }), headers: { "content-type": "application/json" } }));
     await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setPresence", patch: { execution: { reply: "auto" } } }), headers: { "content-type": "application/json" } }));
     process.env.OPENPRESENCE_X_API_MOCK = "0";
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "mention-1", text: "@jenny_ai What do you think?", lang: "en", created_at: "2026-08-15T12:00:00.000Z", author_id: "user-1", conversation_id: "root-1", referenced_tweets: [{ type: "replied_to", id: "parent-1" }] }], includes: { users: [{ id: "user-1", username: "builder", name: "Builder" }] } }), { status: 200, headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "parent-1", text: "The immediate public claim", lang: "en", created_at: "2026-08-15T11:59:00.000Z", author_id: "user-2", conversation_id: "root-1", referenced_tweets: [{ type: "replied_to", id: "root-1" }] }], includes: { tweets: [{ id: "root-1", text: "The root idea that gives this exchange meaning", lang: "en", created_at: "2026-08-15T11:58:00.000Z", author_id: "user-3", conversation_id: "root-1" }], users: [{ id: "user-2", username: "author", name: "Author" }, { id: "user-3", username: "originator", name: "Originator" }] } }), { status: 200, headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ action: "reply", text: "The root claim is the interesting part here; the immediate reply makes the tradeoff clearer. What would you test next?", rationale: "The full ancestry supports one specific continuation." }) } }] }), { status: 200, headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { id: "reply-1" } }), { status: 200, headers: { "content-type": "application/json" } }));
+    const fetchMock = vi.fn(async (input: string | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/chat/completions")) return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ action: "reply", text: "The root claim matters here; the immediate reply makes the tradeoff clearer. What would you test next?", rationale: "The full ancestry supports one specific continuation." }) } }] }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.includes("/users/")) return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.includes("search/recent")) return new Response(JSON.stringify({ data: [{ id: "mention-1", text: "@jenny_ai What do you think?", lang: "en", created_at: "2026-08-15T12:00:00.000Z", author_id: "user-1", conversation_id: "root-1", referenced_tweets: [{ type: "replied_to", id: "parent-1" }] }], includes: { users: [{ id: "user-1", username: "builder", name: "Builder" }] } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.includes("ids=parent-1")) return new Response(JSON.stringify({ data: [{ id: "parent-1", text: "The immediate public claim", lang: "en", created_at: "2026-08-15T11:59:00.000Z", author_id: "user-2", conversation_id: "root-1", referenced_tweets: [{ type: "replied_to", id: "root-1" }] }], includes: { tweets: [{ id: "root-1", text: "The root idea that gives this exchange meaning", lang: "en", created_at: "2026-08-15T11:58:00.000Z", author_id: "user-3", conversation_id: "root-1" }], users: [{ id: "user-2", username: "author", name: "Author" }, { id: "user-3", username: "originator", name: "Originator" }] } }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ data: { id: "reply-1" } }), { status: 200, headers: { "content-type": "application/json" } });
+    });
     vi.stubGlobal("fetch", fetchMock);
     const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "syncNativeX", presenceId }), headers: { "content-type": "application/json" } }));
     const body = await response.json();
@@ -719,12 +785,13 @@ describe("native X connection", () => {
     expect(body.events.some((event: { title: string }) => event.title === "Worth responding to")).toBe(true);
     expect(body.presence.context.publicFooting.judgedInboundIds).toContain("mention-1");
     expect(body.executions[0].target).toEqual({ type: "x.post", id: "mention-1" });
-    const cognitionRequest = JSON.stringify(fetchMock.mock.calls[3]?.[1]?.body);
+    const cognitionCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/chat/completions"));
+    const cognitionRequest = JSON.stringify(cognitionCall?.[1]?.body);
     expect(cognitionRequest).toContain("The root idea that gives this exchange meaning");
     expect(cognitionRequest).toContain("The immediate public claim");
     expect(cognitionRequest).toContain("@jenny_ai What do you think?");
     expect(cognitionRequest).toContain("Thread context (complete)");
-    expect(fetchMock.mock.calls[4]).toBeUndefined();
+    expect(fetchMock.mock.calls.filter((call) => String(call[0]).includes("/2/tweets") && (call[1] as RequestInit | undefined)?.method === "POST")).toHaveLength(0);
     vi.unstubAllGlobals();
   });
 
@@ -872,7 +939,8 @@ describe("native X connection", () => {
       presenceId: state.presence!.id,
       kind: "x",
       status: "connected",
-      environment: "live",
+      channelId: "x",
+      access: "read-write",
       account: { id: "user-1", username: "jenny_ai", name: "Jenny" },
       createdAt: "2026-08-20T00:00:00.000Z",
       updatedAt: "2026-08-20T00:00:00.000Z",

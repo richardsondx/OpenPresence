@@ -36,6 +36,49 @@ export function reconcileOrphanedAssignmentStatuses(source: OpenPresenceState): 
   return { state: next, repairedAssignmentIds };
 }
 
+/**
+ * A scheduler dispatch can arrive after a scheduled Assignment's execution
+ * window has closed. Settle the durable queue row so the scheduler does not
+ * redispatch it forever, while leaving the parent Assignment eligible for its
+ * next declared window.
+ */
+export function deferQueuedAssignmentRunsOutsideWindow(
+  source: OpenPresenceState,
+  assignmentId: string,
+  presenceId: string,
+  nowMs = Date.now(),
+): { state: OpenPresenceState; deferredRunIds: string[] } {
+  const next = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
+  const timestamp = new Date(nowMs).toISOString();
+  const deferredRunIds: string[] = [];
+  for (const run of next.assignmentRuns ?? []) {
+    if (run.assignmentId !== assignmentId || run.presenceId !== presenceId || run.sessionId !== `live:${presenceId}` || run.status !== "queued") continue;
+    run.status = "deferred";
+    run.currentStage = "candidate_review";
+    run.completedAt = timestamp;
+    run.heartbeatAt = timestamp;
+    run.lastProgressAt = timestamp;
+    run.leaseOwner = undefined;
+    run.leaseExpiresAt = undefined;
+    run.lastError = undefined;
+    run.updatedAt = timestamp;
+    deferredRunIds.push(run.id);
+  }
+  if (deferredRunIds.length) {
+    const assignment = next.assignments.find((item) => item.id === assignmentId && item.presenceId === presenceId);
+    if (assignment?.status === "working") {
+      assignment.status = "active";
+      assignment.work = {
+        ...(assignment.work ?? { phase: "candidate_review", attempts: 0, maxAttempts: 4, storiesResearched: 0 }),
+        phase: "candidate_review",
+        blockedReason: undefined,
+      };
+      assignment.updatedAt = timestamp;
+    }
+  }
+  return { state: next, deferredRunIds };
+}
+
 export function stageTimeoutForRun(run: AssignmentRun): number {
   const stage = run.currentStage ?? "candidate_review";
   return defaultOperationalStagePolicies[stage]?.expectedProgressWithinMs ?? 120_000;
@@ -46,7 +89,7 @@ export function isAssignmentRunStale(run: AssignmentRun, nowMs = Date.now()): bo
     return false;
   }
   const leaseTime = Date.parse(run.leaseExpiresAt ?? "");
-  const heartbeatTime = Date.parse(run.heartbeatAt ?? run.lastProgressAt ?? run.updatedAt ?? run.createdAt);
+  const heartbeatTime = Date.parse(run.lastProgressAt ?? run.heartbeatAt ?? run.updatedAt ?? run.createdAt);
   if (!Number.isFinite(leaseTime) || !Number.isFinite(heartbeatTime)) return false;
 
   const stageTimeout = stageTimeoutForRun(run);
@@ -86,6 +129,26 @@ export function recoverStaleAssignmentRuns(
 
     const timestamp = new Date(nowMs).toISOString();
     const assignment = next.assignments.find((item) => item.id === run.assignmentId);
+    // Queue residence is not an execution attempt. Let the durable dispatcher
+    // claim the same row instead of consuming recovery attempts on idle work.
+    if (run.status === "queued") {
+      run.leaseOwner = undefined;
+      run.leaseExpiresAt = undefined;
+      run.updatedAt = timestamp;
+      recoveredRunIds.push(run.id);
+      continue;
+    }
+    const pendingDelivery = next.executions.some((execution) => execution.assignmentId === run.assignmentId
+      && !["failed", "blocked", "cancelled", "expired", "verification-closed"].includes(execution.status));
+    if (pendingDelivery) {
+      run.status = "delivery_pending";
+      run.leaseOwner = undefined;
+      run.leaseExpiresAt = undefined;
+      run.updatedAt = timestamp;
+      if (assignment) assignment.status = "awaiting_execution";
+      recoveredRunIds.push(run.id);
+      continue;
+    }
     const pursuit = (source.assignmentPursuitWindows ?? []).find((window) =>
       window.id === run.pursuitWindowId
       && window.assignmentId === run.assignmentId
@@ -98,7 +161,7 @@ export function recoverStaleAssignmentRuns(
     // active pursuit window and resource envelope. Treat zero as unbounded
     // only for that explicit window; ordinary assignments still retain their
     // finite recovery budget.
-    const canRetry = activePursuit || (run.maxAttempts === 0 || run.attempts + 1 < run.maxAttempts);
+    const canRetry = activePursuit || (run.maxAttempts > 0 && run.attempts < run.maxAttempts);
 
     if (canRetry && assignment && !["completed", "cancelled"].includes(assignment.status)) {
       // 1. Mark current run as superseded_stale (preserving attempt lineage)
@@ -146,7 +209,7 @@ export function recoverStaleAssignmentRuns(
         id: `run-recovery:${run.id}:${nowMs}`,
         type: "system",
         title: "Autonomous work recovery started",
-        detail: `The previous work cycle for “${assignment.title ?? assignment.instruction}” stalled. OpenPresence safely started a fresh work cycle (Attempt ${run.attempts + 2} of ${run.maxAttempts}).`,
+        detail: `The previous work cycle for “${assignment.title ?? assignment.instruction}” stalled. OpenPresence safely started a fresh work cycle (Attempt ${run.attempts + 1}${run.maxAttempts ? ` of ${run.maxAttempts}` : " within the active pursuit"}).`,
         time: timestamp,
         tone: "positive",
         presenceId: run.presenceId,
@@ -178,4 +241,62 @@ export function recoverStaleAssignmentRuns(
   }
 
   return { state: next, recoveredRunIds, spawnedRunIds };
+}
+
+/** Retry only proven pre-delivery failures. An uncertain write stays isolated. */
+export function deferRecoverableAssignmentFailure(state: OpenPresenceState, runId: string, nowMs = Date.now()): boolean {
+  const run = state.assignmentRuns?.find((item) => item.id === runId);
+  const assignment = run && state.assignments.find((item) => item.id === run.assignmentId && item.presenceId === run.presenceId);
+  if (!run || !assignment || !["failed", "blocked"].includes(run.status)) return false;
+  if (["completed", "completed_with_adaptation", "cancelled", "paused", "expired_incomplete"].includes(assignment.status)) return false;
+  const error = run.lastError ?? assignment.lastOutcome?.message ?? "";
+  if (!/empty response|ended without a delivery, deferral|worker stopped reporting progress|unreachable|rate.limit|timed? ?out|temporar(?:y|ily)|ECONNRESET|fetch failed/i.test(error)) return false;
+  if (state.executions.some((execution) => execution.assignmentId === assignment.id
+    && !["failed", "blocked", "cancelled", "expired", "verification-closed"].includes(execution.status))) return false;
+  // Even a failed execution may have crossed the external-write boundary.
+  if (state.executions.some((execution) => execution.assignmentId === assignment.id
+    && (execution.runId === runId || execution.createdAt >= (run.startedAt ?? run.createdAt)))) return false;
+  const failures = (assignment.systemFailures ?? 0) + 1;
+  assignment.systemFailures = failures;
+  const budget = Math.min(4, assignment.work?.maxAttempts || 4);
+  if (failures >= budget || (run.maxAttempts > 0 && run.attempts >= run.maxAttempts)) return false;
+  const at = new Date(nowMs).toISOString();
+  run.status = "deferred";
+  run.currentStage = "candidate_review";
+  run.completedAt = at;
+  run.leaseOwner = undefined;
+  run.leaseExpiresAt = undefined;
+  run.updatedAt = at;
+  assignment.status = "active";
+  assignment.nextDueAt = new Date(nowMs + Math.min(15 * 60_000, 60_000 * 2 ** (failures - 1))).toISOString();
+  assignment.work = { ...(assignment.work ?? { attempts: run.attempts, maxAttempts: budget, storiesResearched: 0 }), phase: "candidate_review", blockedReason: undefined };
+  assignment.lastOutcome = { class: "evaluation_failed", message: `Work will retry automatically after a temporary failure: ${error}`, at };
+  assignment.updatedAt = at;
+  return true;
+}
+
+/** One-time repair of historical pre-write failures left outside the scheduler. */
+export function resumeRecoverableAssignmentFailures(state: OpenPresenceState, nowMs = Date.now()): string[] {
+  const resumed: string[] = [];
+  for (const assignment of state.assignments) {
+    if (assignment.environment !== "live" || !["blocked", "needs_operator", "active"].includes(assignment.status)) continue;
+    const run = (state.assignmentRuns ?? []).filter((item) => item.assignmentId === assignment.id)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+    if (!run || !["failed", "blocked", "deferred"].includes(run.status) || !/^(?:Openai returned an empty response\.|The live Assignment ended without a delivery, deferral, or explicit completion result\.|The Assignment worker stopped reporting progress and exhausted its recovery attempts\.)$/.test(run.lastError ?? "")) continue;
+    // These old relative-day requests are already outside any possible local
+    // "today". Preserve their failed history without replaying stale posts.
+    if (!assignment.schedule && /\btoday\b|first post of the day/i.test(assignment.instruction)
+      && nowMs - Date.parse(assignment.createdAt) > 26 * 60 * 60_000) {
+      const at = new Date(nowMs).toISOString();
+      assignment.status = "expired_incomplete";
+      assignment.lastOutcome = { class: "incomplete", message: `The requested day elapsed before completion. The previous failure is retained in work history: ${run.lastError}`, at };
+      assignment.work = { ...(assignment.work ?? { attempts: run.attempts, maxAttempts: run.maxAttempts, storiesResearched: 0 }), phase: "blocked", blockedReason: assignment.lastOutcome.message };
+      assignment.nextDueAt = undefined;
+      assignment.updatedAt = at;
+      resumed.push(assignment.id);
+      continue;
+    }
+    if (deferRecoverableAssignmentFailure(state, run.id, nowMs)) resumed.push(assignment.id);
+  }
+  return resumed;
 }

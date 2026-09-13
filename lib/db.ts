@@ -1182,9 +1182,16 @@ function snapshotWorkspace(state: OpenPresenceState): AgentWorkspaceSnapshot {
 
 function hydrateAgentWorkspaces(state: OpenPresenceState): OpenPresenceState {
   const rows = sqlite.prepare("SELECT agent_id, payload FROM agent_workspaces").all() as Array<{ agent_id: string; payload: string }>;
-  if (!rows.length) return state;
   const revisionRows = sqlite.prepare("SELECT agent_id, revision FROM agent_workspace_revisions").all() as Array<{ agent_id: string; revision: number }>;
   const revisions = new Map(revisionRows.map((row) => [row.agent_id, row.revision]));
+  // The active workspace is intentionally omitted from agent_workspaces on
+  // ordinary writes, but its revision still fences concurrent tabs. Preserve
+  // that counter even when there are no inactive workspace payloads to hydrate.
+  if (!rows.length) {
+    return state.activeAgentId
+      ? { ...state, workspaceRevision: revisions.get(state.activeAgentId) ?? state.workspaceRevision ?? 0 }
+      : state;
+  }
   const stored = new Map<string, AgentWorkspaceSnapshot>();
   for (const row of rows) {
     // The compatibility app_state already contains the active workspace. Do
@@ -1593,7 +1600,8 @@ export function readAgentPresenceDirectory(): Array<{ agentId: string; presence:
 /** Materialize a mutable context from the cached state with one clone. */
 export function readStateForContext(context: StateContext): OpenPresenceState {
   const snapshot = readStateSnapshot();
-  const requestedAgentId = context.agentId ?? snapshot.activeAgentId ?? undefined;
+  const ownedAgentId = assertPresenceContextOwnership(snapshot, context);
+  const requestedAgentId = context.agentId ?? ownedAgentId ?? snapshot.activeAgentId ?? undefined;
   const workspace = requestedAgentId && requestedAgentId !== snapshot.activeAgentId
     ? snapshot.agentWorkspaces.find((item) => item.agent?.id === requestedAgentId)
     : undefined;
@@ -1630,6 +1638,12 @@ export function readStateSnapshotForContext(context: StateContext): OpenPresence
   // Read the requested Agent workspace directly instead of hydrating the
   // compatibility row's historical Agent directory. This is the hot path for
   // Activity, health, and browser configuration requests.
+  // Validate before the cache fast path as well. A cached active snapshot can
+  // otherwise return the canonical Presence to a stale Agent context while a
+  // cold read would correctly reject the same request.
+  const snapshot = readStateSnapshot();
+  const ownedAgentId = assertPresenceContextOwnership(snapshot, context);
+  const effectiveAgentId = context.agentId ?? ownedAgentId;
   const row = sqlite.prepare("SELECT payload, updated_at FROM app_state WHERE id = 1").get() as { payload?: string; updated_at?: string } | undefined;
   if (!row?.payload) return JSON.parse(JSON.stringify(readStateSnapshot())) as OpenPresenceState;
   const cached = stateCache;
@@ -1641,7 +1655,7 @@ export function readStateSnapshotForContext(context: StateContext): OpenPresence
   // caller isolation. A different Agent or a changed SQLite revision falls
   // through to the direct durable read below.
   if (cached && cached.updatedAt === row.updated_at
-    && (!context.agentId || context.agentId === cachedAgentId)
+    && (!effectiveAgentId || effectiveAgentId === cachedAgentId)
     && (!context.presenceId || cached.state.presences.some((presence) => presence.id === context.presenceId))) {
     const scoped = structuredClone(cached.state) as OpenPresenceState;
     if (context.presenceId) {
@@ -1653,7 +1667,7 @@ export function readStateSnapshotForContext(context: StateContext): OpenPresence
   }
   try {
     const compact = JSON.parse(row.payload) as OpenPresenceState;
-    const durableRequestedAgentId = context.agentId ?? compact.activeAgentId ?? undefined;
+    const durableRequestedAgentId = effectiveAgentId ?? compact.activeAgentId ?? undefined;
     // app_state is the authoritative active workspace. The archived Agent
     // snapshot may predate a just-saved Chat turn; overlaying it here loses
     // that turn whenever the worker reads outside the in-process cache.
@@ -1687,6 +1701,8 @@ export function readStateSnapshotForContext(context: StateContext): OpenPresence
  */
 export function readStateViewForContext(context: StateContext, options: StateViewOptions = {}): OpenPresenceState {
   const snapshot = readStateSnapshot();
+  const ownedAgentId = assertPresenceContextOwnership(snapshot, context);
+  const effectiveAgentId = context.agentId ?? ownedAgentId;
   const hotToken = readStateReadToken();
   const hydratedHotState = hotStateCache?.snapshot === snapshot && hotStateCache.token === hotToken
     ? hotStateCache.state
@@ -1694,7 +1710,7 @@ export function readStateViewForContext(context: StateContext, options: StateVie
   if (hotStateCache?.snapshot !== snapshot || hotStateCache.token !== hotToken) {
     hotStateCache = { token: hotToken, snapshot, state: hydratedHotState };
   }
-  const requestedAgentId = context.agentId ?? snapshot.activeAgentId ?? undefined;
+  const requestedAgentId = effectiveAgentId ?? snapshot.activeAgentId ?? undefined;
   const targetPresenceId = context.presenceId ?? snapshot.activePresenceId ?? undefined;
   // Preflight is a read projection of connector and authority state. Refresh
   // only the Presence visible to this browser request; doing this for every
@@ -1903,9 +1919,102 @@ export class WorkspaceConflictError extends Error {
   }
 }
 
+/**
+ * The active compatibility snapshot is the canonical owner of its selected
+ * Presence. A stale Agent workspace may retain the same Presence ID after a
+ * switch; refusing that pair prevents a browser tab from reading or mutating
+ * another Agent's mind under a misleading identity.
+ */
+export function presenceContextConflict(
+  source: Pick<OpenPresenceState, "activeAgentId" | "activePresenceId">,
+  context: Pick<StateContext, "agentId" | "presenceId">,
+) {
+  return Boolean(
+    context.agentId
+    && context.presenceId
+    && source.activeAgentId
+    && source.activePresenceId
+    && context.agentId !== source.activeAgentId
+    && context.presenceId === source.activePresenceId,
+  );
+}
+
+export class AgentPresenceScopeConflictError extends Error {
+  readonly status = 409;
+  constructor(readonly agentId: string, readonly presenceId: string, readonly ownerAgentId?: string, readonly ownerAgentName?: string) {
+    super(ownerAgentId
+      ? `Presence ${presenceId} has conflicting Agent scopes; it is currently selected under Agent ${ownerAgentId}${ownerAgentName ? ` (${ownerAgentName})` : ""}. Refusing the stale Agent ${agentId} context.`
+      : `Presence ${presenceId} has conflicting Agent scopes and no single owner can be proven. Refusing the Agent ${agentId} context until ownership is resolved.`);
+    this.name = "AgentPresenceScopeConflictError";
+  }
+}
+
+function presenceScopeOwners(
+  source: Pick<OpenPresenceState, "activeAgentId" | "activePresenceId" | "agentWorkspaces">,
+  presenceId: string,
+) {
+  const owners = new Set<string>();
+  if (source.activePresenceId === presenceId && source.activeAgentId) owners.add(source.activeAgentId);
+  for (const workspace of source.agentWorkspaces ?? []) {
+    if (workspace.agent?.id && (workspace.presence?.id === presenceId || workspace.presences?.some((presence) => presence.id === presenceId))) owners.add(workspace.agent.id);
+  }
+  const normalized = sqlite.prepare("SELECT agent_id FROM presences WHERE id = ? AND agent_id IS NOT NULL").all(presenceId) as Array<{ agent_id?: string | null }>;
+  for (const row of normalized) if (row.agent_id) owners.add(row.agent_id);
+  const bridges = sqlite.prepare("SELECT agent_id FROM bridges WHERE parent_id = ? AND agent_id IS NOT NULL").all(presenceId) as Array<{ agent_id?: string | null }>;
+  for (const row of bridges) if (row.agent_id) owners.add(row.agent_id);
+  return owners;
+}
+
+function assertPresenceContextOwnership(
+  source: Pick<OpenPresenceState, "activeAgentId" | "activePresenceId" | "agentWorkspaces"> & { agents?: Array<{ id: string; name: string }> },
+  context: StateContext,
+) {
+  if (!context.presenceId) return undefined;
+  const requestedAgentId = context.agentId ?? source.activeAgentId ?? "unknown";
+  const owners = presenceScopeOwners(source, context.presenceId);
+  if (owners.size > 1) throw new AgentPresenceScopeConflictError(requestedAgentId, context.presenceId);
+  // Older callers may address a Presence that has no durable ownership index
+  // yet. Preserve that compatibility path; an explicit duplicate owner is
+  // the unsafe condition this guard must prevent.
+  if (!owners.size) return undefined;
+  const ownerAgentId = [...owners][0];
+  if (ownerAgentId && context.agentId && context.agentId !== ownerAgentId) {
+    const ownerAgentName = source.agents?.find((agent) => agent.id === ownerAgentId)?.name;
+    throw new AgentPresenceScopeConflictError(context.agentId, context.presenceId, ownerAgentId, ownerAgentName);
+  }
+  return ownerAgentId;
+}
+
+/**
+ * A live channel account is a single external identity. Sandbox Presences may
+ * intentionally use illustrative handles, but a live account cannot be
+ * persisted under two Agent or Presence scopes.
+ */
+function assertUniqueLivePresenceOwnership(
+  source: Pick<OpenPresenceState, "agent" | "presences" | "agentWorkspaces">,
+) {
+  const claims = new Map<string, { agentId: string; presenceId: string; handle: string }>();
+  const inspect = (agentId: string | undefined, presences: Presence[] | undefined) => {
+    if (!agentId || !presences) return;
+    for (const presence of presences) {
+      if (presence.environment === "sandbox" || presence.connectionMode === "sandbox") continue;
+      const handle = presence.handle.trim().replace(/^@+/, "").toLowerCase();
+      if (!handle) continue;
+      const key = `${presence.channel}:${handle}`;
+      const prior = claims.get(key);
+      if (prior && (prior.agentId !== agentId || prior.presenceId !== presence.id)) {
+        throw new AgentPresenceScopeConflictError(agentId, presence.id, prior.agentId);
+      }
+      claims.set(key, { agentId, presenceId: presence.id, handle });
+    }
+  };
+  inspect(source.agent?.id, source.presences);
+  for (const workspace of source.agentWorkspaces ?? []) inspect(workspace.agent?.id, workspace.presences ?? (workspace.presence ? [workspace.presence] : []));
+}
+
 /** Workspace contention is a local retry condition, not a Native X outage. */
 export function shouldRecordNativeOperationalFailure(error: unknown) {
-  return !(error instanceof WorkspaceConflictError);
+  return !(error instanceof WorkspaceConflictError || error instanceof AgentPresenceScopeConflictError);
 }
 
 function entityRows(state: OpenPresenceState): Record<string, { id: string; agentId?: string; parentId?: string; payload: unknown }[]> {
@@ -1947,8 +2056,8 @@ function entityRows(state: OpenPresenceState): Record<string, { id: string; agen
     growth_hypotheses: (state.growthHypotheses ?? []).map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.originatingPresenceId, payload: item })),
     growth_evidence_records: (state.growthEvidenceRecords ?? []).map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.presenceId, payload: item })),
     legacy_channel_strategy_guidance: (state.legacyChannelStrategyGuidance ?? []).map((item) => ({ id: item.id, parentId: item.channelId, payload: item })),
-    native_channel_connections: state.nativeConnections.map((item) => ({ id: item.id, parentId: item.presenceId, payload: item })),
-    bridges: state.bridges.map((item) => ({ id: item.id, parentId: item.presenceId, payload: item })),
+    native_channel_connections: state.nativeConnections.map((item) => ({ id: item.id, agentId, parentId: item.presenceId, payload: item })),
+    bridges: state.bridges.map((item) => ({ id: item.id, agentId, parentId: item.presenceId, payload: item })),
     mirror_objects: state.mirrorObjects.map((item) => ({ id: item.id, agentId, parentId: item.presenceId, payload: item })),
     // Mirror history is intentionally omitted from compact compatibility
     // snapshots after it is indexed in `mirror_events`; rebuild only the
@@ -2198,6 +2307,7 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
   // to normalizeState through the freshness check.
   const normalized = isStateNormalized(state) ? state : normalizeState(state);
   markStateNormalized(normalized);
+  assertUniqueLivePresenceOwnership(normalized);
   // Never overwrite a durable workspace with a partial or unlinked Assignment
   // collection. Known legacy records are repaired by normalizeState; anything
   // still invalid fails closed before SQLite is touched.

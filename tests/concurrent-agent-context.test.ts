@@ -70,7 +70,7 @@ describe("independent Agent browser contexts", () => {
     const workspaceRow = database.prepare("SELECT payload FROM agent_workspaces WHERE agent_id = ?").get(agentId) as { payload: string };
     const appState = JSON.parse(appRow.payload) as ReturnType<typeof initialState>;
     const workspaceState = JSON.parse(workspaceRow.payload) as ReturnType<typeof initialState>;
-    const preservedEvent = { id: "event-preserved-during-recovery", type: "system", title: "Preserved event", detail: "Recovered", time: new Date().toISOString(), tone: "info" } as ReturnType<typeof initialState>["events"][number];
+    const preservedEvent = { id: "event-preserved-during-recovery", type: "system", title: "Preserved event", detail: "Recovered", time: new Date().toISOString(), tone: "neutral" } as ReturnType<typeof initialState>["events"][number];
     appState.events = [];
     workspaceState.events = [preservedEvent];
     database.transaction(() => {

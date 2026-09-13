@@ -51,6 +51,24 @@ Proof must show the submitted operator message and the correct user-facing recei
 
 - Chat always enters a durable `operator_chat` turn, including links and paused Presences. Model-selected tools read supplied X posts, save private watches, and create one-time social responsibilities through the existing envelope. Questions and private drafts are not publication commands.
 - Tool receipts use `operator-chat-tool` disclosures. Model/runtime failures appear as OpenPresence messages with `Retry response`; retries reuse the saved operator turn and completed receipts.
-- On an unconfirmed send the text and attachments return to the composer, with the same request key on retry. Refresh must keep the latest conversation, even when more than four historical conversations exist.
+- Unconfirmed sends remain visible in the transcript with `Not confirmed · kept on this browser` and `Retry send`. A browser-persisted outbox retains text, attachments, scope, and request keys across reload. A retry reconciles or saves exactly one turn; later local sends wait behind it. Recovery never replaces the next draft. Only confirmed runtime work shows thinking, and the composer stays usable while sending or working. Refresh must keep the latest conversation, even when more than four historical conversations exist.
+- Replies and tool results stay with their originating turn, including when a follow-up was saved before the earlier answer arrived. Queued follow-ups receive the completed preceding turn in model context and never receive later operator instructions. Provider waiting/recovery holds later turns until the earlier turn completes or is stopped.
+- Every navigation entry updates the URL as well as the visible surface. Selecting the current Agent from Schedule must reach `/chat` and use the Chat projection on refresh.
+- Regression proof: `tests/e2e/chat-recovery.spec.ts` covers interrupted sends, draft preservation, reload/retry, lost acknowledgements, FIFO recovery, and Schedule → Chat navigation.
 - Channel health notices explicitly refer to public work. A real model billing error remains separate from an X rate limit; it must not be represented as the Agent choosing silence.
 - Proof: ordinary live question → private follow-up draft → reload, with no new executions; isolated paused Presence → Send → response → reload while still paused. Worker tests additionally cover failed X reads, tool receipts, replay, and cold database reads over stale Agent snapshots.
+
+## Social tools in Chat (2026-09-12)
+
+- Chat can invoke concrete social actions plus scoped connector diagnostics, observation, search, knowledge, media discovery/inspection and execution verification. Existing execution envelopes and enabled provider/tool bindings apply.
+- Tool calls and results must appear after the operator request in the provider conversation. A final live check should produce one fresh check and one grounded answer, not repeated probes until the step limit.
+- Persist action intent and receipt before delivery. Replaying a completed action in the same turn must reuse its execution. UI delivery cards use current persisted outcome evidence.
+- Worker restarts retain the exact turn and receipts. Stalled Chat work receives bounded recovery without inheriting unrelated public-work incidents. Failed/stranded/stopped turns offer Retry response.
+- Proof: `tests/operator-chat-tools.test.ts`, `tests/operator-chat-harness.test.ts`, and `qa-learnings/chat-tools-2026-09-12.md`.
+
+## Readable tool receipts and inspection reports (2026-09-13)
+
+- Known system tool receipts, including historical messages without reply IDs, render as compact `operator-chat-tool` disclosures rather than OpenPresence JSON bubbles.
+- Opening a tool row shows a plain-language result. `Technical details` is a second, initially collapsed disclosure. Read-only connection checks explicitly leave publishing and credit balance unverified.
+- Old account-inspection messages render a readable summary with `Saved evidence` collapsed. New reports are persisted as plain-language findings.
+- Proof: inspect both default and expanded states, then reload; operator-authored JSON must remain unchanged. Regression tests: `tests/chat-activity-presentation.test.ts`.

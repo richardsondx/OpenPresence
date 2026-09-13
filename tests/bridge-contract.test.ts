@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bridgeAdapterPrompt, bridgeAdapterStatus, bridgeAdapterStatusLabel, bridgeExecutionStatus, chromeBrowserBridgeCapabilities } from "../lib/bridge-contract";
+import { bridgeAdapterPrompt, bridgeAdapterStatus, bridgeAdapterStatusLabel, bridgeAssetPath, bridgeExecutionStatus, chromeBrowserBridgeCapabilities, chromeBrowserBridgeSupportsImageMimeType } from "../lib/bridge-contract";
 
 describe("Bridge adapter contract", () => {
   const connectedAt = new Date("2026-08-14T12:00:00.000Z");
@@ -29,10 +29,19 @@ describe("Bridge adapter contract", () => {
 
   it("keeps the shipped Chrome adapter capability-scoped", () => {
     expect(chromeBrowserBridgeCapabilities()).toMatchObject({
-      affordances: ["post", "reply", "quote", "repost", "like", "follow"],
-      formats: ["x.post", "x.reply", "x.quote", "x.repost", "x.like", "x.follow"],
+      affordances: ["post", "reply", "quote", "repost", "like", "follow", "delete"],
+      formats: ["x.post", "x.reply", "x.quote", "x.repost", "x.like", "x.follow", "x.delete"],
       metrics: ["followers", "public_metrics"],
+      assetKinds: ["image"],
     });
+  });
+
+  it("declares the narrow still-image Bridge contract", () => {
+    expect(chromeBrowserBridgeSupportsImageMimeType("image/png; charset=binary")).toBe(true);
+    expect(chromeBrowserBridgeSupportsImageMimeType("image/jpeg")).toBe(true);
+    expect(chromeBrowserBridgeSupportsImageMimeType("image/gif")).toBe(true);
+    expect(chromeBrowserBridgeSupportsImageMimeType("image/webp")).toBe(false);
+    expect(bridgeAssetPath("asset/with spaces")).toBe("/api/bridge/v1/assets/asset%2Fwith%20spaces");
   });
 
   it("generates a channel-aware prompt without a credential", () => {
@@ -45,6 +54,7 @@ describe("Bridge adapter contract", () => {
     });
     expect(prompt).toContain("Skool Agent");
     expect(prompt).toContain("UNSUPPORTED_ASSET");
+    expect(prompt).toContain("media delivery not enabled yet");
     expect(prompt).toContain("OPENPRESENCE_BRIDGE_KEY=<provide securely");
     expect(prompt).not.toContain("opb_");
     expect(prompt).toContain("claim approved work");

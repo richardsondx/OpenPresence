@@ -38,7 +38,7 @@ import {
   scheduleWake,
 } from "../lib/temporal";
 import { settleAutonomyInitializationFailure } from "../lib/autonomy-worker";
-import { initialState } from "../lib/runtime";
+import { createAgent, initialState } from "../lib/runtime";
 import type {
   Execution,
   MirrorObject,
@@ -256,6 +256,12 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     expect(classification.requiresOperator).toBe(true);
   });
 
+  it("classifies the X monthly spend cap as a billing boundary without burning transient retries", () => {
+    expect(classifyFailureRootCause("X rejected this action: Your monthly spend cap has been reached.", "native_x")).toMatchObject({
+      rootCauseKey: "native_x.credits_exhausted", retryable: false, requiresOperator: true, requiresAuth: false,
+    });
+  });
+
   it("treats SQLite corruption as a database boundary instead of a recoverable runtime outage", () => {
     const uniquePresence = `presence_database_corruption_${Date.now()}`;
     const classification = classifyFailureRootCause("database disk image is malformed", "runtime");
@@ -372,35 +378,21 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
   // Invariant 9: Strict Native-First Routing & 429 Quota Invariant
   it("Invariant 9: Execution router chooses Native-first and halts on 429 without browser evasion", () => {
     const mockPresence: Presence = {
+      ...createAgent({ name: "Genny", description: "AI founder presence", handle: "@example_agent", mode: "agent", accent: "#1DA1F2" }).presence!,
       id: presenceId,
-      channel: "x",
-      name: "Genny",
-      handle: "@example_agent",
-      mode: "agent",
-      status: "live",
-      accent: "#1DA1F2",
-      capabilities: [],
       execution: { reply: "auto" },
       executionEnvelope: { presenceId, affordances: { reply: { mode: "auto" } }, pacingProfile: "recommended", accountProtection: "guidance" },
-      context: { audience: "founders", goals: ["engagement"] },
-      brief: { mission: "Lead AI founder presence", coreTopics: ["AI", "Autonomy"], voiceNotes: ["Curious"], boundaries: ["No spam"], keyPeople: [] },
-      publicSelf: { displayName: "Genny", handle: "@example_agent", bio: "Autonomous AI Presence", avatarUrl: "", channel: "x", presenceId },
-      mediaPerceptionPolicy: "use-judgment",
-      languagePolicy: { avoidTerms: [], avoidThemes: [], preferredPhrasing: {}, prohibitedTerms: [] },
-      pacing: { minMinutesBetweenPosts: 30, maxPostsPerDay: 5, quietHoursEnabled: false },
-      attentionIntervalMinutes: 15,
-      quietHours: { enabled: false, start: "22:00", end: "08:00", timeZone: "America/New_York" },
-      publishingInitiative: { enabled: true, cadence: "daily", days: [], slotsPerDay: 1, preferredTimeWindow: "morning", topics: [], themes: [], formatDiversity: true },
-      accountHealth: "healthy",
     };
 
     const intent: SocialIntent = {
       id: "intent_1",
       presenceId,
       affordance: "reply",
-      status: "ready",
-      summary: "Reply to @maya",
-      createdAt: new Date().toISOString(),
+      agentId: "agent_routing",
+      state: "active",
+      priority: 1,
+      validity: {},
+      formedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
@@ -466,10 +458,7 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
         payload: { text: "Building self-maintaining operational autonomy in AI agents." },
         assetIds: [],
         links: [],
-        channel: "x",
-        presenceId,
         createdAt: new Date().toISOString(),
-        publishedAt: new Date().toISOString(),
       },
       createdAt: run.createdAt,
       updatedAt: run.createdAt,
@@ -480,11 +469,14 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
       {
         id: "mirror_obj_1",
         presenceId,
-        channel: "x",
+        channelId: "x",
+        bridgeId: "bridge_reconciliation",
+        objectType: "post",
+        visibility: "public",
+        shareability: "presence-only",
         content: { text: "Building self-maintaining operational autonomy in AI agents." },
-        externalRef: { id: "ext_tweet_999", type: "post", channel: "x" },
+        externalRef: { id: "ext_tweet_999", type: "post" },
         observedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
       },
     ];
 

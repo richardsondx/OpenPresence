@@ -36,6 +36,8 @@
     ".next-3110/types/**/*.ts",
     ".next-3111/types/**/*.ts",
     ".next-3113/types/**/*.ts",
+    ".next-3115/types/**/*.ts",
+    ".next-3116/types/**/*.ts",
     ".next-3120/types/**/*.ts",
     ".next-3127/types/**/*.ts",
     ".next-3128/types/**/*.ts",
@@ -50,12 +52,17 @@
     ".next-3316/types/**/*.ts",
     ".next-3317/types/**/*.ts",
     ".next-3531/types/**/*.ts",
+    ".next-3532/types/**/*.ts",
     ".next-3541/types/**/*.ts",
     ".next-3599/types/**/*.ts",
+    ".next-recovery-20260913-final/types/**/*.ts",
+    ".next-recovery-20260913-release/types/**/*.ts",
+    ".next-recovery-20260913-v2/types/**/*.ts",
+    ".next-recovery-20260913/types/**/*.ts",
     ".next/types/**/*.ts",
     "/var/folders/yv/1mjm9zl16kj8gykks67kp7j40000gn/T/openpresence-verify-00e51d1719/next-dist/types/**/*.ts",
     "next-env.d.ts",
-    ".next-3532/types/**/*.ts"
+    ".next-readable-chat-20260913/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compactActivityAssignment, mergeActivityProjection } from "../lib/activity-projection";
-import type { Assignment } from "../lib/types";
+import type { Assignment, OpenPresenceState } from "../lib/types";
 import { initialState } from "../lib/runtime";
 
 describe("bounded Activity Assignment projection", () => {
@@ -19,9 +19,9 @@ describe("bounded Activity Assignment projection", () => {
     systemFailures: 0,
     preflight: {
       status: "ready",
-      delegationPolicy: "agent_decides",
+      delegationPolicy: "ask_before_change",
       semanticSummary: "A complete readiness contract.",
-      contract: { deliverable: "one conversation", successEvidence: "a verified outcome", agentDecides: ["whether to act"], assumptions: [] },
+      contract: { objective: "Find one useful conversation.", deliverable: "one conversation", successEvidence: "a verified outcome", agentDecides: ["whether to act"], hardConstraints: [], assumptions: [] },
       checks: [{ label: "Channel", status: "pass", detail: "Available." }],
       issues: [],
       reviewedAt: new Date().toISOString(),

@@ -194,6 +194,34 @@ export function dueLiveAssignmentsWithoutWorkers(state: OpenPresenceState, now =
 }
 
 /**
+ * A queued AssignmentRun is already a durable scheduling decision. It must be
+ * dispatched even when its calendar window has since closed; the route will
+ * settle a missed window explicitly instead of leaving the run queued forever.
+ * This covers a process/fetch loss between queue persistence and worker claim.
+ */
+export function queuedLiveAssignmentRunsWithoutWorkers(state: OpenPresenceState) {
+  const runs = state.assignmentRuns ?? [];
+  const selectedPresenceIds = new Set<string>();
+  return runs.filter((run) => {
+    if (run.status !== "queued") return false;
+    const presence = state.presences.find((item) => item.id === run.presenceId);
+    if (!presence || presence.status !== "live" || presence.environment === "sandbox") return false;
+    const assignment = state.assignments.find((item) => item.id === run.assignmentId && item.presenceId === run.presenceId);
+    if (!assignment || assignment.environment === "sandbox") return false;
+    // A queued run can outlive the Assignment decision that created it. Never
+    // resurrect operator-paused, completed, or cancelled responsibility just
+    // because its stale queue row survived a process restart.
+    if (["paused", "completed", "completed_with_adaptation", "cancelled", "failed", "expired_incomplete"].includes(assignment.status)) return false;
+    // A malformed duplicate queue row must not start a second Assignment lane
+    // while another run for this Presence is already doing logical work.
+    if (selectedPresenceIds.has(run.presenceId)) return false;
+    if (runs.some((other) => other.id !== run.id && other.presenceId === run.presenceId && assignmentRunIsActive(other) && other.status !== "queued")) return false;
+    selectedPresenceIds.add(run.presenceId);
+    return true;
+  });
+}
+
+/**
  * Bridge the durable scheduler to the server-owned Assignment worker entry
  * point. The POST immediately persists AssignmentRun before returning, so a
  * process loss is recoverable and repeated sweeps are deduplicated by both
@@ -203,7 +231,13 @@ export function dispatchDueAssignmentWorkers(state: OpenPresenceState, now = new
   let dispatched = 0;
   const port = process.env.OPENPRESENCE_PORT || "3015";
   const origin = process.env.OPENPRESENCE_INTERNAL_ORIGIN || `http://127.0.0.1:${port}`;
-  for (const assignment of dueLiveAssignmentsWithoutWorkers(state, now)) {
+  const assignments = new Map<string, OpenPresenceState["assignments"][number]>();
+  for (const assignment of dueLiveAssignmentsWithoutWorkers(state, now)) assignments.set(assignment.id, assignment);
+  for (const run of queuedLiveAssignmentRunsWithoutWorkers(state)) {
+    const assignment = state.assignments.find((item) => item.id === run.assignmentId && item.presenceId === run.presenceId);
+    if (assignment) assignments.set(assignment.id, assignment);
+  }
+  for (const assignment of assignments.values()) {
     if (!assignment.presenceId || assignmentDispatchesInFlight.has(assignment.id)) continue;
     assignmentDispatchesInFlight.add(assignment.id);
     dispatched += 1;
@@ -692,6 +726,19 @@ export function incidentBlocksAutonomousAttention(
   return incident.rootCauseKey !== "runtime.duplicate_public_outcome";
 }
 
+export function recoverInterruptedOperatorChat(run: OperationalRun, now: Date) {
+  const nowIso = now.toISOString();
+  run.recoveryCount += 1;
+  run.state = run.recoveryCount <= 2 ? "queued" : "failed";
+  run.stage = run.state === "queued" ? "operator_chat.queued" : "operator_chat.failed";
+  run.lastErrorCode = "CHAT_WORKER_INTERRUPTED";
+  run.retryReason = "The Chat worker stopped making progress. Saved messages and tool results are retained.";
+  run.lastProgressAt = nowIso;
+  run.eligibleAt = new Date(now.getTime() + 5000).toISOString();
+  delete run.leaseOwner;
+  delete run.leaseExpiresAt;
+}
+
 export function runOperationalSweep(now = new Date()): SweepResult {
   const nowIso = now.toISOString();
 
@@ -929,6 +976,15 @@ export function runOperationalSweep(now = new Date()): SweepResult {
     const evaluation = evaluateOperationalRunProgress(run, now);
     if (evaluation.isStale) {
       staleRunsDetected.push(run);
+
+      // Chat owns durable per-turn tool receipts and resumes the same run.
+      // A lost Chat worker must not inherit a public-runtime incident's
+      // escalation or silently become an invisible needs_operator task.
+      if (run.kind === "operator_chat") {
+        recoverInterruptedOperatorChat(run, now);
+        upsertOperationalRun(run);
+        continue;
+      }
 
       // Trigger recovery for stale operational runs
       const dependency = run.kind === "observation" ? "native_x" : "runtime";

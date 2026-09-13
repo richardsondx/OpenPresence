@@ -24,7 +24,7 @@ async function waitForAssignment(assignmentId: string, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const assignment = readState().assignments.find((item) => item.id === assignmentId);
-    if (assignment && ["completed", "blocked", "cancelled"].includes(assignment.status)) return readState();
+    if (assignment && ["completed", "blocked", "cancelled", "expired_incomplete"].includes(assignment.status)) return readState();
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error(`Assignment ${assignmentId} did not reach a terminal state in time.`);
@@ -238,6 +238,41 @@ describe("Sandbox assignment runtime", () => {
     expect(readState().presence?.status).toBe("paused");
   });
 
+  it("expires a recovered old today request before consulting a public connector", async () => {
+    let state = createAgent({ name: "Expired Work", description: "Respect time", mode: "agent", handle: "@expired", accent: "#D68754" });
+    const presence = { ...state.presence!, status: "live" as const, environment: "live" as const, connectionMode: "native" as const };
+    state.presence = presence; state.presences = [presence];
+    state = applyOperation(state, { type: "createAssignment", presenceId: presence.id, environment: "live", instruction: "Publish six original posts today" });
+    const assignment = state.assignments[0];
+    assignment.createdAt = new Date(Date.now() - 48 * 60 * 60_000).toISOString();
+    writeState(state);
+    const fetchMock = vi.fn(async () => { throw new Error("Expired work must not contact a provider"); });
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "runLiveAssignment", assignmentId: assignment.id, presenceId: presence.id }) }));
+    expect(response.ok).toBe(true);
+    const result = await waitForAssignment(assignment.id);
+    expect(result.assignments.find((item) => item.id === assignment.id)?.status).toBe("expired_incomplete");
+    expect(result.executions.filter((item) => item.assignmentId === assignment.id)).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("completes a live private account check without X access or public execution", async () => {
+    let state = createAgent({ name: "Private Inspector", description: "Inspect saved state", mode: "agent", handle: "@inspector", accent: "#D68754" });
+    const presence = { ...state.presence!, status: "live" as const, environment: "live" as const, connectionMode: "native" as const };
+    state.presence = presence; state.presences = [presence];
+    state = applyOperation(state, { type: "createAssignment", presenceId: presence.id, environment: "live", instruction: "Run a private baseline check on current X account state and queue health. Do not publish, reply, quote, or change any public setting. Keep the result private and report only confirmed state." });
+    const assignmentId = state.assignments[0].id;
+    writeState(state);
+    const fetchMock = vi.fn(async () => { throw new Error("Private inspection must not call X or a model"); });
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "runLiveAssignment", assignmentId, presenceId: presence.id }) }));
+    expect(response.ok).toBe(true);
+    const result = await waitForAssignment(assignmentId);
+    expect(result.assignments.find((item) => item.id === assignmentId)).toMatchObject({ status: "completed", completionReport: expect.stringContaining("didn’t make a fresh X connection or billing check") });
+    expect(result.executions.filter((item) => item.assignmentId === assignmentId)).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("completes an evaluation Assignment with a decision report rather than NO_OP", async () => {
     process.env.OPENPRESENCE_AI_MOCK = "1";
     let state = createAgent({ name: "Report Agent", description: "A careful evaluator", mode: "agent", handle: "@report_agent", accent: "#D68754" });
@@ -282,6 +317,7 @@ describe("Sandbox assignment runtime", () => {
       return new Response(Buffer.from("real-chart-bytes"), { status: 200, headers: { "content-type": "image/png" } });
     }));
     let state = createAgent({ name: "KobeissiKlone", description: "Market commentary", mode: "agent", handle: "@kobeissi_klone", accent: "#D68754" });
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
     state = startPlaygroundSession(state, state.presence!.id, "fresh");
     const sessionId = state.playgroundSessions[0]!.id;
     state = applyOperation(state, { type: "configureAssetProvider", provider: "tavily", label: "Tavily", hasSecret: true });
@@ -314,6 +350,7 @@ describe("Sandbox assignment runtime", () => {
       return new Response(Buffer.from("unused"), { status: 200, headers: { "content-type": "image/png" } });
     }));
     let state = createAgent({ name: "Optional Visual Agent", description: "A careful market observer", mode: "agent", handle: "@optional_visual", accent: "#D68754" });
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
     state = startPlaygroundSession(state, state.presence!.id, "fresh");
     const sessionId = state.playgroundSessions[0]!.id;
     state = applyOperation(state, { type: "configureAssetProvider", provider: "tavily", label: "Tavily", hasSecret: true });
@@ -383,6 +420,7 @@ describe("Sandbox assignment runtime", () => {
       .mockResolvedValueOnce(decision("no_op"))
       .mockResolvedValueOnce(decision("post", "A concrete point of view is worth publishing when it changes the reader's next decision."));
     let state = createAgent({ name: "Loop Agent", description: "A thoughtful operator", mode: "agent", handle: "@loop_agent", accent: "#D68754" });
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
     state = startPlaygroundSession(state, state.presence!.id, "fresh");
     const sessionId = state.playgroundSessions[0]!.id;
     state = applyOperation(state, { type: "createAssignment", presenceId: state.presence!.id, sessionId, environment: "sandbox", instruction: "Produce exactly 1 original publication." });

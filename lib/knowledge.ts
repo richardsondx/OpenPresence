@@ -239,7 +239,7 @@ function evidenceFor(state: OpenPresenceState, presenceId: string, segment: Know
   return { agentId: document.agentId, documentId: document.id, documentName: document.name, versionId: version.id, versionNumber: version.versionNumber, segmentId: segment.id, headingPath: segment.headingPath, pageNumber: segment.pageNumber, textRange: segment.textRange, excerpt: segment.text, effectiveUse, sourceType: document.sourceType, reviewAfter: document.reviewAfter, collectionId: document.legacyCollectionId, collectionName: document.legacyCollectionName, itemId: document.id, itemTitle: document.name };
 }
 
-function boundMindFileEvidence(state: OpenPresenceState, presenceId: string): Partial<Record<FileKind, KnowledgeEvidence[]>> {
+export function boundMindFileEvidence(state: OpenPresenceState, presenceId: string): Partial<Record<FileKind, KnowledgeEvidence[]>> {
   const bindings = (state.mindFileKnowledgeBindings ?? []).filter((binding) => binding.agentId === state.agent?.id && binding.enabled);
   const grouped: Partial<Record<FileKind, KnowledgeEvidence[]>> = {};
   for (const binding of bindings) {

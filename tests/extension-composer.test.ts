@@ -1,6 +1,9 @@
-import { describe, expect, it, beforeEach } from "vitest";
+/* eslint-disable @typescript-eslint/no-explicit-any -- this file executes the extension's browser scripts in a deliberately dynamic DOM vm harness. */
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+
+type TestEventListener = (event: { type: string }) => void;
 
 describe("Chrome extension composer and execution helpers", () => {
   let mockWindow: any;
@@ -12,6 +15,7 @@ describe("Chrome extension composer and execution helpers", () => {
     mockDoc = {
       querySelectorAll(selector: string) {
         return elements.filter((el) => {
+          if (selector.includes('input[type="file"]') && el.tagName === "INPUT" && el.getAttribute("type") === "file") return true;
           if (selector.includes(el.getAttribute("data-testid"))) return true;
           return false;
         });
@@ -63,12 +67,20 @@ describe("Chrome extension composer and execution helpers", () => {
         }
       },
       DataTransfer: class DataTransfer {
-        data: any = {};
+        data: Record<string, string> = {};
+        files: unknown[] = [];
+        items = { add: (file: unknown) => { this.files.push(file); } };
         setData(key: string, val: string) { this.data[key] = val; }
+      },
+      File: class File {
+        name: string;
+        type: string;
+        constructor(_parts: unknown[], name: string, options: { type?: string } = {}) { this.name = name; this.type = options.type || ""; }
       },
       setTimeout: globalThis.setTimeout,
       clearTimeout: globalThis.clearTimeout,
     };
+    mockWindow.chrome = { runtime: { id: "test-extension", sendMessage: vi.fn() } };
 
     const executionCode = readFileSync(join(process.cwd(), "extension/execution.js"), "utf8");
     const composerCode = readFileSync(join(process.cwd(), "extension/composer.js"), "utf8");
@@ -77,7 +89,7 @@ describe("Chrome extension composer and execution helpers", () => {
   });
 
   function createElement(tag: string, attrs: Record<string, string> = {}) {
-    const listeners: Record<string, Function[]> = {};
+    const listeners: Record<string, TestEventListener[]> = {};
     const el: any = {
       tagName: tag.toUpperCase(),
       isConnected: true,
@@ -86,12 +98,12 @@ describe("Chrome extension composer and execution helpers", () => {
       attributes: { ...attrs },
       getAttribute(name: string) { return this.attributes[name] ?? null; },
       setAttribute(name: string, val: string) { this.attributes[name] = val; },
-      addEventListener(event: string, fn: Function) {
+      addEventListener(event: string, fn: TestEventListener) {
         listeners[event] = listeners[event] || [];
         listeners[event].push(fn);
       },
       dispatchEvent(event: any) {
-        (listeners[event.type] || []).forEach((fn) => fn(event));
+        (listeners[event.type] || []).forEach((fn: TestEventListener) => fn(event));
       },
       focus() {},
       click() {},
@@ -110,6 +122,66 @@ describe("Chrome extension composer and execution helpers", () => {
     })).toBe("Fallback text.");
 
     expect(mockWindow.OpenPresenceExecution.textForExecution(null)).toBe("");
+  });
+
+  it("retrieves only the exact authorized image asset IDs from the Bridge", async () => {
+    mockWindow.chrome.runtime.sendMessage.mockResolvedValue({
+      ok: true,
+      asset: { assetId: "asset-1", mimeType: "image/png", name: "asset-1.png", data: Buffer.from("png-bytes").toString("base64") },
+    });
+    const assets = await mockWindow.OpenPresenceExecution.assetsForExecution({ publication: { assetIds: ["asset-1", "asset-1"] } });
+    expect(mockWindow.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
+    expect(mockWindow.chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: "OPENPRESENCE_FETCH_ASSET", assetId: "asset-1" });
+    expect(assets).toHaveLength(1);
+    expect(assets[0].assetId).toBe("asset-1");
+    expect(assets[0].file).toMatchObject({ name: "asset-1.png", type: "image/png" });
+  });
+
+  it("fails closed when the Bridge returns an unsupported image format", async () => {
+    mockWindow.chrome.runtime.sendMessage.mockResolvedValue({
+      ok: true,
+      asset: { assetId: "asset-1", mimeType: "image/webp", name: "asset-1.webp", data: Buffer.from("webp-bytes").toString("base64") },
+    });
+    await expect(mockWindow.OpenPresenceExecution.assetsForExecution({ publication: { assetIds: ["asset-1"] } })).rejects.toThrow("cannot upload image/webp");
+  });
+
+  it("sets the X media input before any public submit", async () => {
+    const scope = createElement("form");
+    scope.matches = (selector: string) => selector.includes("form");
+    const input = createElement("input", { type: "file" });
+    const preview = createElement("div", { "data-testid": "mediaPreview-0" });
+    const remove = createElement("button", { "aria-label": "Remove image" });
+    const submit = createElement("button", { "data-testid": "tweetButton" });
+    submit.matches = (selector: string) => selector.includes("tweetButton");
+    scope.querySelector = (selector: string) => selector.includes('input[type="file"]') ? input : null;
+    scope.querySelectorAll = (selector: string) => selector.includes('input[type="file"]') ? [input] : selector.includes("mediaPreview") ? [preview] : selector.includes("Remove image") ? [remove] : selector.includes("button") ? [submit] : [];
+    const composer = createElement("div", { "data-testid": "tweetTextarea_0" });
+    composer.parentElement = scope;
+    const file = new mockWindow.File([new Uint8Array([1, 2, 3])], "asset.png", { type: "image/png" });
+    const result = await mockWindow.OpenPresenceComposer.attachFiles({ composer, files: [file] });
+    expect(result).toBe(true);
+    expect(input.files).toHaveLength(1);
+    expect(input.files[0]).toBe(file);
+  });
+
+  it("rejects nested preview nodes when X exposes fewer per-file controls than requested", async () => {
+    const scope = createElement("form");
+    scope.matches = (selector: string) => selector.includes("form");
+    const input = createElement("input", { type: "file" });
+    const previewWrapper = createElement("div", { "data-testid": "mediaPreview-0" });
+    const previewChild = createElement("img", { "data-testid": "mediaPreview-image" });
+    const remove = createElement("button", { "aria-label": "Remove image" });
+    const submit = createElement("button", { "data-testid": "tweetButton" });
+    submit.matches = (selector: string) => selector.includes("tweetButton");
+    scope.querySelector = (selector: string) => selector.includes('input[type="file"]') ? input : null;
+    scope.querySelectorAll = (selector: string) => selector.includes('input[type="file"]') ? [input] : selector.includes("mediaPreview") ? [previewWrapper, previewChild] : selector.includes("Remove image") ? [remove] : selector.includes("button") ? [submit] : [];
+    const composer = createElement("div", { "data-testid": "tweetTextarea_0" });
+    composer.parentElement = scope;
+    const files = [
+      new mockWindow.File([new Uint8Array([1])], "asset-1.png", { type: "image/png" }),
+      new mockWindow.File([new Uint8Array([2])], "asset-2.png", { type: "image/png" }),
+    ];
+    await expect(mockWindow.OpenPresenceComposer.attachFiles({ composer, files, timeoutMs: 20 })).resolves.toBe(false);
   });
 
   it("successfully fills the composer when text contains newlines or extra spaces", async () => {
@@ -188,13 +260,13 @@ describe("Chrome extension composer and execution helpers", () => {
 
   it("suppresses beforeunload listeners and onbeforeunload assignments", () => {
     const testWindow: any = {
-      listeners: {} as Record<string, Function[]>,
-      addEventListener(event: string, fn: Function) {
+      listeners: {} as Record<string, TestEventListener[]>,
+      addEventListener(event: string, fn: TestEventListener) {
         this.listeners[event] = this.listeners[event] || [];
         this.listeners[event].push(fn);
       },
       dispatchEvent(event: any) {
-        (this.listeners[event.type] || []).forEach((fn) => fn(event));
+        (this.listeners[event.type] || []).forEach((fn: TestEventListener) => fn(event));
       },
     };
 
@@ -240,8 +312,8 @@ describe("Chrome extension composer and execution helpers", () => {
     expect(channelSource).toContain('https://x.com/i/user/${encodeURIComponent(targetId)}');
     expect(channelSource).toContain('window.location.href = "https://x.com/compose/post"');
     expect(channelSource).toContain('const composerUrl = window.location.pathname.includes("/compose/post")');
-    expect(backgroundSource).toContain('const candidateExternalRef = result.externalRef?.type === "x.post"');
-    expect(backgroundSource).toContain('candidateExternalRef, observedAt');
+    expect(backgroundSource).toContain('const candidateExternalRef = result.publicProof?.externalRef');
+    expect(backgroundSource).toContain('candidateExternalRef, domProof: result.publicProof, observedAt');
     expect(backgroundSource).toContain('affordance === "follow"');
     expect(backgroundSource).toContain('affordance === "post"');
     expect(backgroundSource).toContain('const composerIsOpen = affordance === "post"');
@@ -259,6 +331,15 @@ describe("Chrome extension composer and execution helpers", () => {
     expect(backgroundSource).toContain('chrome.tabs.query({ windowId: session.windowId');
     expect(backgroundSource).toContain("message?.type === \"OPENPRESENCE_ACCOUNT_IDENTITY\"");
     expect(backgroundSource).toContain("OPENPRESENCE_CHANNEL_READY");
+    expect(backgroundSource).toContain("OPENPRESENCE_FETCH_ASSET");
+    expect(backgroundSource).toContain("x-openpresence-executor-id");
+    expect(channelSource).toContain("UNSUPPORTED_ASSET");
+    expect(channelSource).toContain("mediaAssets.length !== expectedAssetIds.length");
+    expect(channelSource).toContain("ASSET_UPLOAD_FAILED");
+    expect(channelSource).toContain("assetRefs:");
+    expect(channelSource).toContain("permalink: ownReply.permalink");
+    expect(channelSource).toContain("quotedTargetId: affordance === \"quote\"");
+    expect(channelSource).toContain("PUBLIC_MEDIA_NOT_VERIFIED");
     expect(backgroundSource).toContain("sendSessionContextToTab");
     expect(backgroundSource).toContain("lastIdentityProbeAt");
     expect(backgroundSource).toContain("findExpectedXTab");

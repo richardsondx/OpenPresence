@@ -243,7 +243,7 @@
         ...(quoteAuthor || {}),
         media: mediaFrom(quoteContainer),
       } : undefined;
-      return { id: match[1], text: text(textNode), language, ...author, media: mediaFrom(article, quoteContainer), quotedPost, element: article };
+      return { id: match[1], permalink: link.href, text: text(textNode), language, ...author, media: mediaFrom(article, quoteContainer), quotedPost, element: article };
     }).filter(Boolean);
   }
 
@@ -331,6 +331,7 @@
         objectType: affordance,
         author: { displayName: presenceName, handle: expectedHandle.replace(/^@/, "") },
         content: contentText ? { text: contentText } : undefined,
+        assetRefs: (execution.publication?.assetIds ?? []).map((assetId) => ({ assetId, kind: "image", role: "attachment" })),
         visibility: "public",
         shareability: "presence-only",
         originExecutionId: execution.id,
@@ -498,6 +499,19 @@
       composer = await waitFor(() => document.querySelector('[data-testid="tweetTextarea_0"]'), 20_000);
     }
     if (!composer) return failure({ executionId: execution.id, ok: false, code: "COMPOSER_NOT_READY", message: `X did not open the ${affordance === "post" ? "post" : "reply"} composer.`, retryable: true });
+    let mediaAssets;
+    try {
+      mediaAssets = await window.OpenPresenceExecution?.assetsForExecution?.(execution) ?? [];
+    } catch (error) {
+      return failure({ executionId: execution.id, ok: false, code: "UNSUPPORTED_ASSET", message: error instanceof Error ? error.message : "The approved Asset could not be retrieved for X.", retryable: false });
+    }
+    const expectedAssetIds = Array.isArray(execution.publication?.assetIds) ? execution.publication.assetIds : [];
+    if (expectedAssetIds.length && (!Array.isArray(mediaAssets) || mediaAssets.length !== expectedAssetIds.length || mediaAssets.some((item, index) => item?.assetId !== expectedAssetIds[index]))) {
+      return failure({ executionId: execution.id, ok: false, code: "UNSUPPORTED_ASSET", message: "The installed Bridge could not retrieve every sealed Asset for this publication. OpenPresence did not submit text without the approved media.", retryable: false });
+    }
+    if (mediaAssets.length && !(await window.OpenPresenceComposer?.attachFiles?.({ composer, files: mediaAssets.map((item) => item.file) }))) {
+      return failure({ executionId: execution.id, ok: false, code: "ASSET_UPLOAD_FAILED", message: "X did not accept the approved image attachment. OpenPresence did not submit the text.", retryable: true });
+    }
     sessionStorage.removeItem("openpresence-pending-execution");
     const content = window.OpenPresenceExecution?.textForExecution(execution) || "";
     if (!content) return failure({ executionId: execution.id, ok: false, code: "MISSING_PUBLICATION_TEXT", message: "The Bridge execution did not include approved publication text.", retryable: false });
@@ -541,7 +555,7 @@
     // a submission signal and let the server verify the exact public
     // reply through the official X API.
     const submission = await waitFor(() => {
-      const ownReply = visiblePosts().find((post) => post.text.includes(content) && post.handle?.toLowerCase() === expectedHandle.replace(/^@/, "").toLowerCase());
+      const ownReply = visiblePosts().find((post) => post.text.trim() === content.trim() && post.handle?.toLowerCase() === expectedHandle.replace(/^@/, "").toLowerCase());
       if (ownReply) return { kind: "visible", ownReply };
       const error = submissionError();
       if (error) return { kind: "error", message: error };
@@ -568,12 +582,25 @@
     const ownReply = submission?.kind === "visible" ? submission.ownReply : undefined;
     if (submission?.kind === "settled" || ownReply) {
       if (affordance === "post" && !ownReply) return failure({ executionId: execution.id, ok: false, code: "PUBLIC_OBJECT_NOT_VISIBLE", message: "X accepted the composer, but the new original post was not visible for verification.", retryable: true });
-      const externalRef = { type: affordance === "quote" || affordance === "post" ? "x.post" : "x.reply", id: ownReply ? ownReply.id : targetId };
-      if ((affordance === "quote" || affordance === "post") && ownReply) {
-        await reportVerifiedAction(execution, target, affordance, externalRef, content);
-        return { executionId: execution.id, ok: true, externalRef };
+      if (ownReply && mediaAssets.length && (ownReply.media?.length ?? 0) < mediaAssets.length) {
+        return failure({ executionId: execution.id, ok: false, code: "PUBLIC_MEDIA_NOT_VERIFIED", message: "X showed the public post, but OpenPresence could not verify every approved image attachment. The action was not counted as successful.", retryable: false });
       }
-      return { executionId: execution.id, ok: true, verifyWithApi: true, externalRef };
+      if (ownReply && affordance === "quote" && ownReply.quotedPost?.id !== targetId) {
+        return failure({ executionId: execution.id, ok: false, code: "QUOTE_TARGET_NOT_VERIFIED", message: "X showed the public post, but OpenPresence could not verify that it quoted the approved target. The action was not counted as successful.", retryable: false });
+      }
+      const externalRef = { type: affordance === "quote" || affordance === "post" ? "x.post" : "x.reply", id: ownReply ? ownReply.id : targetId };
+      if (!ownReply) return failure({ executionId: execution.id, ok: false, code: "PUBLIC_OBJECT_NOT_VISIBLE", message: `X did not show the completed ${affordance} in the controlled tab.`, retryable: true });
+      const publicProof = {
+        permalink: ownReply.permalink,
+        externalRef,
+        authorHandle: ownReply.handle,
+        text: ownReply.text,
+        parentId: affordance === "reply" ? targetId : undefined,
+        quotedTargetId: affordance === "quote" ? ownReply.quotedPost?.id : undefined,
+        mediaCount: ownReply.media?.length ?? 0,
+        assetIds: execution.publication?.assetIds ?? [],
+      };
+      return { executionId: execution.id, ok: true, verifyWithApi: true, externalRef, publicProof };
     }
 
     return failure({ executionId: execution.id, ok: false, code: "PUBLIC_OBJECT_NOT_VISIBLE", message: `X did not show the completed ${affordance} in the controlled tab.`, retryable: true });

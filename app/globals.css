@@ -6223,6 +6223,8 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .operator-chat-thinking { display: flex; align-items: center; gap: 8px; width: min(100%, 700px); margin-left: clamp(22px, 5vw, 76px); padding: 5px 11px; color: var(--muted); font-size: 12px; }
 .operator-chat-thinking .presence-glyph { width: 25px; height: 25px; font-size: 13px; flex: 0 0 auto; }
 .operator-chat-thinking .thinking-dots { margin-left: 0; }
+.operator-chat-queue-status { display: flex; align-items: center; gap: 7px; margin: 7px auto 0; width: min(100%, 840px); color: #706a88; font: 9px var(--font-mono, monospace); }
+.operator-chat-queue-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #8d72e7; box-shadow: 0 0 0 3px rgba(141,114,231,.12); }
 .operator-chat-work-status { display: flex; align-items: center; gap: 9px; width: min(100%, 700px); margin-left: clamp(22px, 5vw, 76px); padding: 8px 11px; border: 1px solid #d8d0ee; border-radius: 8px; color: #5f5680; background: #faf8ff; font-size: 11px; }
 .operator-chat-work-status > div { display: grid; gap: 2px; }
 .operator-chat-work-status strong { color: #40385f; font-size: 11px; }
@@ -6842,6 +6844,9 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .operator-chat-page .operator-chat-composer .chat-mode-picker { align-self: center; }
 .operator-chat-page .operator-chat-composer textarea { font-size: 12px; }
 .operator-chat-page .send-button { width: 38px; height: 38px; border-radius: 50%; color: #fff; background: #242631; }
+.operator-chat-page .send-button.is-stop { color: #fff; background: #c14c4c; }
+.operator-chat-page .send-button.is-queue { color: #fff; background: #6742d5; }
+.operator-chat-page .send-button.is-stop:disabled { opacity: .6; }
 .agent-lab-page { display: grid; gap: 0; min-height: calc(100vh - 64px); background: #f7f8fb; }
 @media (min-width: 681px) {
   /* Agent Lab is a focused workspace: keep its shell control discoverable
@@ -7114,4 +7119,51 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
   .sidebar { display: block; overflow: visible; }
   .sidebar-body { overflow: visible; }
   .sidebar-resource-menu { display: none; }
+}
+
+/* Tool receipts are activity, not another speaker's chat bubble. */
+.operator-chat-message.is-tool-activity,
+.app-shell.theme-dark .operator-chat-message.is-tool-activity {
+  align-self: flex-start;
+  width: min(100%, 740px);
+  max-width: 100%;
+  margin: 2px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.operator-chat-tool > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.operator-chat-tool > summary::-webkit-details-marker { display: none; }
+.operator-chat-tool > summary:focus-visible,
+.operator-chat-technical > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+.operator-chat-tool-icon { display: flex; flex-shrink: 0; }
+.operator-chat-tool-icon.is-failed { color: #a56a3b; }
+.operator-chat-tool-title { color: var(--ink); font-weight: 500; min-width: 0; }
+.operator-chat-tool-status { font-size: 11px; flex-shrink: 0; }
+.operator-chat-tool time { margin-left: auto; white-space: nowrap; font-size: 10px; }
+.operator-chat-tool-chevron { flex-shrink: 0; transition: transform .15s ease; }
+.operator-chat-tool[open] .operator-chat-tool-chevron { transform: rotate(180deg); }
+.operator-chat-tool-result { margin: 2px 0 9px 7px; padding: 0 0 1px 15px; border-left: 1px solid var(--border); }
+.operator-chat-tool-result p { margin: 0 0 7px; font-size: 12px; }
+.operator-chat-tool-limit { color: var(--muted); }
+.operator-chat-technical { margin-top: 10px; color: var(--muted); font-size: 11px; }
+.operator-chat-technical > summary { cursor: pointer; width: fit-content; padding: 3px 0; }
+.operator-chat-technical pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; padding: 12px; border: 1px solid var(--border); border-radius: 5px; font-size: 11px; line-height: 1.5; }
+.app-shell.theme-dark .operator-chat-tool-title { color: #f4f4f8; }
+@media (max-width: 480px) {
+  .operator-chat-tool > summary { flex-wrap: wrap; gap: 6px; }
+  .operator-chat-tool time { display: none; }
+  .operator-chat-tool-chevron { margin-left: auto; }
 }

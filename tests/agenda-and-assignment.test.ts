@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileAgenda, compileAgendaWork, migrateLegacyOperatorDirectives, nextScheduledOccurrence, scheduledAssignmentIsDue } from "../lib/runtime";
+import { compileAgenda, compileAgendaWork, initialState, migrateLegacyOperatorDirectives, nextScheduledOccurrence, scheduledAssignmentIsDue } from "../lib/runtime";
 import type { Assignment, OpenPresenceState, OperatorDirective } from "../lib/types";
 
 function createMockState(): OpenPresenceState {
@@ -121,6 +121,7 @@ function createMockState(): OpenPresenceState {
   ];
 
   return {
+    ...initialState(),
     onboarded: true,
     agent: { id: agentId, name: "Genny", description: "Persistent agent", audience: "builders", mode: "agent", accent: "#D68754", languagePolicy: { avoidPreferences: [], neverLiterals: [] } } as unknown as OpenPresenceState["agent"],
     presence: { id: presenceId, agentId, name: "Genny on X", handle: "@genny", channel: "x", status: "live", environment: "live", execution: { post: "auto", reply: "auto" } } as unknown as OpenPresenceState["presence"],
@@ -400,19 +401,21 @@ describe("Canonical Assignment Convergence and Agenda Compilation", () => {
       id: "exp_memory",
       agentId: "agent_genny",
       presenceId: "presence_main",
-      channelId: "x",
-      environment: "live",
+      channel: "x",
+      title: "Persistent agent memory architecture",
       brief: "Find persistent agent memory architecture breakthroughs",
-      engagement: { mode: "evaluate", assignmentId: "assign_growth" },
+      interpretation: "Look for grounded, relevant developments.",
+      engagement: { mode: "objective", assignmentId: "assign_growth" },
       status: "active",
-      budget: { maxRuns: 10, runsCompleted: 1, resetPeriod: "daily" },
-      progress: { candidatesSeen: 5, candidatesHydrated: 5, findingsSurfaced: 1 },
+      revision: 1,
+      coverage: { status: "available", label: "Available", detail: "Native coverage is available." },
       createdAt: "2026-08-19T13:30:00.000Z",
       updatedAt: "2026-08-19T13:50:00.000Z",
     });
     state.explorationFindings.push({
       id: "finding_fresh_1",
       explorationId: "exp_memory",
+      sessionId: "session_memory",
       presenceId: "presence_main",
       mirrorObjectId: "mirror_fresh_post",
       safeSummary: "Breakthrough paper on durable memory representations.",
@@ -540,19 +543,21 @@ describe("Canonical Assignment Convergence and Agenda Compilation", () => {
       id: "exp_general",
       agentId: "agent_genny",
       presenceId: "presence_main",
-      channelId: "x",
-      environment: "live",
+      channel: "x",
+      title: "General news",
       brief: "Browse general news",
+      interpretation: "Surface potentially relevant developments.",
       engagement: { mode: "surface" },
       status: "active",
-      budget: { maxRuns: 10, runsCompleted: 1, resetPeriod: "daily" },
-      progress: { candidatesSeen: 2, candidatesHydrated: 2, findingsSurfaced: 1 },
+      revision: 1,
+      coverage: { status: "available", label: "Available", detail: "Native coverage is available." },
       createdAt: "2026-08-19T13:30:00.000Z",
       updatedAt: "2026-08-19T13:58:00.000Z",
     });
     state.explorationFindings.push({
       id: "finding_low_value",
       explorationId: "exp_general",
+      sessionId: "session_general",
       presenceId: "presence_main",
       mirrorObjectId: "mirror_low_value",
       safeSummary: "A general announcement.",

@@ -1,13 +1,14 @@
+import { saveNativeXCredentials, upsertNativeXConnection } from "../lib/x";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateAgentReply, isAiRateLimitError, promptFor } from "../lib/ai";
-import { executeAutonomyRun, queueAutonomyRun } from "../lib/autonomy-worker";
-import { getOperationalRun, readStateSnapshotForContext, resolvedDbPath, saveProviderSecret, writeState } from "../lib/db";
+import { dispatchAutonomyWorker, executeAutonomyRun, queueAutonomyRun } from "../lib/autonomy-worker";
+import { getOperationalRun, readStateSnapshotForContext, resolvedDbPath, saveProviderSecret, upsertOperationalRun, writeState } from "../lib/db";
 import { parseOperatorChatStep } from "../lib/operator-chat-harness";
 import { recentChatItems } from "../lib/operator-chat-history";
 import { createOperatorNudge, linkOperatorChatAssignment, recordOperatorConversationMessage, settleNudgeFromAssignment, startQueuedNudge } from "../lib/operator-chat";
-import { applyOperation, createAgent } from "../lib/runtime";
-import { repairMissingOperatorNudgeWakes } from "../lib/temporal";
+import { applyOperation, createAgent, startPlaygroundSession } from "../lib/runtime";
+import { repairMissingOperatorNudgeWakes, recoverInterruptedOperatorChat } from "../lib/temporal";
 
 function fixture(content = "What should we focus on next?") {
   let state = createAgent({ name: "Chat Test", description: "Useful social judgment", mode: "agent", handle: "@chat_test", accent: "#777777" });
@@ -24,6 +25,87 @@ const modelResponse = (content: unknown) => new Response(JSON.stringify({ choice
 
 describe("private operator Chat harness", () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  it("uses a multi-tool turn to execute once and returns verified delivery evidence to cognition", async () => {
+    const original = fixture("Publish one short post about testing a prototype.");
+    let state = applyOperation(original.state, { type: "setPresence", patch: { connectionMode: "sandbox", status: "live", execution: { post: "auto" } } });
+    state = startPlaygroundSession(state, original.presenceId, "fresh");
+    writeState(state);
+    const action = { kind: "social_action", action: "post", text: "Watch one person try the prototype before adding another feature." };
+    const steps = [{ kind: "runtime_status" }, { kind: "search_knowledge", query: "prototype" }, { kind: "search_assets", query: "prototype" }, action, action];
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const step = steps.shift();
+      if (step) return modelResponse(step);
+      expect(String(init?.body)).toContain('verified');
+      expect(String(init?.body)).toContain('succeeded');
+      const request = JSON.parse(String(init?.body));
+      expect(request.messages.at(-1).content).toContain("Runtime tool result");
+      expect(request.messages.at(-1).content).toContain("succeeded");
+      expect(request.messages.at(-2).role).toBe("assistant");
+      return modelResponse({ kind: "answer", text: "The Sandbox post is verified." });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+    const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
+    expect(getOperationalRun(run.id)?.state).toBe("succeeded");
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(saved.executions).toHaveLength(1);
+    expect(saved.outcomes.filter((item) => item.status === "succeeded")).toHaveLength(1);
+    expect(saved.operatorConversations!.flatMap((item) => item.messages)).toContainEqual(expect.objectContaining({ content: "The Sandbox post is verified.", replyToMessageId: original.message.id }));
+  });
+
+  it("feeds checks back as tool turns and does not repeat identical external probes", async () => {
+    vi.stubEnv("OPENPRESENCE_X_API_MOCK", "0");
+    const original = fixture("Check my connection now, read-only.");
+    const state = upsertNativeXConnection(original.state, { presenceId: original.presenceId, id: "harness-check", account: { id: "chat-account", username: "chat_test", name: "Chat Test" }, access: "read-write" });
+    saveNativeXCredentials("harness-check", { apiKey: "test", apiSecret: "test", accessToken: "test", accessTokenSecret: "test" });
+    writeState(state);
+    let modelCalls = 0;
+    let externalReads = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
+      if (String(url).includes("api.openai.com")) {
+        modelCalls += 1;
+        if (modelCalls <= 2) return modelResponse({ kind: "check_connection" });
+        expect(JSON.parse(String(init?.body)).messages.at(-1).content).toContain("Runtime tool result");
+        return modelResponse({ kind: "answer", text: "The read-only check passed." });
+      }
+      externalReads += 1;
+      return new Response(JSON.stringify({ data: String(url).includes("/users/me") ? { id: "chat-account", username: "chat_test", name: "Chat Test" } : [] }), { status: 200 });
+    }));
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+    expect(getOperationalRun(run.id)?.state).toBe("succeeded");
+    expect(modelCalls).toBe(3);
+    expect(externalReads).toBe(2);
+  });
+
+  it("recovers a stranded Chat turn without escalating an unrelated public incident", () => {
+    const { presenceId, message } = fixture("Continue after a worker restart");
+    const run = queueAutonomyRun(presenceId, "operator_chat", { metadata: { operatorMessageId: message.id } }).run;
+    const now = new Date();
+    run.state = "running";
+    run.stage = "operator_chat.generating";
+    run.lastProgressAt = new Date(now.getTime() - 95000).toISOString();
+    run.lastHeartbeatAt = now.toISOString();
+    run.leaseOwner = "stopped-worker";
+    run.leaseExpiresAt = new Date(now.getTime() + 10000).toISOString();
+    upsertOperationalRun(run);
+    recoverInterruptedOperatorChat(run, now);
+    upsertOperationalRun(run);
+    expect(getOperationalRun(run.id)).toMatchObject({ state: "queued", stage: "operator_chat.queued", recoveryCount: 1 });
+    expect(getOperationalRun(run.id)?.leaseOwner).toBeUndefined();
+    const exhausted = getOperationalRun(run.id)!;
+    exhausted.recoveryCount = 2;
+    exhausted.state = "running";
+    exhausted.stage = "operator_chat.generating";
+    exhausted.lastProgressAt = run.lastProgressAt;
+    exhausted.leaseOwner = "stopped-again";
+    upsertOperationalRun(exhausted);
+    recoverInterruptedOperatorChat(exhausted, now);
+    upsertOperationalRun(exhausted);
+    expect(getOperationalRun(run.id)).toMatchObject({ state: "failed", stage: "operator_chat.failed", recoveryCount: 3 });
+  });
 
   it("keeps the newest scoped Chat records when the durable ledger grows past its bound", () => {
     const records = [
@@ -82,6 +164,75 @@ describe("private operator Chat harness", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(getOperationalRun(queued.run.id)?.state).toBe("succeeded");
     expect(saved.executions).toHaveLength(0);
+  });
+
+  it("does not persist a late Chat answer after the operator cancels the run", async () => {
+    const { presenceId, message } = fixture("Stop this turn while it is thinking");
+    let releaseModel!: () => void;
+    let modelStarted!: () => void;
+    const modelGate = new Promise<void>((resolve) => { releaseModel = resolve; });
+    const started = new Promise<void>((resolve) => { modelStarted = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      modelStarted();
+      await modelGate;
+      return modelResponse({ kind: "answer", text: "This late answer must not be saved." });
+    }));
+    const queued = queueAutonomyRun(presenceId, "operator_chat", { metadata: { operatorMessageId: message.id } });
+    const worker = executeAutonomyRun(queued.run.id);
+    await started;
+    const cancelled = getOperationalRun(queued.run.id)!;
+    cancelled.state = "cancelled";
+    cancelled.stage = "operator_chat.cancelled";
+    upsertOperationalRun(cancelled);
+    releaseModel();
+    await worker;
+    const saved = readStateSnapshotForContext({ presenceId });
+    const messages = (saved.operatorConversations ?? []).flatMap((item) => item.messages);
+    expect(messages).not.toContainEqual(expect.objectContaining({ content: "This late answer must not be saved." }));
+    expect(getOperationalRun(queued.run.id)?.state).toBe("cancelled");
+  });
+
+  it("keeps later Chat turns queued while the earlier turn waits for provider recovery", async () => {
+    const { state, presenceId, message } = fixture("First turn waits for capacity");
+    const next = recordOperatorConversationMessage(state, { presenceId, content: "Second turn", clientRequestId: "second-waiting-turn" });
+    writeState(next);
+    const secondMessage = next.operatorConversations!.flatMap((item) => item.messages).find((item) => item.clientRequestId === "second-waiting-turn")!;
+    const first = queueAutonomyRun(presenceId, "operator_chat", { metadata: { operatorMessageId: message.id } }).run;
+    first.state = "waiting";
+    first.createdAt = new Date(Date.now() - 1000).toISOString();
+    first.stage = "waiting.provider_quota";
+    upsertOperationalRun(first);
+    const second = queueAutonomyRun(presenceId, "operator_chat", { metadata: { operatorMessageId: secondMessage.id } }).run;
+    const fetchMock = vi.fn(async () => modelResponse({ kind: "answer", text: "Second answer" }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await dispatchAutonomyWorker(second.id)).toBeNull();
+    expect(getOperationalRun(second.id)?.state).toBe("queued");
+    expect(fetchMock).not.toHaveBeenCalled();
+    first.state = "cancelled";
+    upsertOperationalRun(first);
+    await dispatchAutonomyWorker(second.id);
+    expect(getOperationalRun(second.id)?.state).toBe("succeeded");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("includes the earlier answer in a queued follow-up's context, but never includes future turns", async () => {
+    const { state, presenceId, message } = fixture("First question");
+    let next = recordOperatorConversationMessage(state, { presenceId, content: "Follow-up question", clientRequestId: "followup" });
+    const followup = next.operatorConversations!.flatMap((item) => item.messages).find((item) => item.clientRequestId === "followup")!;
+    next = recordOperatorConversationMessage(next, { presenceId, content: "Future instruction", clientRequestId: "future" });
+    next = recordOperatorConversationMessage(next, { presenceId, role: "presence", replyToMessageId: message.id, content: "Earlier answer arrived after follow-up was queued" });
+    writeState(next);
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = String(init?.body);
+      expect(body).toContain("Earlier answer arrived after follow-up was queued");
+      expect(body).not.toContain("Future instruction");
+      return modelResponse({ kind: "answer", text: "Answer with the preceding turn in context" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const run = queueAutonomyRun(presenceId, "operator_chat", { metadata: { operatorMessageId: followup.id } }).run;
+    await executeAutonomyRun(run.id);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(getOperationalRun(run.id)?.state).toBe("succeeded");
   });
 
   it("merges concurrent same-Presence Chat answers without losing either turn", async () => {

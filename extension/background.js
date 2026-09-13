@@ -65,6 +65,35 @@ async function bridgeRequest(session, path, options = {}) {
   return body;
 }
 
+function base64FromBytes(bytes) {
+  let value = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    value += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(value);
+}
+
+async function bridgeAssetRequest(session, assetId) {
+  const origin = await appOrigin();
+  const response = await fetch(`${origin}/api/bridge/v1/assets/${encodeURIComponent(assetId)}`, {
+    headers: { authorization: `Bearer ${session.bridgeKey}`, "x-openpresence-executor-id": session.executorId },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || `OpenPresence asset request failed (${response.status}).`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return {
+    assetId,
+    mimeType: response.headers.get("content-type") || "",
+    sha256: response.headers.get("x-content-sha256") || "",
+    name: response.headers.get("content-disposition")?.match(/filename="([^"]+)"/)?.[1] || `${assetId}.img`,
+    data: base64FromBytes(bytes),
+  };
+}
+
 function sendStatus(status) {
   chrome.tabs.query({ url: ["http://localhost:3015/*", "http://127.0.0.1:3015/*"] }).then((tabs) => {
     // The status is useful in the controlled channel tab too. Keep it scoped
@@ -707,12 +736,14 @@ async function verifySubmittedExecution(session, result, attempt = 0) {
     // the quote/reply's external ID; passing it as candidateExternalRef makes
     // the API verifier look for the target itself forever. Let the server
     // search by verified author, parent, and approved text in this fallback.
-    const candidateExternalRef = result.externalRef?.type === "x.post"
-      ? undefined
-      : result.externalRef;
+    // A public proof carries the newly-rendered object ID. Older channel
+    // results used x.post for the reply target, so keep that legacy fallback
+    // unset unless the result includes the new receipt evidence.
+    const candidateExternalRef = result.publicProof?.externalRef
+      || (result.externalRef?.type === "x.post" ? undefined : result.externalRef);
     const response = await bridgeRequest(session, executionPath, {
       method: "POST",
-      body: JSON.stringify({ executorId: session.executorId, candidateExternalRef, observedAt: new Date().toISOString() })
+      body: JSON.stringify({ executorId: session.executorId, candidateExternalRef, domProof: result.publicProof, observedAt: new Date().toISOString() })
     });
     if (response.verified || response.execution?.status === "succeeded") {
       await clearVerificationJob(result.executionId);
@@ -846,6 +877,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         session = [...sessions.values()].find((item) => item.windowId === sender.tab.windowId);
       }
       if (!session) { sendResponse({ ok: false, error: "The controlled Chrome session is no longer active." }); return; }
+      if (message?.type === "OPENPRESENCE_FETCH_ASSET") {
+        if (typeof message.assetId !== "string" || !message.assetId.trim()) {
+          sendResponse({ ok: false, error: "The requested Asset ID is missing." });
+          return;
+        }
+        try {
+          sendResponse({ ok: true, asset: await bridgeAssetRequest(session, message.assetId.trim()) });
+        } catch (error) {
+          sendResponse({ ok: false, error: error instanceof Error ? error.message : "The authorized Asset could not be retrieved." });
+        }
+        return;
+      }
       if (message?.type === "OPENPRESENCE_CHANNEL_READY" && sender.tab?.id) {
         // X can mount its content script after the one initial context send.
         // Rebind the live X tab before it reports account identity.

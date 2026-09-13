@@ -226,7 +226,7 @@ describe("Publishing Plan", () => {
     const initialPlanId = state.publishingPlans[0]!.id;
 
     const agenda = compileAgendaWork(state, presence.id);
-    const reassessItem = agenda.workItems.find((item) => item.source === "publishing" && item.step === "reassess_plan");
+    const reassessItem = agenda.workItems?.find((item) => item.source === "publishing" && item.step === "reassess_plan");
     expect(reassessItem).toBeDefined();
     expect(reassessItem).toMatchObject({
       source: "publishing",
@@ -245,13 +245,13 @@ describe("Publishing Plan", () => {
     const supersededPlan = afterWake.publishingPlans.find((item: { id: string }) => item.id === initialPlanId);
 
     expect(activePlan).toBeDefined();
-    expect(activePlan.revision).toBe(2);
+    expect(activePlan!.revision).toBe(2);
     expect(supersededPlan).toMatchObject({
       id: initialPlanId,
       status: "superseded",
-      supersededBy: activePlan.id,
+      supersededBy: activePlan!.id,
     });
-    expect(supersededPlan.supersededAt).toBeDefined();
+    expect(supersededPlan!.supersededAt).toBeDefined();
   });
 
   it("reassesses a due plan in the durable native Attention worker", async () => {
@@ -327,7 +327,7 @@ describe("Publishing Plan", () => {
     state.publishingPlans = []; // Simulate missing plan edge case
 
     const agenda = compileAgendaWork(state, presence.id);
-    const createItem = agenda.workItems.find((item) => item.source === "publishing" && item.step === "create_plan");
+    const createItem = agenda.workItems?.find((item) => item.source === "publishing" && item.step === "create_plan");
     expect(createItem).toBeDefined();
     expect(createItem).toMatchObject({
       source: "publishing",
@@ -355,7 +355,7 @@ describe("Publishing Plan", () => {
 
     // In Agenda, no reassess_plan or create_plan is due because nextReassessmentAt is in the future
     const agenda = compileAgendaWork(state, presence.id);
-    const reassessItem = agenda.workItems.find((item) => item.source === "publishing" && (item.step === "reassess_plan" || item.step === "create_plan"));
+    const reassessItem = agenda.workItems?.find((item) => item.source === "publishing" && (item.step === "reassess_plan" || item.step === "create_plan"));
     expect(reassessItem).toBeUndefined();
   });
 
@@ -380,14 +380,19 @@ describe("Publishing Plan", () => {
         {
           id: "ep_1",
           presenceId: presence.id,
-          channel: "x",
-          counterpartyActorId: "actor_1",
-          counterpartyHandle: "@maya",
+          channelId: "x",
+          agentId: state.agent!.id,
+          participantActorIds: ["actor_1"],
+          linkedEpisodeIds: [],
+          environment: "live",
+          surface: "reply",
+          privacyScope: "public",
+          agentTurnCount: 0,
+          externalTurnCount: 2,
           status: "active",
           rootMirrorObjectId: "m_1",
           branchAnchorMirrorObjectId: "m_1",
           lastExternalObjectId: "ext_1",
-          exchangeCount: 2,
           lastMeaningfulDevelopment: "Maya asked a clarifying question.",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -404,14 +409,16 @@ describe("Publishing Plan", () => {
           author: { displayName: "Maya", handle: "@maya" },
           content: { text: "What do you think about agent memory persistence?" },
           visibility: "public",
+          bridgeId: "native:test",
+          shareability: "presence-only",
           observedAt: new Date().toISOString(),
         },
       ],
     };
 
     const agenda = compileAgendaWork(state, presence.id);
-    const conversationItem = agenda.workItems.find((item) => item.source === "conversation");
-    const reassessItem = agenda.workItems.find((item) => item.source === "publishing" && item.step === "reassess_plan");
+    const conversationItem = agenda.workItems?.find((item) => item.source === "conversation");
+    const reassessItem = agenda.workItems?.find((item) => item.source === "publishing" && item.step === "reassess_plan");
 
     expect(conversationItem).toBeDefined();
     expect(reassessItem).toBeDefined();

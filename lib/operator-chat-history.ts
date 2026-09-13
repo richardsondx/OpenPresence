@@ -10,3 +10,20 @@ export function recentChatItems<T>(items: T[] | undefined, presenceId: string | 
     .sort((left, right) => date(right) - date(left))
     .slice(0, limit);
 }
+
+/** A queued follow-up may be saved before the previous answer arrives.
+ * Preserve turn order for both rendering and model context, even though the
+ * durable event ledger is chronological. Unlinked legacy messages stay put. */
+export function orderedOperatorChatMessages<T extends { id: string; role: string; replyToMessageId?: string }>(messages: T[]): T[] {
+  const operatorIds = new Set(messages.filter((item) => item.role === "operator").map((item) => item.id));
+  const replies = new Map<string, T[]>();
+  for (const item of messages) {
+    if (item.role !== "operator" && item.replyToMessageId && operatorIds.has(item.replyToMessageId)) {
+      replies.set(item.replyToMessageId, [...(replies.get(item.replyToMessageId) ?? []), item]);
+    }
+  }
+  return messages.flatMap((item) => {
+    if (item.role !== "operator" && item.replyToMessageId && operatorIds.has(item.replyToMessageId)) return [];
+    return [item, ...(replies.get(item.id) ?? [])];
+  });
+}

@@ -232,6 +232,7 @@ describe("canonical Assignment domain", () => {
 
   it("recomputes stale live preflight after the native X connection is repaired", () => {
     let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
     const presence = state.presence!;
     state = applyOperation(state, { type: "createAssignment", instruction: "Publish one useful lesson about persistent agents.", presenceId: presence.id, environment: "live", schedule: { day: "Tuesday", time: "08:00", executionWindow: "08:00–11:00" } });
     const assignment = state.assignments[0]!;
@@ -366,6 +367,8 @@ describe("canonical Assignment domain", () => {
       deadlineAt: "2026-08-29T07:00:00.000Z",
       maxVerifiedActions: 40,
       status: "active",
+      createdAt: "2026-08-29T03:00:00.000Z",
+      updatedAt: "2026-08-29T03:00:00.000Z",
     }];
     const run = {
       id: "assignment-run:pipeline",
@@ -415,11 +418,14 @@ describe("canonical Assignment domain", () => {
     state.assignmentPursuitWindows = [{
       id: "pursuit:active",
       assignmentId: assignment.id,
+      agentId: assignment.agentId,
       presenceId: assignment.presenceId,
       startsAt: "2026-08-29T03:00:00.000Z",
       deadlineAt: "2026-08-29T07:00:00.000Z",
       maxVerifiedActions: 10,
       status: "active",
+      createdAt: "2026-08-29T03:00:00.000Z",
+      updatedAt: "2026-08-29T03:00:00.000Z",
     }];
     const run = {
       id: "assignment-run:stale-candidate",
@@ -542,7 +548,7 @@ describe("canonical Assignment domain", () => {
   it("does not treat a terminally closed pre-write miss as fresh work", () => {
     expect(isAutonomousPreWriteDeliveryFailure({
       status: "failed",
-      failure: { code: "BRIDGE_NOT_CHECKED_IN", retryable: false },
+      failure: { code: "BRIDGE_NOT_CHECKED_IN", message: "The bridge did not check in.", retryable: false },
     })).toBe(false);
   });
 

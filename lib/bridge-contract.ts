@@ -13,7 +13,19 @@ export const bridgeEndpointPaths = {
   outcomes: "/api/bridge/v1/outcomes",
   metrics: "/api/bridge/v1/metrics",
   identity: "/api/bridge/v1/identity",
+  assets: "/api/bridge/v1/assets",
 } as const;
+
+/** Still images the shipped Chrome/X adapter can hand to the X composer. */
+export const chromeBrowserBridgeImageMimeTypes = ["image/png", "image/jpeg", "image/gif"] as const;
+
+export function chromeBrowserBridgeSupportsImageMimeType(mimeType: string | undefined) {
+  return chromeBrowserBridgeImageMimeTypes.includes((mimeType ?? "").split(";", 1)[0]!.trim().toLowerCase() as typeof chromeBrowserBridgeImageMimeTypes[number]);
+}
+
+export function bridgeAssetPath(assetId: string) {
+  return `${bridgeEndpointPaths.assets}/${encodeURIComponent(assetId)}`;
+}
 
 /**
  * The shipped Chrome adapter observes X, reports verified metrics, and delivers
@@ -28,6 +40,7 @@ export function chromeBrowserBridgeCapabilities(): ConnectorCapabilities {
     affordances: ["post", "reply", "quote", "repost", "like", "follow", "delete"],
     formats: ["x.post", "x.reply", "x.quote", "x.repost", "x.like", "x.follow", "x.delete"],
     metrics: ["followers", "public_metrics"],
+    assetKinds: ["image"],
   };
 }
 
@@ -111,7 +124,7 @@ export function bridgeAdapterPrompt(input: BridgePromptInput) {
     "3. Send new, changed, and deleted channel objects to POST " + input.baseUrl + bridgeEndpointPaths.events + ". Use stable sourceEventId values. Include externalRef, objectType, author, content, occurredAt, visibility, shareability, and parentExternalRef for replies/comments.",
     "4. Use POST " + input.baseUrl + bridgeEndpointPaths.reconcile + " for an initial or cursor-based sync.",
     "5. Poll POST " + input.baseUrl + bridgeEndpointPaths.claim + " to claim approved work, using {\"executorId\":\"<stable-adapter-id>\",\"limit\":10}.",
-    "6. Perform only claimed executions. Use the supplied publication payload and target exactly as returned. This adapter may deliver only the declared actions: " + capabilities + ". Media must be uploaded only from the supplied assetIds through the authenticated OpenPresence asset route.",
+    "6. Perform only claimed executions. Use the supplied publication payload and target exactly as returned. This adapter may deliver only the declared actions: " + capabilities + ". Media must be uploaded only from the supplied assetIds through the authenticated OpenPresence asset route. The shipped X adapter supports still images (PNG, JPEG, GIF) only.",
     ...(input.presence.channel === "x" ? [
       ...(supports("post") ? ["   For x.post, open the X composer, enter exactly the supplied publication text, upload only supplied media, and verify the resulting post id before acknowledging."] : []),
       ...(supports("reply") ? [
@@ -135,7 +148,7 @@ export function bridgeAdapterPrompt(input: BridgePromptInput) {
     "- Do not expose the Bridge key or unrelated browser/session data.",
     "- Do not send messages, posts, comments, or likes unless OpenPresence returned the execution.",
     "- Do not claim success before confirming the external object.",
-    "- If an execution contains assetIds or media that cannot be retrieved through an approved adapter route, do not pretend to upload it; fail it with code UNSUPPORTED_ASSET.",
+    "- If an execution contains assetIds or media that cannot be retrieved through an approved adapter route, or is not a supported PNG, JPEG, or GIF image, do not pretend to upload it; fail it with code UNSUPPORTED_ASSET.",
     "- Stop and report a configuration error if the channel or community does not authorize this adapter.",
   ];
   return lines.join("\n");

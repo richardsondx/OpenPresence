@@ -1,6 +1,9 @@
 "use client";
 
+import { chatToolReceipt, inspectionReportSummary, legacyInspectionEvidence, toolActivitySummary } from "@/lib/chat-activity-presentation";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { orderedOperatorChatMessages } from "@/lib/operator-chat-history";
+import { useOperatorChatOutbox } from "@/lib/use-operator-chat-outbox";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import dynamic from "next/dynamic";
@@ -68,6 +71,7 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
+  Square,
   Sun,
   Terminal,
   ThumbsDown,
@@ -870,11 +874,12 @@ function ModeOption({
 
 export default function Home() {
   const [state, setState] = useState<OpenPresenceState | null>(null);
-  const [view, setView] = useState<View>(() => {
+  const [view, setRenderedView] = useState<View>(() => {
     return typeof window !== "undefined" ? viewForLocation(window.location) : "live";
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [scopeRecoveryPath, setScopeRecoveryPath] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<FileKind>("BRAIN");
   const [pendingOperation, setPendingOperation] = useState<string | null>(null);
   const [agentSwitchingId, setAgentSwitchingId] = useState<string | null>(null);
@@ -903,7 +908,19 @@ export default function Home() {
     const response = await fetchRuntime(input, { ...init, headers, cache: "no-store" });
     if (response.status === 304) return null;
     rememberStateResponse(response);
-    const payload = await readJsonResponse<T>(response);
+    const payload = await readJsonResponse<T & { error?: string; scope?: string; ownerAgentId?: string; presenceId?: string }>(response);
+    if (!response.ok) {
+      if (response.status === 409 && payload.scope === "agent-presence") {
+        if (payload.ownerAgentId && payload.presenceId) {
+          setScopeRecoveryPath(`/chat?${new URLSearchParams({ agentId: payload.ownerAgentId, presenceId: payload.presenceId })}`);
+          throw new Error("This account is also saved under another Agent. Open its current workspace to inspect it before continuing.");
+        }
+        setScopeRecoveryPath(null);
+        throw new Error("This account is saved under multiple Agents with conflicting identities. Its owner must be resolved before public work can continue. No account actions were taken by this request.");
+      }
+      throw new Error(payload.error ?? "The workspace could not be loaded.");
+    }
+    setScopeRecoveryPath(null);
     return normalizeClientState(payload);
   }, [rememberStateResponse]);
   const loadAgentChat = useCallback((agentId: string) => {
@@ -973,7 +990,7 @@ export default function Home() {
     document.title = presenceName;
   }, [state?.presence?.id, state?.presence?.name]);
   useEffect(() => {
-    const onPopState = () => setView(viewForLocation(window.location));
+    const onPopState = () => setRenderedView(viewForLocation(window.location));
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
@@ -1037,13 +1054,21 @@ export default function Home() {
             ...(context?.activeAgentId ? { "x-openpresence-agent-id": context.activeAgentId } : {}),
             ...(context?.activePresenceId ? { "x-openpresence-presence-id": context.activePresenceId } : {}),
             ...(context?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(context.workspaceRevision) } : {}),
-            ...(view === "live" || view === "review" ? { "x-openpresence-projection": "activity" } : view === "chat" ? { "x-openpresence-projection": "chat" } : view === "growth" || view === "analytics" ? { "x-openpresence-projection": "growth" } : view === "knowledge" ? { "x-openpresence-projection": "knowledge" } : view === "assets" ? { "x-openpresence-projection": "assets" } : view === "people" ? { "x-openpresence-projection": "people" } : view === "feed" ? { "x-openpresence-projection": "feed" } : view === "schedule" ? { "x-openpresence-projection": "schedule" } : view === "work" ? { "x-openpresence-projection": "work" } : view === "watching" ? { "x-openpresence-projection": "watching" } : view === "rehearsal" ? { "x-openpresence-projection": "rehearsal" } : view === "brain" || view === "presence" ? { "x-openpresence-projection": "full" } : view === "teach" ? { "x-openpresence-projection": "teach" } : view === "playground" ? { "x-openpresence-projection": "playground" } : view === "usage" ? { "x-openpresence-projection": "usage" } : {}),
+            ...(["sendPresenceNudge", "retryOperatorChat", "cancelOperatorChat"].includes(operationType ?? "") ? { "x-openpresence-projection": "chat" } : view === "live" || view === "review" ? { "x-openpresence-projection": "activity" } : view === "chat" ? { "x-openpresence-projection": "chat" } : view === "growth" || view === "analytics" ? { "x-openpresence-projection": "growth" } : view === "knowledge" ? { "x-openpresence-projection": "knowledge" } : view === "assets" ? { "x-openpresence-projection": "assets" } : view === "people" ? { "x-openpresence-projection": "people" } : view === "feed" ? { "x-openpresence-projection": "feed" } : view === "schedule" ? { "x-openpresence-projection": "schedule" } : view === "work" ? { "x-openpresence-projection": "work" } : view === "watching" ? { "x-openpresence-projection": "watching" } : view === "rehearsal" ? { "x-openpresence-projection": "rehearsal" } : view === "brain" || view === "presence" ? { "x-openpresence-projection": "full" } : view === "teach" ? { "x-openpresence-projection": "teach" } : view === "playground" ? { "x-openpresence-projection": "playground" } : view === "usage" ? { "x-openpresence-projection": "usage" } : {}),
           },
           keepalive: operationType === "createAgent",
           body: JSON.stringify(operation),
         }, runtimeTimeoutForOperation(operationType));
         rememberStateResponse(response);
-        const payload = await readJsonResponse<OpenPresenceState & { error?: string; conflict?: boolean; state?: OpenPresenceState; receiptOnly?: boolean }>(response);
+        const payload = await readJsonResponse<OpenPresenceState & { error?: string; conflict?: boolean; state?: OpenPresenceState; receiptOnly?: boolean; scope?: string; ownerAgentId?: string; presenceId?: string }>(response);
+        if (!response.ok && response.status === 409 && payload.scope === "agent-presence") {
+          if (payload.ownerAgentId && payload.presenceId) {
+            setScopeRecoveryPath(`/chat?${new URLSearchParams({ agentId: payload.ownerAgentId, presenceId: payload.presenceId })}`);
+            throw new Error("This account is also saved under another Agent. Your change was not applied. Open its current workspace to inspect it before continuing.");
+          }
+          setScopeRecoveryPath(null);
+          throw new Error("This account is saved under multiple Agents with conflicting identities. Its owner must be resolved before public work can continue. Your change was not applied.");
+        }
         if ((payload as OpenPresenceState & { throttled?: boolean }).throttled) return context as OpenPresenceState;
         if (!response.ok && response.status === 409 && payload.state && conflictRetries < WORKSPACE_CONFLICT_RETRY_LIMIT) {
           conflictRetries += 1;
@@ -1240,8 +1265,11 @@ export default function Home() {
     }, 15_000);
     return () => window.clearInterval(timer);
   }, [view, state?.onboarded, state?.activePresenceId, state?.presence?.id]);
+  function setView(nextView: View) {
+    openView(nextView);
+  }
   function openView(nextView: View) {
-    setView(nextView);
+    setRenderedView(nextView);
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
       url.pathname = viewPaths[nextView];
@@ -1472,11 +1500,12 @@ export default function Home() {
         <p>Waking your Presence…</p>
       </main>
     );
-  if (error && !state)
+  if (error && (!state || scopeRecoveryPath))
     return (
       <main className="loading-screen">
         <CircleAlert size={28} />
         <p>{error}</p>
+        {scopeRecoveryPath && <Button onClick={() => window.location.assign(scopeRecoveryPath)}>Open current Agent workspace</Button>}
         <Button onClick={() => window.location.reload()}>Try again</Button>
       </main>
     );
@@ -2429,7 +2458,7 @@ function AgentWorkspaceShell({
           {view === "knowledge" && <KnowledgeView state={state} mutate={mutate} refreshState={refreshState} />}
           {view === "assets" && <AssetsView state={state} refreshState={refreshState} />}
           {view === "usage" && <UsageView state={state} setView={setView} mutate={mutate} />}
-          {view === "chat" && <OperatorChatView state={state} mutate={mutate} refreshState={refreshState} operationalHealth={operationalHealth} setView={setView} />}
+          {view === "chat" && <OperatorChatView key={`${state.activeAgentId}:${state.presence?.id}:${typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("threadId") ?? "main"}`} state={state} mutate={mutate} refreshState={refreshState} operationalHealth={operationalHealth} setView={setView} />}
           {view === "rehearsal" && <AgentLabView state={state} mutate={mutate} setView={setView} />}
           {view === "watching" && <WatchingView key={watchingTab} state={state} mutate={mutate} refreshState={refreshState} setView={setView} initialTab={watchingTab} />}
           {view === "people" && <PeopleViewLazy state={state} mutate={mutate} Button={Button} SectionEyebrow={SectionEyebrow} PageHeader={PageHeader} ChannelAvatar={ChannelAvatar} channelLabel={channelLabel} formatTime={formatTime} formatDateTime={formatDateTime} watchRelationshipPolicy={watchRelationshipPolicy} watchPolicyFromPurpose={watchPolicyFromPurpose} watchPlanSummary={watchPlanSummary} onOpenWatchlist={() => openWatching("watchlist")} />}
@@ -7236,19 +7265,33 @@ function OperatorChatOperationalNotice({ health, onOpenReview }: { health?: Oper
   </div>;
 }
 
-function OperatorChatMessageBody({ message }: { message: OperatorConversationMessage }) {
-  let receipt: { tool?: string; error?: string; status?: string; url?: string; instruction?: string; query?: string; post?: { text?: string }; delivered?: boolean } | undefined;
-  if (message.role === "system" && message.replyToMessageId) {
-    try { receipt = JSON.parse(message.content); } catch { /* Plain runtime message. */ }
+function OperatorChatMessageBody({ message, state }: { message: OperatorConversationMessage; state: OpenPresenceState }) {
+  const receipt = chatToolReceipt(message);
+  if (receipt) {
+    const result = Array.isArray(receipt.result) ? receipt.result.map((item) => {
+      if (!item || typeof item !== "object") return item;
+      const execution = state.executions.find((candidate) => candidate.id === item.executionId);
+      return execution ? { ...item, status: execution.status, failure: execution.failure, verified: execution.status === "succeeded" && state.outcomes.some((outcome) => outcome.executionId === execution.id && outcome.status === "succeeded") } : item;
+    }) : receipt.result;
+    const activity = toolActivitySummary({ ...receipt, result });
+    return <details className="operator-chat-tool" data-testid="operator-chat-tool">
+      <summary><span className={`operator-chat-tool-icon${activity.failed ? " is-failed" : ""}`} aria-hidden="true">{activity.failed ? <CircleAlert size={15} /> : ["Awaiting verification", "Needs review"].includes(activity.status) ? <Clock3 size={15} /> : <Check size={15} />}</span><span className="operator-chat-tool-title">{activity.title}</span><span className="operator-chat-tool-status">{activity.status}</span><time dateTime={message.timestamp}>{formatTime(message.timestamp)}</time><ChevronDown size={13} className="operator-chat-tool-chevron" aria-hidden="true" /></summary>
+      <div className="operator-chat-tool-result"><p>{activity.summary}</p>{activity.limit && <p className="operator-chat-tool-limit">{activity.limit}</p>}<details className="operator-chat-technical"><summary>Technical details</summary><pre>{JSON.stringify({ ...receipt, result }, null, 2)}</pre></details></div>
+    </details>;
   }
-  const labels: Record<string, string> = { inspect_post: "Read post", watch: "Save watch", assignment: "Create responsibility" };
-  if (receipt?.tool && labels[receipt.tool]) return <details className="operator-chat-tool" data-testid="operator-chat-tool"><summary>{labels[receipt.tool]} · {receipt.error ? "Could not complete" : receipt.tool === "assignment" ? "Saved" : receipt.tool === "inspect_post" && !receipt.post ? "Unavailable" : "Done"}</summary><p>{receipt.error ?? receipt.post?.text ?? receipt.instruction ?? receipt.query ?? receipt.url}</p>{receipt.status && <p>{receipt.status}</p>}{receipt.delivered === false && <p>No public action has been delivered.</p>}</details>;
+  const inspection = message.role === "presence" ? legacyInspectionEvidence(message.content) : undefined;
+  if (inspection) return <div className="operator-chat-inspection" data-testid="operator-chat-inspection"><p>{inspectionReportSummary(inspection)}</p><details className="operator-chat-technical"><summary>Saved evidence</summary><pre>{JSON.stringify(inspection, null, 2)}</pre></details></div>;
   return <p>{message.content}</p>;
 }
 
 function operatorChatWorkLabel(stage: string | undefined) {
   if (stage === "operator_chat.queued") return "Queued · the Agent is picking up your turn";
   if (stage === "operator_chat.generating") return "Thinking through your request";
+  if (stage === "operator_chat.check_connection") return "Checking the connection now";
+  if (stage === "operator_chat.social_action" || stage === "operator_chat.delivery") return "Carrying out the social action";
+  if (stage === "operator_chat.inspect_execution") return "Verifying delivery";
+  if (stage === "operator_chat.refresh_channel") return "Refreshing channel evidence";
+  if (stage === "operator_chat.search_posts") return "Searching posts";
   if (stage === "operator_chat.inspect_post") return "Reading the post you shared";
   if (stage === "operator_chat.watch") return "Saving your watch";
   if (stage === "operator_chat.assignment") return "Creating the responsibility";
@@ -7335,14 +7378,33 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
       : undefined);
   const nudges = state.operatorNudges ?? [];
   const threadNudges = nudges.filter((nudge) => !conversation || nudge.conversationId === conversation.id);
-  const hasUnfinishedChatRun = (state.operationalRuns ?? []).some((run) => run.presenceId === presence.id && run.kind === "operator_chat" && ["queued", "running", "waiting", "recovering", "reconciling"].includes(run.state));
-  const [pendingMessages, setPendingMessages] = useState<OperatorConversationMessage[]>([]);
+  const chatRuns = (state.operationalRuns ?? [])
+    .filter((run) => run.presenceId === presence.id && run.kind === "operator_chat" && ["queued", "running", "waiting", "recovering", "reconciling"].includes(run.state))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+  const hasUnfinishedChatRun = chatRuns.length > 0;
+  const outbox = useOperatorChatOutbox(
+    `${state.activeAgentId}:${presence.id}:${requestedThreadId ?? "main"}`,
+    (conversation?.messages ?? []).flatMap((item) => item.clientRequestId ? [item.clientRequestId] : []),
+    async (turn) => {
+      const result = await mutate({ type: "sendPresenceNudge", presenceId: presence.id, threadId: turn.threadId, content: turn.content, attachments: turn.inputAttachments, clientRequestId: turn.clientRequestId });
+      const saved = (snapshot: OpenPresenceState | null | undefined) => snapshot?.operatorConversations?.some((item) => item.presenceId === presence.id && item.messages.some((message) => message.clientRequestId === turn.clientRequestId));
+      return Boolean(saved(result) || saved(await refreshState().catch(() => undefined)));
+    },
+  );
+  const pendingMessages = outbox.turns;
+  const sending = pendingMessages.some((turn) => turn.delivery === "sending" || turn.delivery === "pending");
+  const [stoppingChat, setStoppingChat] = useState(false);
   const threadNudgeIds = new Set(threadNudges.map((nudge) => nudge.id));
   const conversationActionEvents = operatorConversationActionEvents(state, presence.id).filter((event) => threadNudgeIds.has(event.nudgeId));
   const terminalAssignmentStatuses = new Set<AssignmentStatus>(["completed", "completed_with_adaptation", "failed", "expired_incomplete", "cancelled"]);
-  const hasUnfinishedNudges = hasUnfinishedChatRun || conversationActionEvents.some((event) => !["verified", "failed"].includes(event.status)) || threadNudges.some((nudge) => nudge.presenceId === presence.id && (["queued", "acknowledged", "working"].includes(nudge.status)
+  const toolExecutionIds = new Set((conversation?.messages ?? []).flatMap((item) => {
+    if (item.role !== "system") return [];
+    try { const receipt = JSON.parse(item.content); return Array.isArray(receipt.executionIds) ? receipt.executionIds.filter((id: unknown): id is string => typeof id === "string") : []; } catch { return []; }
+  }));
+  const hasUnfinishedToolActions = state.executions.some((item) => toolExecutionIds.has(item.id) && ["queued", "approved", "running", "submitted", "verification-pending"].includes(item.status));
+  const hasUnfinishedNudges = hasUnfinishedToolActions || hasUnfinishedChatRun || conversationActionEvents.some((event) => !["verified", "failed"].includes(event.status)) || threadNudges.some((nudge) => nudge.presenceId === presence.id && (["queued", "acknowledged", "working"].includes(nudge.status)
     || nudge.status === "assignment_created" && Boolean(nudge.assignmentId && !terminalAssignmentStatuses.has(state.assignments.find((assignment) => assignment.id === nudge.assignmentId)?.status ?? "draft"))));
-  const persistedVisibleMessages = (conversation?.messages ?? []).filter((item, index, messages) => {
+  const persistedVisibleMessages = orderedOperatorChatMessages(conversation?.messages ?? []).filter((item, index, messages) => {
     // Older runtimes put execution rationale and routine observation summaries
     // in Genny's mouth. Keep those records durable, but do not render machinery
     // as conversation now that truthful action events exist beside the thread.
@@ -7365,10 +7427,7 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
   }
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<SandboxAssetInput[]>([]);
-  const [sending, setSending] = useState(false);
-  const sendingRef = useRef(false);
-  const retrySendRef = useRef<{ content: string; clientRequestId: string } | null>(null);
-  const [sendError, setSendError] = useState<string | null>(null);
+
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const refreshStateRef = useRef(refreshState);
@@ -7383,13 +7442,13 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
     composer.style.height = `${Math.min(140, Math.max(38, composer.scrollHeight))}px`;
   }, [message]);
   useEffect(() => {
-    if (!hasUnfinishedNudges) return;
+    if (!hasUnfinishedNudges && !pendingMessages.length) return;
     const timer = window.setInterval(() => {
       if (!browserDocumentIsVisible()) return;
       void refreshStateRef.current().catch(() => undefined);
     }, 1_500);
     return () => window.clearInterval(timer);
-  }, [hasUnfinishedNudges, presence.id]);
+  }, [hasUnfinishedNudges, presence.id, pendingMessages.length]);
   const addFile = (file: File) => {
     if (attachments.length >= 12 || file.size > 4_000_000) return;
     const kind = file.type === "image/gif" ? "gif" : file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "image" : "document";
@@ -7397,41 +7456,28 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
     reader.onload = () => setAttachments((items) => [...items, { name: file.name, kind, mimeType: file.type, dataUrl: typeof reader.result === "string" ? reader.result : undefined }]);
     reader.readAsDataURL(file);
   };
-  const send = async (event?: React.FormEvent) => {
+  const stopCurrentChat = async () => {
+    const currentRun = chatRuns[0];
+    if (!currentRun || stoppingChat) return;
+    setStoppingChat(true);
+    try {
+      await mutate({ type: "cancelOperatorChat", presenceId: presence.id, runId: currentRun.id });
+    } finally {
+      setStoppingChat(false);
+    }
+  };
+  const send = (event?: React.FormEvent) => {
     event?.preventDefault();
-    if (!message.trim() || sending || sendingRef.current) return;
+    if (!message.trim()) return;
     const submittedContent = message.trim();
-    const clientRequestId = retrySendRef.current?.content === submittedContent ? retrySendRef.current.clientRequestId : `operator_send_${crypto.randomUUID()}`;
-    retrySendRef.current = { content: submittedContent, clientRequestId };
-    const submittedAttachments = attachments;
-    setSendError(null);
-    const pendingId = `pending_operator_message_${clientRequestId}`;
-    sendingRef.current = true;
-    setPendingMessages((items) => [...items, { id: pendingId, role: "operator", content: submittedContent, timestamp: new Date().toISOString(), clientRequestId }]);
+    const clientRequestId = `operator_send_${crypto.randomUUID()}`;
+    if (!outbox.enqueue({
+      id: `pending_operator_message_${clientRequestId}`, role: "operator", content: submittedContent,
+      timestamp: new Date().toISOString(), clientRequestId, threadId: operatorThread.id,
+      inputAttachments: attachments,
+    })) return;
     setMessage("");
     setAttachments([]);
-    setSending(true);
-    try {
-      const result = await mutate({ type: "sendPresenceNudge", presenceId: presence.id, threadId: operatorThread.id, content: submittedContent, attachments, clientRequestId });
-      // The server records the operator turn before it invokes the model. If
-      // the browser request is interrupted after that durable write, reconcile
-      // the thread so the submitted message and its current status do not
-      // disappear from this view until a manual reload.
-      const saved = (snapshot: OpenPresenceState | null | undefined) => snapshot?.operatorConversations?.some((conversation) => conversation.presenceId === presence.id && conversation.messages.some((item) => item.clientRequestId === clientRequestId));
-      const confirmed = saved(result) || saved(await refreshState().catch(() => undefined));
-      if (!confirmed) {
-        setMessage(submittedContent);
-        setAttachments(submittedAttachments);
-        setSendError("Your message could not be confirmed as saved. It is back in the composer; send again to retry safely.");
-      } else {
-        retrySendRef.current = null;
-        void refreshState().catch(() => undefined);
-      }
-    } finally {
-      setPendingMessages((items) => items.filter((item) => item.id !== pendingId));
-      sendingRef.current = false;
-      setSending(false);
-    }
   };
   const linkedAssignmentIds = new Set([...operatorThread.assignmentIds, ...threadNudges.flatMap((nudge) => nudge.assignmentId ? [nudge.assignmentId] : [])]);
   const linkedAssignments = state.assignments.filter((assignment) => linkedAssignmentIds.has(assignment.id));
@@ -7447,7 +7493,22 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
   const sessionAssignmentIds = new Set(sessionAssignments.map((assignment) => assignment.id));
   const linkedRuns = (state.assignmentRuns ?? []).filter((run) => sessionAssignmentIds.has(run.assignmentId));
   const hasActiveAssignmentRun = linkedRuns.some((run) => ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status));
-  const activeOperatorRun = (state.operationalRuns ?? []).find((run) => run.presenceId === presence.id && run.kind === "operator_chat" && ["queued", "running", "waiting", "recovering", "reconciling"].includes(run.state));
+  const activeOperatorRun = chatRuns[0];
+  const chatIsBusy = pendingMessages.length > 0 || hasUnfinishedChatRun;
+  const hasQueuedDraft = chatIsBusy && Boolean(message.trim());
+  const queuedRunCount = chatRuns.filter((run) => run.state === "queued").length;
+  const unconfirmedSend = pendingMessages[0]?.delivery === "unconfirmed";
+  const queueStatusText = unconfirmedSend
+    ? "Delivery is unconfirmed. Retry the message above to continue; later messages stay in order."
+    : !activeOperatorRun && sending
+      ? "Sending your message · you can keep typing"
+      : hasQueuedDraft
+    ? "This message will be queued behind the current work."
+    : queuedRunCount > 0
+      ? `${queuedRunCount} message${queuedRunCount === 1 ? "" : "s"} queued · working in order`
+      : chatIsBusy
+        ? "Working on your request · new messages run in order"
+        : null;
   return <div className="page page-chat operator-chat-page">
     <PageHeader className="chat-heading" title="Chat" description={`A private conversation with ${presence.name}. Ask a question, share context, or give the Agent an outcome to pursue.`} />
     <div className="chat-layout operator-chat-layout">
@@ -7459,35 +7520,43 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
           const nudge = item.nudgeId ? nudges.find((candidate) => candidate.id === item.nudgeId) : undefined;
           const linkedAssignment = nudge?.assignmentId ? state.assignments.find((assignment) => assignment.id === nudge.assignmentId) : undefined;
           const failedChatRun = item.role === "operator" && !visibleMessages.some((reply) => reply.role === "presence" && reply.replyToMessageId === item.id)
-            ? (state.operationalRuns ?? []).find((run) => run.kind === "operator_chat" && run.state === "failed" && run.metadata?.operatorMessageId === item.id)
+            ? (state.operationalRuns ?? []).find((run) => run.kind === "operator_chat" && ["failed", "needs_operator", "cancelled"].includes(run.state) && run.metadata?.operatorMessageId === item.id)
             : undefined;
           const anchoredActions = item.nudgeId && actionAnchorByNudge.get(item.nudgeId) === item.id ? conversationActionEvents.filter((event) => event.nudgeId === item.nudgeId) : [];
-          return <Fragment key={item.id}><article className={`operator-chat-message is-${item.role}`}>
-            <div className="operator-chat-message-meta"><strong>{item.role === "operator" ? "You" : item.role === "presence" ? presence.name : "OpenPresence"}</strong><span>{formatTime(item.timestamp)}</span></div>
-            <OperatorChatMessageBody message={item} />
+          const isToolActivity = Boolean(chatToolReceipt(item));
+          return <Fragment key={item.id}><article className={`operator-chat-message is-${item.role}${isToolActivity ? " is-tool-activity" : ""}`}>
+            {!isToolActivity && <div className="operator-chat-message-meta"><strong>{item.role === "operator" ? "You" : item.role === "presence" ? presence.name : "OpenPresence"}</strong><span>{formatTime(item.timestamp)}</span></div>}
+            <OperatorChatMessageBody message={item} state={state} />
+            {visiblePendingMessages.some((turn) => turn.id === item.id) && <div className="operator-chat-message-actions" role="status">
+              <span>{visiblePendingMessages.find((turn) => turn.id === item.id)?.delivery === "unconfirmed" ? "Not confirmed · kept on this browser" : visiblePendingMessages.find((turn) => turn.id === item.id)?.delivery === "sending" ? "Sending…" : "Waiting to send"}</span>
+              {visiblePendingMessages[0]?.id === item.id && visiblePendingMessages[0].delivery === "unconfirmed" && <button type="button" onClick={outbox.retry}>Retry send</button>}
+            </div>}
             {failedChatRun && <button type="button" disabled={Boolean(activeOperatorRun)} onClick={() => void mutate({ type: "retryOperatorChat", presenceId: presence.id, messageId: item.id })}>Retry response</button>}
             {item.role === "operator" && <OperatorChatLinkPreview content={item.content} />}
             {item.attachments?.length ? <div className="operator-chat-attachments">{item.attachments.map((attachment) => <span key={attachment.id}>{attachment.name}</span>)}</div> : null}
             {item.role === "operator" && nudge && <div className="operator-chat-message-actions">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status) && <span className={`operator-nudge-status is-${nudge.status}`} role="status">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status)}</span>}{nudge.status === "failed" && !nudge.privateConversation && !nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "retryPresenceNudge", presenceId: presence.id, nudgeId: nudge.id })}>Retry look</button>}{!nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "createAssignmentFromNudge", presenceId: presence.id, nudgeId: nudge.id })}>Take this on</button>}</div>}
           </article>{anchoredActions.length > 0 && <div className="operator-chat-action-timeline" aria-label="Actions from this conversation">{anchoredActions.map((event) => <OperatorChatActionTimelineEvent key={event.id} event={event} />)}</div>}</Fragment>;
         })}
-        <OperatorChatWorkStatus run={activeOperatorRun} presence={presence} />
+        {activeOperatorRun && !["operator_chat.queued", "operator_chat.generating"].includes(activeOperatorRun.stage ?? "") && <OperatorChatWorkStatus run={activeOperatorRun} presence={presence} />}
         <OperatorSessionBlocks state={state} presence={presence} assignments={sessionAssignments} runs={linkedRuns} actions={conversationActionEvents} showProgress={hasActiveAssignmentRun} onOpenReview={() => setView("review")} />
-        {(sending || hasUnfinishedChatRun) && activeOperatorRun?.state !== "waiting" && <div className="operator-chat-thinking" role="status" aria-live="polite" data-testid="operator-chat-thinking">
+        {activeOperatorRun && activeOperatorRun.state !== "waiting" && ["operator_chat.queued", "operator_chat.generating"].includes(activeOperatorRun.stage ?? "") && <div className="operator-chat-thinking" role="status" aria-live="polite" data-testid="operator-chat-thinking">
           <PresenceGlyph accent={presence.accent} name={presence.name} avatarVariant={state.agent?.avatarVariant} look={presenceAvatarLook(presence)} />
-          <span>{presence.name} is thinking</span>
+          <span>{activeOperatorRun?.stage === "operator_chat.queued" ? `${presence.name} is picking up your request` : `${presence.name} is thinking`}</span>
           <span className="thinking-dots" aria-hidden="true"><i /> <i /> <i /></span>
         </div>}
         <div ref={endRef} />
         </div>
         <OperatorChatOperationalNotice health={operationalHealth} onOpenReview={() => setView("review")} />
-        {sendError && <p role="alert" className="operator-chat-send-error">{sendError}</p>}
+        {outbox.storageError && <p role="alert" className="operator-chat-send-error">{outbox.storageError}</p>}
+        {queueStatusText && <div className="operator-chat-queue-status" role="status" aria-live="polite" data-testid="operator-chat-queue-status"><span className="operator-chat-queue-dot" aria-hidden="true" />{queueStatusText}</div>}
         {attachments.length > 0 && <div className="attachment-list operator-chat-attachments">{attachments.map((attachment, index) => <span key={`${attachment.name}-${index}`}>{attachment.name}<button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={11} /></button></span>)}</div>}
         <form className="chat-composer operator-chat-composer" onSubmit={send}>
           <label className="attach-button" aria-label="Attach context"><Plus size={16} /><input type="file" hidden multiple onChange={(event) => Array.from(event.target.files ?? []).forEach(addFile)} /></label>
-          <textarea ref={composerRef} aria-label={`Message ${presence.name}`} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder={sending ? `Sending to ${presence.name}…` : sessionAssignments.some((assignment) => assignmentIsOpen(assignment)) ? `Steer current work or ask ${presence.name}…` : `Message ${presence.name}…`} rows={1} disabled={sending} />
+          <textarea ref={composerRef} aria-label={`Message ${presence.name}`} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }} placeholder={chatIsBusy ? `Queue a message for ${presence.name}…` : sessionAssignments.some((assignment) => assignmentIsOpen(assignment)) ? `Steer current work or ask ${presence.name}…` : `Message ${presence.name}…`} rows={1} />
           <ChatModePicker mode="chat" setView={setView} />
-          <button className="send-button" aria-label="Send" type="submit" disabled={!message.trim() || sending}>{sending ? <LoaderCircle size={17} className="spin" /> : <ArrowUp size={18} strokeWidth={2.2} />}</button>
+          <button className={`send-button${chatIsBusy && !hasQueuedDraft ? " is-stop" : hasQueuedDraft ? " is-queue" : ""}`} aria-label={chatIsBusy && !hasQueuedDraft ? activeOperatorRun ? "Stop current task" : unconfirmedSend ? "Waiting for retry" : "Sending message" : hasQueuedDraft ? "Queue message" : "Send"} type={chatIsBusy && !hasQueuedDraft ? "button" : "submit"} onClick={chatIsBusy && !hasQueuedDraft ? () => void stopCurrentChat() : undefined} disabled={chatIsBusy && !hasQueuedDraft ? !activeOperatorRun || stoppingChat : !message.trim()}>
+            {chatIsBusy && !hasQueuedDraft ? !activeOperatorRun ? unconfirmedSend ? <CircleAlert size={17} /> : <LoaderCircle size={17} className="spin" /> : stoppingChat ? <LoaderCircle size={17} className="spin" /> : <Square size={15} fill="currentColor" /> : hasQueuedDraft ? <Plus size={18} /> : <ArrowUp size={18} strokeWidth={2.2} />}
+          </button>
         </form>
       </section>
     </div>
@@ -11213,7 +11282,10 @@ function NeedsYouQueue({
   const [reviewPromptIncidentId, setReviewPromptIncidentId] = useState<string | null>(null);
   const incidents = health?.incidents.filter((incident) => incident.state === "needs_operator" || incident.operatorActionRequired) ?? [];
   const approvals = executions.filter((execution) => execution.status === "awaiting-review");
-  const blocked = assignments.filter((assignment) => ["needs_operator", "blocked"].includes(assignment.status));
+  const blockedAssignments = assignments.filter((assignment) => ["needs_operator", "blocked"].includes(assignment.status));
+  const billingIncident = incidents.find((incident) => isXCreditsError(incident.safeSummary));
+  const billingAssignments = billingIncident ? blockedAssignments.filter((assignment) => isXCreditsError(assignment.lastOutcome?.message)) : [];
+  const blocked = blockedAssignments.filter((assignment) => !billingAssignments.includes(assignment));
   const duplicateEvidence = duplicatePublicOutcomeEvidence(state, state.presence?.id);
   const duplicateTargetLabel = (evidence: (typeof duplicateEvidence)[number]) => evidence.target
     ? socialTargetLabel(evidence.target, `the ${evidence.replies[0]?.channelId === "x" ? "X" : "public"} post ${evidence.targetRef.id}`)
@@ -11237,7 +11309,7 @@ function NeedsYouQueue({
     const presenceId = state.presence?.id;
     if (!presenceId) return;
     const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x");
-    const shouldCheckNativeX = incident.rootCauseKey.startsWith("native_x.") || (
+    const shouldCheckNativeX = isXCreditsError(incident.safeSummary) || incident.rootCauseKey.startsWith("native_x.") || (
       incident.rootCauseKey === "runtime.credits_exhausted"
       && state.presences.some((item) => item.id === presenceId && item.channel === "x")
       && xCreditsExhausted(nativeConnection)
@@ -11269,6 +11341,7 @@ function NeedsYouQueue({
     }
   };
   const incidentAction = (incident: NonNullable<OperationalHealthSnapshot["incidents"]>[number]) => {
+    if (isXCreditsError(incident.safeSummary)) return { label: "Review X connection and billing", onClick: onOpenSettings };
     if (incident.requiresAuth) return { label: "Open connection settings", onClick: onOpenSettings };
     if (incident.rootCauseKey === "runtime.duplicate_public_outcome") {
       if (incident.affectedRunIds.length === 0) return { label: checkingIncidentId === incident.id ? "Resuming…" : "I reviewed it · resume", onClick: () => void resolveReviewedDuplicate(incident), disabled: checkingIncidentId !== null };
@@ -11303,17 +11376,20 @@ function NeedsYouQueue({
           ? `Multiple replies were observed to ${duplicateTargetLabel(duplicateEvidence[0]!)}.`
           : isReviewedDuplicate && duplicateEvidence.length > 1
             ? `Multiple replies were observed on ${duplicateEvidence.length} public threads.`
-            : incident.safeSummary;
+            : isXCreditsError(incident.safeSummary) ? "X API access is blocked by billing" : incident.safeSummary;
         const incidentDetail = isReviewedDuplicate
           ? duplicateEvidence.length
             ? "No affected action remains active. Inspect the identified thread and observed replies before resuming delivery to that target."
             : "No affected action remains active, but the target evidence is no longer available in the local Social Mirror. Review this Presence’s public activity on the channel before resuming."
+          : isXCreditsError(incident.safeSummary)
+            ? `${billingAssignments.length} Assignment${billingAssignments.length === 1 ? " is" : "s are"} waiting on the same X billing issue. Repeating these actions cannot restore API access. ${incident.safeSummary}`
           : `${incident.affectedRunIds.length} affected action${incident.affectedRunIds.length === 1 ? "" : "s"}. The automatic recovery budget is exhausted; review the context before continuing.`;
         return (
           <article className="needs-you-queue-card needs-you-queue-card-incident" key={incident.id}>
             <div className="needs-you-queue-card-topline"><span className="needs-you-queue-badge">Needs You</span><span>Recovery decision</span></div>
             <h3>{incidentHeading}</h3>
             <p>{incidentDetail}</p>
+            {incident.id === billingIncident?.id && billingAssignments.length > 0 && <button type="button" className="action-button secondary" onClick={onOpenSchedule}>View affected Assignments</button>}
             {isReviewedDuplicate && duplicateEvidence.length > 0 && (
               <section className="needs-you-queue-evidence" aria-label="Affected public threads" data-testid="duplicate-public-outcome-evidence">
                 <strong>{duplicateEvidence.length === 1 ? "Affected public thread" : "Affected public threads"}</strong>
@@ -11518,7 +11594,7 @@ function FailedAttemptsReview({
     const presenceId = state.presence?.id;
     if (!presenceId) return;
     const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x");
-    const shouldCheckNativeX = incident.rootCauseKey.startsWith("native_x.") || (
+    const shouldCheckNativeX = isXCreditsError(incident.safeSummary) || incident.rootCauseKey.startsWith("native_x.") || (
       incident.rootCauseKey === "runtime.credits_exhausted" &&
       state.presences.some((item) => item.id === presenceId && item.channel === "x") &&
       xCreditsExhausted(nativeConnection)
@@ -11539,6 +11615,7 @@ function FailedAttemptsReview({
     }
   };
   const operatorActionForIncident = (incident: NonNullable<OperationalHealthSnapshot["incidents"]>[number]) => {
+    if (isXCreditsError(incident.safeSummary)) return { label: "Review X connection and billing", onClick: onOpenSettings };
     if (incident.requiresAuth) return { label: "Open connection settings", onClick: onOpenSettings };
     if (incident.rootCauseKey === "runtime.duplicate_public_outcome") return { label: "Review public activity", onClick: onOpenQueue };
     if (incident.rootCauseKey.startsWith("runtime.")) return { label: checkingIncidentId === incident.id ? "Checking runtime…" : "Check runtime now", onClick: () => void recheckIncident(incident) };

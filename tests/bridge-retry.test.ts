@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { claimExecutions, closeChromeVerification, createBridgeWithKey, failExecution, ingestEvents, reconcileBridge, recordVerifiedBridgeReaction, reportBridgeIdentity } from "../lib/bridge";
+import { claimExecutions, closeChromeVerification, createBridgeWithKey, failExecution, ingestEvents, reconcileBridge, recordVerifiedBridgeReaction, reportBridgeIdentity, verifyChromeExecution } from "../lib/bridge";
 import { applyOperation, createAgent, formXReplyIntent, recordNativeMirror } from "../lib/runtime";
 import { appendMirrorEvents, readState, readStateForBridge, readStateVersion, WorkspaceConflictError, writeState } from "../lib/db";
 import type { Execution, MirrorEvent } from "../lib/types";
@@ -562,5 +562,82 @@ describe("Bridge browser retry lifecycle", () => {
     expect(closed.execution.externalRef).toBeUndefined();
     expect(closed.execution.failure?.reviewDisposition).toBe("operator_action_required");
     expect(closed.execution.failure?.reviewNote).toContain("No matching public object");
+  });
+
+  it("keeps an authenticated DOM readback pending when native X verification has no credentials", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "0");
+    let state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    state.presence!.environment = "live";
+    state.presence!.connectionMode = "bridge";
+    state.presences = state.presences.map((presence) => presence.id === state.presence!.id ? { ...presence, environment: "live", connectionMode: "bridge" } : presence);
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    state = applyOperation(bridgeResult.state, { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    state = formXReplyIntent(state, "A verified browser reply.", "target-post-dom");
+    writeState(state);
+    let bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge!.id)!;
+    reportBridgeIdentity(bridge, { executorId: "chrome-dom-proof", username: "example_agent" });
+    bridge = readState().bridges.find((item) => item.id === bridge.id)!;
+    ingestEvents(bridge, { events: [{ sourceEventId: "dom-proof-target", event: "created", object: { externalRef: { type: "x.post", id: "target-post-dom" }, objectType: "post", language: "en", author: { displayName: "Target", handle: "target" }, content: { text: "Target" }, visibility: "public", shareability: "presence-only" } }] });
+    bridge = readState().bridges.find((item) => item.id === bridge.id)!;
+    const claimed = claimExecutions(bridge, { executorId: "chrome-dom-proof", limit: 1 });
+    expect(claimed.executions).toHaveLength(1);
+    const execution = claimed.executions[0]!;
+    const result = await verifyChromeExecution(readState().bridges.find((item) => item.id === bridge.id)!, execution.id, {
+      executorId: "chrome-dom-proof",
+      observedAt: new Date().toISOString(),
+      domProof: {
+        permalink: "https://x.com/example_agent/status/1234567890",
+        externalRef: { type: "x.reply", id: "1234567890" },
+        authorHandle: "example_agent",
+        text: "A verified browser reply.",
+        parentId: "target-post-dom",
+        mediaCount: 0,
+        assetIds: [],
+      },
+    });
+    expect(result.verified).toBe(false);
+    expect(result.execution.status).toBe("verification-pending");
+    expect(result.execution.failure?.code).toBe("X_API_VERIFICATION_PENDING");
+    expect(result.execution.externalRef).toBeUndefined();
+  });
+
+  it("rejects DOM readback that clears the composer without a matching public permalink or relationship", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "0");
+    let state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    state.presence!.environment = "live";
+    state.presence!.connectionMode = "bridge";
+    state.presences = state.presences.map((presence) => presence.id === state.presence!.id ? { ...presence, environment: "live", connectionMode: "bridge" } : presence);
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    state = applyOperation(bridgeResult.state, { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    state = formXReplyIntent(state, "A reply whose public receipt is missing.", "target-post-dom-fail");
+    writeState(state);
+    let bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge!.id)!;
+    reportBridgeIdentity(bridge, { executorId: "chrome-dom-reject", username: "example_agent" });
+    bridge = readState().bridges.find((item) => item.id === bridge.id)!;
+    ingestEvents(bridge, { events: [{ sourceEventId: "dom-reject-target", event: "created", object: { externalRef: { type: "x.post", id: "target-post-dom-fail" }, objectType: "post", language: "en", author: { displayName: "Target", handle: "target" }, content: { text: "Target" }, visibility: "public", shareability: "presence-only" } }] });
+    bridge = readState().bridges.find((item) => item.id === bridge.id)!;
+    const claimed = claimExecutions(bridge, { executorId: "chrome-dom-reject", limit: 1 });
+    expect(claimed.executions).toHaveLength(1);
+    const execution = claimed.executions[0]!;
+    const result = await verifyChromeExecution(readState().bridges.find((item) => item.id === bridge.id)!, execution.id, {
+      executorId: "chrome-dom-reject",
+      domProof: {
+        permalink: "https://x.com/example_agent/status/1234567891",
+        externalRef: { type: "x.reply", id: "1234567891" },
+        authorHandle: "example_agent",
+        text: "A reply whose public receipt is missing.",
+        parentId: "wrong-target",
+        mediaCount: 0,
+        assetIds: [],
+      },
+    });
+    expect(result.verified).toBe(false);
+    expect(result.execution.status).toBe("verification-pending");
+    expect(result.execution.failure?.code).toBe("X_API_VERIFICATION_PENDING");
+    expect(result.execution.externalRef).toBeUndefined();
   });
 });
