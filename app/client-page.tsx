@@ -14104,8 +14104,8 @@ function ScheduleView({
               <Button variant="ghost" onClick={() => setIntervention("Please review this plan and choose the next worthwhile step.")}>Ask Jenny to review this plan</Button>
             )}
             {!["completed", "completed_with_adaptation", "cancelled", "draft", "expired_incomplete", "failed"].includes(selectedAssignment.status) && (
-              <Button variant="primary" disabled={runningLiveAssignmentId === selectedAssignment.id || getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing} onClick={() => void runLiveAssignment(selectedAssignment)}>
-                {runningLiveAssignmentId === selectedAssignment.id || getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing ? <><LoaderCircle size={14} className="spin" /> Working now…</> : ["needs_operator", "blocked"].includes(selectedAssignment.status) ? <><RotateCcw size={14} /> Retry attempt</> : <><Play size={14} /> Work now</>}
+              <Button variant="primary" disabled={sendingIntervention || getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing} onClick={() => setIntervention("Please prioritize this and decide whether it should happen now.")}>
+                {getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing ? <><LoaderCircle size={14} className="spin" /> Working now…</> : <><Play size={14} /> Ask Jenny to prioritize</>}
               </Button>
             )}
             {!["completed", "completed_with_adaptation", "cancelled", "failed", "expired_incomplete"].includes(selectedAssignment.status) && (
