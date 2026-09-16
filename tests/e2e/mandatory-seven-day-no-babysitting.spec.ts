@@ -385,6 +385,25 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     const measurementCount = current.outcomes.length + current.growthReviews.length + current.evidenceRecords.length + current.publicationMetrics.length;
     const blockers = current.events.filter(isExplicitBlocker).map(eventProjection);
     const autonomousWakeCount = current.events.filter((event) => event.title === "Sandbox autonomous attention wake" && event.sessionId === sessionId).length;
+    const sessionIntents = current.intents;
+    const sessionIntentIds = new Set(sessionIntents.map((intent) => text(intent.id)));
+    const sessionExecutionIds = new Set(current.executions.map((execution) => text(execution.id)));
+    const causalGraph = {
+      observations: current.mirrorObjects.length,
+      decisions: sessionIntents.length,
+      planMutations: current.events.filter((event) => text(event.title) === "Agent plan changed").length,
+      permissionDecisions: current.events.filter((event) => /permission|authorized|envelope/i.test(`${text(event.title)} ${text(event.detail)}`)).length,
+      executions: current.executions.length,
+      verifiedResults: current.outcomes.filter((outcome) => text(outcome.status) === "succeeded").length,
+      learningUpdates: current.events.filter((event) => /learning|strategy/i.test(`${text(event.title)} ${text(event.detail)}`)).length,
+      laterReplans: current.events.filter((event) => /plan changed|replan|reassess/i.test(`${text(event.title)} ${text(event.detail)}`)).length,
+    };
+    expect(current.executions.every((execution) => sessionIntentIds.has(text(execution.socialIntentId))), "An execution is missing its decision lineage.").toBe(true);
+    expect(current.outcomes.every((outcome) => !text(outcome.executionId) || sessionExecutionIds.has(text(outcome.executionId))), "An outcome is missing its execution lineage.").toBe(true);
+    expect(causalGraph.observations).toBeGreaterThan(0);
+    expect(causalGraph.decisions).toBeGreaterThan(0);
+    expect(causalGraph.executions).toBeGreaterThan(0);
+    expect(causalGraph.verifiedResults).toBeGreaterThan(0);
     const startMs = startAt ? Date.parse(startAt) : Number.NaN;
     const endMs = endAt ? Date.parse(endAt) : Number.NaN;
     const dailyTrajectory = Array.from({ length: 7 }, (_, index) => {
@@ -422,7 +441,7 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
       virtualDurationMinutes: elapsedMinutes,
       requiredVirtualDurationMinutes: dayMinutes,
       baseline: { goal: text(record(created.agent).description), userAssignmentCount: baselineAssignments.length, presence: { connectionMode: text(record(baseline.presence).connectionMode), environment: text(record(baseline.presence).environment) } },
-      totals: { agentAssignments: agentAssignments.length, autonomousIntents: autonomousIntents.length, autonomousExecutions: autonomousExecutions.length, outcomes: current.outcomes.length, measurements: measurementCount, blockers: blockers.length, autonomousWakeCount },
+      totals: { agentAssignments: agentAssignments.length, autonomousIntents: autonomousIntents.length, autonomousExecutions: autonomousExecutions.length, outcomes: current.outcomes.length, measurements: measurementCount, blockers: blockers.length, autonomousWakeCount, causalGraph },
       assertions: { sevenDaysAdvanced: (elapsedMinutes ?? 0) >= dayMinutes, dailyAutonomousWakes: autonomousWakeCount >= 7, noUserAssignment: baselineAssignments.length === 0, seededLaunch: text(startSession.seed) === seed, relevantMediaObserved: current.events.some((event) => /evaluation-chart|media/i.test(`${text(event.title) ?? ""} ${text(event.detail) ?? ""}`)), irrelevantMediaObserved: current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("unrelated product photo")), breakingEventObserved: current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("withdrawn")), selfGeneratedWork: agentAssignments.length > 0 || autonomousIntents.length > 0, followThrough: autonomousExecutions.length > 0, measurement: measurementCount > 0, explicitBlocker: blockers.length > 0, unexplainedIdleDays },
       dailyTrajectory,
       trajectory,
