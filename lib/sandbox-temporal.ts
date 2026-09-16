@@ -375,8 +375,9 @@ export class SandboxTemporalKernel {
     kernel.checkpointNumberValue = snapshot.nextCheckpointNumber ?? 0;
     kernel.handlers = new Map(Object.entries(handlers ?? {}));
     for (const event of kernel.eventsValue) {
-      if (event.handlerId && !kernel.handlers.has(event.id) && kernel.handlers.has(event.handlerId)) kernel.handlers.set(event.id, kernel.handlers.get(event.handlerId)!);
-      if (event.status === "pending" && event.handlerId && !kernel.handlers.has(event.id)) throw new TemporalValidationError(`Snapshot requires replay handler ${event.handlerId}.`);
+      const stableHandler = event.handlerKey ? kernel.handlers.get(event.handlerKey) : event.handlerId ? kernel.handlers.get(event.handlerId) : undefined;
+      if (stableHandler && !kernel.handlers.has(event.id)) kernel.handlers.set(event.id, stableHandler);
+      if (event.status === "pending" && (event.handlerId || event.handlerKey) && !kernel.handlers.has(event.id)) throw new TemporalValidationError(`Snapshot requires replay handler ${event.handlerKey ?? event.handlerId}.`);
     }
     kernel.checkpointNumberValue = Math.max(0, ...(snapshot.checkpoints ?? []).map((checkpoint) => Number(checkpoint.id.match(/^checkpoint-(\d+)$/)?.[1] ?? 0)));
     return kernel;
