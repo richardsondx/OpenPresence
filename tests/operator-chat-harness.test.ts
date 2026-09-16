@@ -7,8 +7,8 @@ import { getOperationalRun, readStateSnapshotForContext, resolvedDbPath, savePro
 import { parseOperatorChatStep } from "../lib/operator-chat-harness";
 import { recentChatItems } from "../lib/operator-chat-history";
 import { createOperatorNudge, linkOperatorChatAssignment, recordOperatorConversationMessage, settleNudgeFromAssignment, startQueuedNudge } from "../lib/operator-chat";
-import { applyOperation, createAgent, startPlaygroundSession } from "../lib/runtime";
-import { repairMissingOperatorNudgeWakes, recoverInterruptedOperatorChat } from "../lib/temporal";
+import { applyOperation, createAgent, normalizeState, startPlaygroundSession } from "../lib/runtime";
+import { repairMissingOperatorNudgeWakes, recoverInterruptedOperatorChat, queuedLiveAssignmentRunsWithoutWorkers } from "../lib/temporal";
 
 function fixture(content = "What should we focus on next?") {
   let state = createAgent({ name: "Chat Test", description: "Useful social judgment", mode: "agent", handle: "@chat_test", accent: "#777777" });
@@ -26,6 +26,61 @@ const modelResponse = (content: unknown) => new Response(JSON.stringify({ choice
 describe("private operator Chat harness", () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
+  it("normalizes flattened bounded assignment windows from model output", () => {
+    const parsed = parseOperatorChatStep(JSON.stringify({
+      kind: "assignment",
+      title: "Test a template",
+      startsAt: "2026-09-16T05:00:00-04:00",
+      deadlineAt: "2026-09-16T05:45:00-04:00",
+      instruction: "Prepare a private draft and leave it ready for review.",
+      strategyTemplateId: "growth-hypothesis:example",
+    }));
+    expect(parsed).toMatchObject({ kind: "assignment", timeframe: { startsAt: "2026-09-16T05:00:00-04:00", deadline: "2026-09-16T05:45:00-04:00" }, strategyTemplateId: "growth-hypothesis:example" });
+  });
+
+  it("records supervisory turns on the active Sandbox causal clock", () => {
+    const original = fixture("How are we doing?");
+    const state = startPlaygroundSession(original.state, original.presenceId, "fresh");
+    const session = state.playgroundSessions.find((item) => item.presenceId === original.presenceId)!;
+    const next = recordOperatorConversationMessage(state, { presenceId: original.presenceId, content: "Can we push harder?", clientRequestId: "causal-supervision-turn" });
+    const message = next.operatorConversations!.flatMap((item) => item.messages).find((item) => item.clientRequestId === "causal-supervision-turn");
+    expect(message?.causalTime).toEqual({ clock: "sandbox", at: session.virtualNow, sessionId: session.id });
+  });
+
+  it("continues a promise-only answer into actual research before completing, and persists choices", async () => {
+    const original = fixture("Find a current startup participation format and draft two options. Do not publish.");
+    const steps = [
+      { kind: "answer", text: "I’ll look for a useful approach." },
+      { kind: "search_knowledge", query: "startup participation" },
+      { kind: "answer", text: "Two private approaches are ready.", choices: [{ label: "Showcase", content: "Draft the showcase option; do not publish." }, { label: "Lessons", content: "Draft the lessons option; do not publish." }] },
+    ];
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      if (steps.length === 2) expect(String(init?.body)).toContain("Completion checkpoint");
+      return modelResponse(steps.shift());
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+    const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
+    const replies = saved.operatorConversations!.flatMap(item => item.messages).filter(item => item.replyToMessageId === original.message.id);
+    expect(replies.some(item => item.role === "system" && item.content.includes("search_knowledge"))).toBe(true);
+    expect(replies.filter(item => item.role === "presence")).toEqual([expect.objectContaining({ content: "Two private approaches are ready.", choices: expect.arrayContaining([expect.objectContaining({ label: "Showcase" })]) })]);
+    expect(saved.executions).toHaveLength(0);
+    expect(saved.assignments).toHaveLength(0);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not report success when the model exhausts its tool budget", async () => {
+    const original = fixture("Investigate the current runtime.");
+    vi.stubGlobal("fetch", vi.fn(async () => modelResponse({ kind: "runtime_status" })));
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+    expect(getOperationalRun(run.id)?.state).toBe("failed");
+    const messages = readStateSnapshotForContext({ presenceId: original.presenceId }).operatorConversations!.flatMap(item => item.messages);
+    expect(messages.some(item => item.replyToMessageId === original.message.id && item.role === "presence")).toBe(false);
+    expect(messages.some(item => item.content.includes("work limit"))).toBe(true);
+  });
+
   it("uses a multi-tool turn to execute once and returns verified delivery evidence to cognition", async () => {
     const original = fixture("Publish one short post about testing a prototype.");
     let state = applyOperation(original.state, { type: "setPresence", patch: { connectionMode: "sandbox", status: "live", execution: { post: "auto" } } });
@@ -40,7 +95,7 @@ describe("private operator Chat harness", () => {
       expect(String(init?.body)).toContain('succeeded');
       const request = JSON.parse(String(init?.body));
       expect(request.messages.at(-1).content).toContain("Runtime tool result");
-      expect(request.messages.at(-1).content).toContain("succeeded");
+      expect(JSON.stringify(request.messages)).toContain("succeeded");
       expect(request.messages.at(-2).role).toBe("assistant");
       return modelResponse({ kind: "answer", text: "The Sandbox post is verified." });
     });
@@ -49,7 +104,7 @@ describe("private operator Chat harness", () => {
     await executeAutonomyRun(run.id);
     const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
     expect(getOperationalRun(run.id)?.state).toBe("succeeded");
-    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(fetchMock).toHaveBeenCalledTimes(7);
     expect(saved.executions).toHaveLength(1);
     expect(saved.outcomes.filter((item) => item.status === "succeeded")).toHaveLength(1);
     expect(saved.operatorConversations!.flatMap((item) => item.messages)).toContainEqual(expect.objectContaining({ content: "The Sandbox post is verified.", replyToMessageId: original.message.id }));
@@ -76,8 +131,48 @@ describe("private operator Chat harness", () => {
     const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
     await executeAutonomyRun(run.id);
     expect(getOperationalRun(run.id)?.state).toBe("succeeded");
-    expect(modelCalls).toBe(3);
+    expect(modelCalls).toBe(4);
     expect(externalReads).toBe(2);
+  });
+
+  it("turns an operator's fixed-it message into a fresh check and retry of the existing Assignment", async () => {
+    vi.stubEnv("OPENPRESENCE_X_API_MOCK", "1");
+    const original = fixture("I fixed the X issue. Check it again and continue the blocked public work.");
+    original.state.presences[0]!.environment = "live";
+    if (original.state.presence?.id === original.presenceId) original.state.presence.environment = "live";
+    let state = upsertNativeXConnection(original.state, { presenceId: original.presenceId, id: "chat-recovery", account: { id: "chat-account", username: "chat_test", name: "Chat Test" }, access: "read-write" });
+    saveNativeXCredentials("chat-recovery", { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_token", accessTokenSecret: "test_token_secret" });
+    state = applyOperation(state, { type: "createAssignment", presenceId: original.presenceId, environment: "live", instruction: "Publish one useful post about the prototype." });
+    const assignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "activateAssignment", id: assignment.id });
+    state.assignments[0]!.status = "needs_operator";
+    state.assignments[0]!.work = { ...(state.assignments[0]!.work ?? { phase: "blocked", attempts: 0, maxAttempts: 4, storiesResearched: 0 }), phase: "blocked", blockedReason: "X reports no API credits." };
+    state.assignments[0]!.lastOutcome = { class: "delivery_failed", message: "X reports no API credits.", at: new Date().toISOString() };
+    writeState(state);
+    let modelCalls = 0;
+    const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      if (!String(url).includes("api.openai.com")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      modelCalls += 1;
+      if (modelCalls === 1) return modelResponse({ kind: "runtime_status" });
+      if (modelCalls === 2 || modelCalls === 3) return modelResponse({ kind: "retry_assignment", assignmentId: assignment.id });
+      expect(String(init?.body)).toContain("Fresh X reads passed");
+      return modelResponse({ kind: "answer", text: "I checked the saved X account and recent posts, then queued the existing public responsibility. The read-only check did not prove billing or write access, so I’ll let the normal worker verify that on the real retry." });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+    const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
+    const messages = saved.operatorConversations!.flatMap((item) => item.messages);
+    const receipt = messages.find((item) => item.role === "system" && item.replyToMessageId === original.message.id && item.content.includes('"tool":"retry_assignment"'));
+    expect(getOperationalRun(run.id)?.state).toBe("succeeded");
+    expect(modelCalls).toBe(5);
+    expect(receipt?.content).toContain('"status":"queued"');
+    expect(saved.assignments.find((item) => item.id === assignment.id)).toMatchObject({ id: assignment.id, status: "working" });
+    expect(saved.assignments).toHaveLength(1);
+    expect(saved.assignmentRuns?.filter((item) => item.assignmentId === assignment.id)).toHaveLength(1);
+    expect(queuedLiveAssignmentRunsWithoutWorkers(saved)).toEqual(expect.arrayContaining([expect.objectContaining({ assignmentId: assignment.id })]));
+    expect(saved.executions).toHaveLength(0);
+    expect(messages).toContainEqual(expect.objectContaining({ role: "presence", replyToMessageId: original.message.id, content: expect.stringContaining("queued the existing public responsibility") }));
   });
 
   it("recovers a stranded Chat turn without escalating an unrelated public incident", () => {
@@ -132,6 +227,67 @@ describe("private operator Chat harness", () => {
     expect(created.state.operatorNudges?.[0]).toMatchObject({ status: "acknowledged", privateConversation: true });
   });
 
+  it("keeps a selected library asset reference and its grounded preview on private Chat turns", () => {
+    const { state, presenceId } = fixture("What does this image show?");
+    const timestamp = new Date().toISOString();
+    const assetId = "library-chat-asset";
+    state.assets.push({
+      id: assetId,
+      agentId: state.agent!.id,
+      sourceId: "uploaded-source",
+      type: "image",
+      dataUrl: "data:image/png;base64,AAAA",
+      mimeType: "image/png",
+      status: "ready",
+      provenance: { origin: "operator_upload", sourceUrl: "https://cdn.example.test/chart.png", importedAt: timestamp },
+      perception: { observation: "A line chart with a rising trend.", likelyMeaning: "The measured value increased over time.", uncertainty: ["low"] },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    const beforeAssetCount = state.assets.length;
+    const created = createOperatorNudge(state, {
+      presenceId,
+      content: "What does this image show?",
+      privateConversation: true,
+      attachments: [{ name: "trend.png", kind: "image", existingAssetId: assetId }],
+    });
+    const message = created.state.operatorConversations?.flatMap((item) => item.messages).find((item) => item.id === created.nudge.messageId);
+    expect(message?.attachments?.[0]).toMatchObject({
+      existingAssetId: assetId,
+      name: "trend.png",
+      dataUrl: "data:image/png;base64,AAAA",
+      sourceUrl: "https://cdn.example.test/chart.png",
+      perception: {
+        observation: "A line chart with a rising trend.",
+        interpretation: "The measured value increased over time.",
+        uncertainty: "low",
+      },
+    });
+    expect(created.nudge.attachmentIds).toHaveLength(1);
+    expect(created.state.assets).toHaveLength(beforeAssetCount);
+  });
+
+  it("rejects a stale or cross-Presence library asset before private cognition", () => {
+    const { state, presenceId } = fixture("Use the selected image privately");
+    state.assets.push({
+      id: "other-presence-asset",
+      agentId: state.agent!.id,
+      sourceId: "uploaded-source",
+      accessScope: { mode: "selected_presences", presenceIds: ["another-presence"] },
+      type: "image",
+      status: "ready",
+      provenance: { origin: "operator_upload", importedAt: new Date().toISOString() },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    expect(() => createOperatorNudge(state, {
+      presenceId,
+      content: "Use the selected image privately",
+      privateConversation: true,
+      attachments: [{ name: "private.png", kind: "image", existingAssetId: "other-presence-asset" }],
+    })).toThrow("That media is no longer available to this Presence.");
+  });
+
   it("links a plain Chat assignment to its turn and returns one eventual outcome receipt", () => {
     const { state, presenceId, message } = fixture("Please publish one thoughtful post about launch feedback");
     const withAssignment = applyOperation(state, {
@@ -143,6 +299,7 @@ describe("private operator Chat harness", () => {
     const assignment = withAssignment.assignments[0];
     const conversation = (withAssignment.operatorConversations ?? []).find((item) => item.messages.some((item) => item.id === message.id))!;
     const linked = linkOperatorChatAssignment(withAssignment, conversation.id, message.id, assignment.id);
+    expect(linked.assignments.find((item) => item.id === assignment.id)?.createdBy).toBe("agent");
     const linkedMessage = linked.operatorConversations?.find((item) => item.id === conversation.id)?.messages.find((item) => item.id === message.id);
     expect(linkedMessage?.nudgeId).toBeTruthy();
     expect(linked.operatorNudges?.find((item) => item.id === linkedMessage?.nudgeId)).toMatchObject({ assignmentId: assignment.id, status: "assignment_created" });
@@ -161,7 +318,7 @@ describe("private operator Chat harness", () => {
     await executeAutonomyRun(queued.run.id);
     const saved = readStateSnapshotForContext({ presenceId });
     expect((saved.operatorConversations ?? []).flatMap((item) => item.messages)).toContainEqual(expect.objectContaining({ role: "presence", replyToMessageId: message.id, content: "Let's compare two topics with the audience we want to reach." }));
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(getOperationalRun(queued.run.id)?.state).toBe("succeeded");
     expect(saved.executions).toHaveLength(0);
   });
@@ -212,7 +369,7 @@ describe("private operator Chat harness", () => {
     upsertOperationalRun(first);
     await dispatchAutonomyWorker(second.id);
     expect(getOperationalRun(second.id)?.state).toBe("succeeded");
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("includes the earlier answer in a queued follow-up's context, but never includes future turns", async () => {
@@ -231,7 +388,7 @@ describe("private operator Chat harness", () => {
     vi.stubGlobal("fetch", fetchMock);
     const run = queueAutonomyRun(presenceId, "operator_chat", { metadata: { operatorMessageId: followup.id } }).run;
     await executeAutonomyRun(run.id);
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(getOperationalRun(run.id)?.state).toBe("succeeded");
   });
 
@@ -247,6 +404,7 @@ describe("private operator Chat harness", () => {
     const fetchMock = vi.fn(async (_url: string | URL, init?: RequestInit) => {
       const request = JSON.parse(String(init?.body)) as { messages?: Array<{ content?: string }> };
       const prompt = request.messages?.at(-1)?.content ?? "";
+      if (prompt.includes("Completion checkpoint")) return modelResponse({ kind: "answer", text: prompt.includes("First answer") ? "First answer" : "Second answer" });
       if (prompt.includes("First turn must keep its context")) {
         firstStarted();
         await firstGate;
@@ -260,7 +418,7 @@ describe("private operator Chat harness", () => {
     const firstWorker = executeAutonomyRun(firstRun.run.id);
     await firstCall;
     const secondWorker = executeAutonomyRun(secondRun.run.id);
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2));
     releaseFirst();
     await Promise.all([firstWorker, secondWorker]);
     const saved = readStateSnapshotForContext({ presenceId });
@@ -283,7 +441,7 @@ describe("private operator Chat harness", () => {
     const queued = queueAutonomyRun(presenceId, "operator_chat", { metadata: { operatorMessageId: message.id } });
     await executeAutonomyRun(queued.run.id);
     const saved = readStateSnapshotForContext({ presenceId });
-    expect(modelCalls).toBe(2);
+    expect(modelCalls).toBe(3);
     expect(getOperationalRun(queued.run.id)?.state).toBe("succeeded");
     expect((saved.operatorConversations ?? []).flatMap((item) => item.messages).at(-1)?.content).toContain("still work on the draft");
     expect(saved.executions).toHaveLength(0);
@@ -301,7 +459,7 @@ describe("private operator Chat harness", () => {
     const saved = readStateSnapshotForContext({ presenceId });
     expect(saved.watches.filter((item) => item.query === "@example")).toHaveLength(1);
     expect((saved.operatorConversations ?? []).flatMap((item) => item.messages).filter((item) => item.role === "presence" && item.replyToMessageId === message.id)).toHaveLength(1);
-    expect(calls).toBe(2);
+    expect(calls).toBe(3);
   });
 
   it("keeps new turns when a cold worker read encounters an older active Agent snapshot", () => {
@@ -328,6 +486,57 @@ describe("private operator Chat harness", () => {
     const saved = readStateSnapshotForContext({ presenceId });
     expect(saved.assignments).toHaveLength(1);
     expect(saved.presence!.status).toBe("paused");
+    expect(saved.executions).toHaveLength(0);
+    expect(getOperationalRun(queued.run.id)?.state).toBe("succeeded");
+  });
+
+  it("saves an explicit planning-only Chat Task for review without starting work", async () => {
+    const original = fixture("Create the private Task now and leave it ready for review. Do not publish anything.");
+    original.state.presence!.environment = "live";
+    original.state.presences.find((item) => item.id === original.presenceId)!.environment = "live";
+    writeState(original.state, { force: true });
+    const startsAt = new Date(Date.now() - 60_000).toISOString();
+    const deadline = new Date(Date.now() + 45 * 60_000).toISOString();
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => modelResponse(++calls === 1
+      ? {
+        kind: "assignment",
+        title: "Private planning Task",
+        timeframe: { startsAt, deadline },
+        instruction: "Create a private, bounded one-time Task. Do not publish, reply, quote, like, repost, follow, attach media, or perform any public action. Stop immediately after the Task is saved. This is a planning task only and remains ready for review.",
+      }
+      : { kind: "answer", text: "The private Task is saved and ready for review. Nothing was published." })));
+
+    const queued = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } });
+    await executeAutonomyRun(queued.run.id);
+
+    const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
+    const assignment = saved.assignments[0];
+    expect(assignment).toMatchObject({ status: "draft", planningOnly: true, title: "Private planning Task", description: expect.any(String), timeframe: { startsAt: expect.any(String), deadline: expect.any(String) } });
+    expect(assignment.nextDueAt).toBeUndefined();
+    expect(saved.assignmentRuns?.filter((run) => run.assignmentId === assignment.id)).toHaveLength(0);
+    expect(saved.executions).toHaveLength(0);
+    const messages = (saved.operatorConversations ?? []).flatMap((item) => item.messages).filter((item) => item.replyToMessageId === original.message.id);
+    const receipt = messages.find((item) => item.role === "system");
+    expect(receipt ? JSON.parse(receipt.content) : undefined).toMatchObject({ assignmentId: assignment.id, status: "draft", planningOnly: true, readyForReview: true, delivered: false });
+    expect(messages.filter((item) => item.role === "presence")).toHaveLength(1);
+    expect(messages.at(-1)?.content).toContain("saved and ready for review");
+  });
+
+  it("persists an Agent-created Chat responsibility with the template under test", async () => {
+    const original = fixture("Use a saved template to prepare one private growth draft. Do not publish.");
+    const prepared = normalizeState(original.state);
+    const template = prepared.growthHypotheses?.find((item) => item.template?.source === "bundled");
+    expect(template).toBeTruthy();
+    writeState(prepared, { force: true });
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => modelResponse(++calls === 1
+      ? { kind: "assignment", title: "Test saved growth format", instruction: `Prepare one private draft using ${template!.template!.title}. Do not publish.`, strategyTemplateId: template!.id }
+      : { kind: "answer", text: "The Agent-planned draft is saved and ready for review. Nothing was published." })));
+    const queued = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } });
+    await executeAutonomyRun(queued.run.id);
+    const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
+    expect(saved.assignments).toContainEqual(expect.objectContaining({ createdBy: "agent", strategyTemplateId: template!.id }));
     expect(saved.executions).toHaveLength(0);
     expect(getOperationalRun(queued.run.id)?.state).toBe("succeeded");
   });

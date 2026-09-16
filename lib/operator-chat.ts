@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { AssignmentRunStatus, AttentionEpisode, OpenPresenceState, OperatorConversation, OperatorNudge, PresenceChatAttachment, SandboxAssetInput } from "./types";
+import type { AssignmentRunStatus, AttentionEpisode, OpenPresenceState, OperatorConversation, OperatorNudge, PerceptionUncertainty, PresenceChatAttachment, SandboxAssetInput } from "./types";
 import { assignmentPursuitVerifiedCounts } from "./runtime";
+import { assetIsEligibleForPresence, effectiveAssetObservation, ingestLibraryImages } from "./asset-library";
+import { detectLibraryMedia } from "./asset-media";
+import { putAssetBytes } from "./asset-store";
+import { createUninterpretedPerception } from "./perception";
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const now = () => new Date().toISOString();
@@ -8,6 +12,66 @@ const urlsIn = (content: string) => [...new Set(content.match(/https?:\/\/[^\s<>
 
 const burstStatusWords = /\b(?:burst|campaign|increased? effort|distribution push|volume|actions?)\b/i;
 const burstStatusQuestionWords = /\b(?:did|has|have|is|are|when|what time|how many|how much|status|started|starting|running|active)\b/i;
+
+type MaterializedOperatorAttachments = {
+  state: OpenPresenceState;
+  attachments: SandboxAssetInput[];
+  newAssetIds: string[];
+};
+
+function decodeOperatorDataUrl(dataUrl: string, name: string) {
+  const match = dataUrl.match(/^data:([^;,]+);base64,([\s\S]+)$/);
+  if (!match) throw new Error(`${name} is not a valid base64 media attachment.`);
+  const bytes = Buffer.from(match[2]!, "base64");
+  if (!bytes.length) throw new Error(`${name} is an empty media attachment.`);
+  return { bytes, mimeType: match[1]! };
+}
+
+/**
+ * Conversation attachment IDs are private UI wrappers. Any attachment that
+ * can reach a public action must first receive the same durable Asset Library
+ * identity and immutable bytes as every other publication asset.
+ */
+export async function materializeOperatorChatAttachments(source: OpenPresenceState, presenceId: string, input: SandboxAssetInput[]): Promise<MaterializedOperatorAttachments> {
+  const state = clone(source);
+  const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+  const agentId = state.agent?.id;
+  if (!presence || !agentId) throw new Error("The attached media has no valid Agent and Presence context.");
+  const attachments: SandboxAssetInput[] = [];
+  const newAssetIds: string[] = [];
+  for (const item of input) {
+    if (item.existingAssetId) {
+      const existing = state.assets.find((asset) => asset.id === item.existingAssetId);
+      if (!existing || existing.archivedAt || existing.status === "failed" || !assetIsEligibleForPresence(state, existing, presence.id)) {
+        throw new Error(`${item.name} is no longer available to ${presence.name}.`);
+      }
+      attachments.push({ ...item, existingAssetId: existing.id, dataUrl: undefined, mimeType: existing.storage?.mimeType ?? existing.mimeType ?? item.mimeType });
+      continue;
+    }
+    if (!item.dataUrl) {
+      attachments.push({ ...item });
+      continue;
+    }
+    const decoded = decodeOperatorDataUrl(item.dataUrl, item.name);
+    const detected = detectLibraryMedia(item.name, decoded.mimeType, decoded.bytes);
+    if (!detected) throw new Error(`${item.name} is not a supported visual attachment.`);
+    const imported = await ingestLibraryImages(state, {
+      agentId,
+      files: [{ bytes: decoded.bytes, mimeType: detected.mimeType, assetType: detected.assetType, fileName: item.name, path: item.name }],
+      accessScope: { mode: "selected_presences", presenceIds: [presence.id] },
+      storeBytes: putAssetBytes,
+    });
+    const asset = imported.assets[0];
+    if (!asset || !assetIsEligibleForPresence(state, asset, presence.id)) throw new Error(`${item.name} could not be made available to ${presence.name}.`);
+    asset.presenceId = presence.id;
+    asset.environment = presence.environment ?? "live";
+    asset.visibility = "private-community";
+    asset.shareability = "presence-only";
+    newAssetIds.push(...imported.newAssetIds);
+    attachments.push({ ...item, existingAssetId: asset.id, dataUrl: undefined, mimeType: asset.storage?.mimeType ?? detected.mimeType });
+  }
+  return { state, attachments, newAssetIds: [...new Set(newAssetIds)] };
+}
 
 /** A status question must not be mistaken for a command to start a burst. */
 export function isBurstStatusQuestion(content: string) {
@@ -134,7 +198,7 @@ function conversationFor(state: OpenPresenceState, presenceId: string, threadId?
 }
 
 /** Record a normal private turn without creating an attention request. */
-export function recordOperatorConversationMessage(source: OpenPresenceState, input: { presenceId: string; threadId?: string; content: string; role?: "operator" | "presence" | "system"; replyToMessageId?: string; clientRequestId?: string }) {
+export function recordOperatorConversationMessage(source: OpenPresenceState, input: { presenceId: string; threadId?: string; content: string; choices?: Array<{ label: string; content: string }>; role?: "operator" | "presence" | "system"; replyToMessageId?: string; clientRequestId?: string; assignmentId?: string }) {
   const state = clone(source);
   const presence = state.presences.find((item) => item.id === input.presenceId) ?? state.presence;
   if (!presence) throw new Error("That Presence is not available.");
@@ -144,7 +208,20 @@ export function recordOperatorConversationMessage(source: OpenPresenceState, inp
     if (existing) return state;
   }
   const timestamp = now();
-  conversation.messages.push({ id: `${input.role === "presence" ? "presence" : "operator"}_message_${randomUUID()}`, role: input.role ?? "operator", replyToMessageId: input.replyToMessageId, content: input.content.trim(), timestamp, clientRequestId: input.role === "presence" ? undefined : input.clientRequestId });
+  const sandboxSession = state.playgroundSessions
+    .filter((session) => session.presenceId === presence.id && session.status === "active")
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  conversation.messages.push({
+    id: `${input.role === "presence" ? "presence" : "operator"}_message_${randomUUID()}`,
+    role: input.role ?? "operator",
+    replyToMessageId: input.replyToMessageId,
+    content: input.content.trim(),
+    choices: input.role === "presence" ? input.choices : undefined,
+    timestamp,
+    causalTime: sandboxSession ? { clock: "sandbox", at: sandboxSession.virtualNow, sessionId: sandboxSession.id } : { clock: "wall", at: timestamp },
+    clientRequestId: input.role === "presence" ? undefined : input.clientRequestId,
+    assignmentId: input.assignmentId,
+  });
   if (conversation.title === "New conversation" && input.role !== "presence") conversation.title = input.content.replace(/\s+/g, " ").slice(0, 52) + (input.content.length > 52 ? "…" : "");
   conversation.updatedAt = timestamp;
   return state;
@@ -168,7 +245,7 @@ export function directWatchQuery(content: string) {
   return match?.[1]?.replace(/^@/, "") || (operatorRequestsWatch(content) ? mentionedHandle?.replace(/^@/, "") : undefined);
 }
 
-export function createOperatorNudge(source: OpenPresenceState, input: { presenceId: string; threadId?: string; content: string; attachments?: SandboxAssetInput[]; clientRequestId?: string; privateConversation?: boolean }) {
+export function createOperatorNudge(source: OpenPresenceState, input: { presenceId: string; threadId?: string; content: string; attachments?: SandboxAssetInput[]; clientRequestId?: string; privateConversation?: boolean; assignmentId?: string }) {
   const state = clone(source);
   const presence = state.presences.find((item) => item.id === input.presenceId) ?? state.presence;
   if (!presence) throw new Error("That Presence is not available.");
@@ -181,8 +258,51 @@ export function createOperatorNudge(source: OpenPresenceState, input: { presence
   }
   const messageId = `operator_message_${randomUUID()}`;
   const nudgeId = `operator_nudge_${randomUUID()}`;
-  const attachments: PresenceChatAttachment[] = (input.attachments ?? []).map((item) => ({ id: `operator_attachment_${randomUUID()}`, name: item.name, kind: item.kind, mimeType: item.mimeType, dataUrl: item.dataUrl, sourceUrl: item.sourceUrl }));
-  conversation.messages.push({ id: messageId, role: "operator", content: input.content.trim(), timestamp, nudgeId, attachments, clientRequestId: input.clientRequestId });
+  const attachments: PresenceChatAttachment[] = (input.attachments ?? []).map((item) => {
+    const existingAsset = item.existingAssetId ? state.assets.find((asset) => asset.id === item.existingAssetId) : undefined;
+    if (item.existingAssetId && (!existingAsset || existingAsset.archivedAt || !["ready", "queued", "processing"].includes(existingAsset.status) || existingAsset.environment && existingAsset.environment !== (presence.environment ?? "live") || !assetIsEligibleForPresence(state, existingAsset, presence.id))) {
+      throw new Error("That media is no longer available to this Presence.");
+    }
+    const effective = existingAsset ? effectiveAssetObservation(state, existingAsset) : undefined;
+    const latestPerception = existingAsset
+      ? [...(state.perceptions ?? [])]
+        .filter((perception) => perception.assetId === existingAsset.id
+          && perception.agentId === existingAsset.agentId
+          && !perception.socialObjectId
+          && (!perception.scope || perception.scope === "library")
+          && perception.sourceAssetVersion === (existingAsset.checksum ?? existingAsset.storage?.exactHash ?? existingAsset.updatedAt))
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+      : undefined;
+    const perceptionResult = existingAsset
+      ? latestPerception?.result ?? (effective?.observation
+        ? {
+            observation: effective.observation,
+            interpretation: effective.likelyMeaning,
+            uncertainty: (effective.uncertainty as PerceptionUncertainty | undefined) ?? "insufficient",
+          }
+        : createUninterpretedPerception(existingAsset))
+      : undefined;
+    const perception = perceptionResult ? {
+      observation: perceptionResult.observation,
+      interpretation: perceptionResult.interpretation,
+      uncertainty: perceptionResult.uncertainty,
+      missingContext: perceptionResult.missingContext,
+      providerId: latestPerception?.providerId,
+    } : undefined;
+    return {
+      id: `operator_attachment_${randomUUID()}`,
+      existingAssetId: item.existingAssetId,
+      name: item.name,
+      kind: item.kind,
+      mimeType: item.mimeType ?? existingAsset?.storage?.mimeType ?? existingAsset?.mimeType,
+      // Keep inline previews usable while avoiding a second copy of assets
+      // backed by the durable library store.
+      dataUrl: existingAsset?.dataUrl ?? item.dataUrl,
+      sourceUrl: existingAsset?.provenance.sourceUrl ?? item.sourceUrl,
+      perception,
+    };
+  });
+  conversation.messages.push({ id: messageId, role: "operator", content: input.content.trim(), timestamp, nudgeId, attachments, clientRequestId: input.clientRequestId, assignmentId: input.assignmentId });
   if (presence.status === "paused" && !input.privateConversation) {
     conversation.messages.push({ id: `operator_system_${randomUUID()}`, role: "system", content: `${presence.name} is paused. Your note is saved and will be considered after you wake this Presence.`, timestamp, nudgeId });
   }
@@ -204,6 +324,7 @@ export function createOperatorNudge(source: OpenPresenceState, input: { presence
     attentionEpisodeIds: [],
     acknowledgedAt: presence.status === "paused" && !input.privateConversation ? undefined : timestamp,
     clientRequestId: input.clientRequestId,
+    assignmentId: input.assignmentId,
   };
   state.operatorNudges = [nudge, ...(state.operatorNudges ?? [])];
   return { state, nudge, duplicate: false as const };
@@ -300,6 +421,10 @@ export function linkOperatorChatAssignment(state: OpenPresenceState, conversatio
   const message = conversation?.messages.find((item) => item.id === messageId && item.role === "operator");
   const assignment = state.assignments.find((item) => item.id === assignmentId && item.presenceId === conversation?.presenceId);
   if (!conversation || !message || !assignment) throw new Error("The Chat responsibility could not be linked to its operator turn.");
+  // The operator authored the request, but the Agent authored and persisted
+  // the resulting responsibility. Keep that distinction durable so Tasks can
+  // show who planned the work without inferring from its prose.
+  assignment.createdBy = "agent";
   let nudge = message.nudgeId ? state.operatorNudges?.find((item) => item.id === message.nudgeId) : undefined;
   if (!nudge) {
     nudge = { id: `operator_nudge_${randomUUID()}`, privateConversation: true, agentId: conversation.agentId, presenceId: conversation.presenceId, conversationId: conversation.id, messageId: message.id, content: message.content, status: "assignment_created", sourceUrls: urlsIn(message.content), attachmentIds: message.attachments?.map((item) => item.id) ?? [], createdAt: message.timestamp, updatedAt: now(), attentionEpisodeIds: [], clientRequestId: message.clientRequestId };

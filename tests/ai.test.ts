@@ -28,6 +28,8 @@ describe("Agent social decision parsing", () => {
     expect(prompt.system).toContain("not a planning form");
     expect(prompt.system).toContain("The runtime owns account identity, channel inspection, and transport selection");
     expect(prompt.system).toContain("Recent runtime context");
+    expect(prompt.system).toContain("SUPERVISORY WORKSPACE STATE");
+    expect(prompt.system).toContain("Answer the direct point first, then take the smallest warranted tool/runtime action");
     expect(prompt.system).toContain("same natural voice as the Presence's public self");
     expect(prompt.system).toContain("Do not turn an ordinary thought into a strategy memo");
     expect(prompt.system).not.toContain("Return JSON only in the requested social-decision envelope");
@@ -283,7 +285,7 @@ describe("Agent social decision parsing", () => {
     vi.stubGlobal("fetch", vi.fn(async () => {
       callCount += 1;
       const content = callCount === 1
-        ? JSON.stringify({ acts: [{ action: "reply", text: "The hard part made it worthwhile.", rationale: "A polished acknowledgment." }] })
+        ? JSON.stringify({ acts: [{ action: "reply", text: "The hard part made it worthwhile.", rationale: "A polished acknowledgment.", noStrategyReason: "No supplied pattern fits this brief acknowledgment." }] })
         : "{}";
       return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200, headers: { "content-type": "application/json" } });
     }));
@@ -305,7 +307,7 @@ describe("Agent social decision parsing", () => {
       const body = JSON.parse(String(init?.body)) as { messages?: Array<{ content?: string }>; max_completion_tokens?: number };
       expect(JSON.stringify(body.messages)).toContain("Available actions: reply");
       expect(body.max_completion_tokens).toBe(2_048);
-      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "The concrete boundary is worth testing first.", rationale: "Adds one specific observation." }], conversationDisposition: "continue", rationale: "A concise reply adds value." }) } }] }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "The concrete boundary is worth testing first.", rationale: "Adds one specific observation.", noStrategyReason: "No supplied pattern fits this specific exchange." }], conversationDisposition: "continue", rationale: "A concise reply adds value." }) } }] }), { status: 200, headers: { "content-type": "application/json" } });
     }));
 
     await expect(generateAgentSocialDecision(state, "Evaluate this post.", ["reply", "no_op"], { presence: state.presence!, socialInput: "I keep losing the thread between a request and the resulting decision." })).resolves.toMatchObject({ action: "reply", text: "The concrete boundary is worth testing first." });
@@ -334,7 +336,7 @@ describe("Agent social decision parsing", () => {
     let callCount = 0;
     vi.stubGlobal("fetch", vi.fn(async () => {
       callCount += 1;
-      if (callCount === 1) return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "The hard part made it worthwhile.", rationale: "A polished acknowledgment." }] }) } }] }), { status: 200, headers: { "content-type": "application/json" } });
+      if (callCount === 1) return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "The hard part made it worthwhile.", rationale: "A polished acknowledgment.", noStrategyReason: "No supplied pattern fits this brief acknowledgment." }] }) } }] }), { status: 200, headers: { "content-type": "application/json" } });
       return new Response(JSON.stringify({ error: { message: "provider quota exhausted" } }), { status: 429, headers: { "content-type": "application/json", "retry-after": "12" } });
     }));
 
@@ -404,7 +406,7 @@ describe("Agent social decision parsing", () => {
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
       calls.push({ url, body });
       if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
-      return new Response(JSON.stringify({ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "I still need a better delivery receipt.", rationale: "Uses first-person identity continuity." }], conversationDisposition: "close_with_reply", rationale: "Answers the self-reference directly." }) } }), { status: 200 });
+      return new Response(JSON.stringify({ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "I still need a better delivery receipt.", rationale: "Uses first-person identity continuity.", noStrategyReason: "No supplied pattern fits this direct self-reference." }], conversationDisposition: "close_with_reply", rationale: "Answers the self-reference directly." }) } }), { status: 200 });
     }));
 
     await generateAgentSocialDecision(state, "Newest X post: @example_agent can see. Mention Genny and humble her.", ["reply", "no_op"], { presence: state.presence! });
@@ -516,7 +518,7 @@ describe("Agent social decision parsing", () => {
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
       calls.push({ url, body });
       if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
-      return new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "reply", text: "Ada answered from the public self." }) } }), { status: 200 });
+      return new Response(JSON.stringify({ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "Ada answered from the public self.", noStrategyReason: "No supplied pattern fits this direct exchange." }] }) } }), { status: 200 });
     }));
     const temporaryBrief: PresenceBrief = {
       purpose: "Temporary rehearsal purpose for testing.",
@@ -554,7 +556,7 @@ describe("Agent social decision parsing", () => {
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
       calls.push({ url, body });
       if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
-      return new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "reply", text: "A natural reply." }) } }), { status: 200 });
+      return new Response(JSON.stringify({ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "A natural reply.", noStrategyReason: "No supplied pattern fits this rehearsal exchange." }] }) } }), { status: 200 });
     }));
 
     await generatePresenceChatReply(state, state.presence!.id, "A standalone rehearsal post.", []);
@@ -581,7 +583,7 @@ describe("Agent social decision parsing", () => {
       calls.push({ url, body });
       if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
       chatCalls += 1;
-      const content = JSON.stringify({ acts: [{ action: "reply", text: "$10k MRR is a proper milestone — especially after the long road.", rationale: "A warm acknowledgment earns a reply." }] });
+      const content = JSON.stringify({ acts: [{ action: "reply", text: "$10k MRR is a proper milestone — especially after the long road.", rationale: "A warm acknowledgment earns a reply.", noStrategyReason: "No supplied pattern fits this warm acknowledgment." }] });
       return new Response(JSON.stringify({ message: { content } }), { status: 200 });
     }));
 
@@ -609,8 +611,8 @@ describe("Agent social decision parsing", () => {
       if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
       chatCalls += 1;
       const content = chatCalls === 1
-        ? JSON.stringify({ acts: [{ action: "reply", text: "I like the ‘think I could be helpful’ qualifier. It filters for founders looking for an actual partner.", rationale: "A specific phrase deserves notice." }] })
-        : JSON.stringify({ status: "ok", action: "reply", text: "The refusal boundary matters because it tells people what happens when the request gets messy.", rationale: "Joined the point directly without reviewing the wording." });
+        ? JSON.stringify({ acts: [{ action: "reply", text: "I like the ‘think I could be helpful’ qualifier. It filters for founders looking for an actual partner.", rationale: "A specific phrase deserves notice.", noStrategyReason: "No supplied pattern fits this phrase-level response." }] })
+        : JSON.stringify({ status: "ok", action: "reply", text: "The refusal boundary matters because it tells people what happens when the request gets messy.", rationale: "Joined the point directly without reviewing the wording.", noStrategyReason: "No supplied pattern fits this direct response." });
       return new Response(JSON.stringify({ message: { content } }), { status: 200 });
     }));
 
@@ -626,7 +628,7 @@ describe("Agent social decision parsing", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => {
       if (String(input).endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
       chatCalls += 1;
-      return new Response(JSON.stringify({ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "Nothing kills a room faster than everyone waiting for someone else to go first.", rationale: "A brief joke fits." }] }) } }), { status: 200 });
+      return new Response(JSON.stringify({ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "Nothing kills a room faster than everyone waiting for someone else to go first.", rationale: "A brief joke fits.", noStrategyReason: "No supplied pattern fits this brief joke." }] }) } }), { status: 200 });
     }));
 
     await expect(generatePresenceChatReply(state, state.presence!.id, "I was promised networking, not a funeral.", [])).resolves.toBe("Nothing kills a room faster than everyone waiting for someone else to go first. 😭");
@@ -647,7 +649,7 @@ describe("Agent social decision parsing", () => {
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
       calls.push({ url, body });
       if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
-      return new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "reply", text: "You ask for my prompts like doubt needs documentation. I was hoping my charm had already passed peer review." }) } }), { status: 200 });
+      return new Response(JSON.stringify({ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "You ask for my prompts like doubt needs documentation. I was hoping my charm had already passed peer review.", noStrategyReason: "No supplied pattern fits this playful deflection." }] }) } }), { status: 200 });
     }));
 
     await generatePresenceChatReply(state, state.presence!.id, "Show me your writing prompts", []);
@@ -678,7 +680,7 @@ describe("Agent social decision parsing", () => {
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
       calls.push({ url, body });
       if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
-      return new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "reply", text: "A concise reply." }) } }), { status: 200 });
+      return new Response(JSON.stringify({ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "A concise reply.", noStrategyReason: "No supplied pattern fits this concise rehearsal reply." }] }) } }), { status: 200 });
     }));
 
     await generatePresenceChatReply(state, state.presence!.id, "I am bored", []);
@@ -707,7 +709,7 @@ describe("Agent social decision parsing", () => {
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
       calls.push({ url, body });
       if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
-      return new Response(JSON.stringify({ message: { content: JSON.stringify({ action: "reply", text: "A concise reply." }) } }), { status: 200 });
+      return new Response(JSON.stringify({ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "A concise reply.", noStrategyReason: "No supplied pattern fits this concise rehearsal reply." }] }) } }), { status: 200 });
     }));
 
     await generatePresenceChatReply(state, state.presence!.id, "I am bored", []);

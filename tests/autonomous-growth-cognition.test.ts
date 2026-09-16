@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { applyOperation, compileAgendaWork, createAgent, createGrowthReview, deriveGrowthEvidenceSnapshot, deriveSelfDirectedDiscoveryPlan } from "@/lib/runtime";
 import { parseGrowthReviewDecision } from "@/lib/ai";
+import { autonomousGrowthReviewNeed, runAutonomousAttention } from "@/lib/autonomy-worker";
+import { listOperationalRuns, upsertRecoveryIncident, writeState } from "@/lib/db";
+import { runOperationalSweep } from "@/lib/temporal";
 import type { OpenPresenceState } from "@/lib/types";
 
 function fixture(): OpenPresenceState {
@@ -80,6 +83,73 @@ describe("Continuous Growth Awareness & Strategy Adaptation", () => {
     expect(growthItem?.state).toBe("ready");
   });
 
+  it("consumes a due Growth review from the headless attention worker", async () => {
+    process.env.OPENPRESENCE_AI_MOCK = "1";
+    let state = fixture();
+    const presenceId = state.presence!.id;
+
+    state = applyOperation(state, {
+      type: "createAssignment",
+      presenceId,
+      environment: "sandbox",
+      instruction: "Grow this Presence toward 10,000 followers while building an audience of AI founders.",
+    });
+    const assignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "activateAssignment", id: assignment.id });
+    const dueAt = new Date(Date.now() - 60_000).toISOString();
+    const persistedAssignment = state.assignments.find((item) => item.id === assignment.id)!;
+    persistedAssignment.plan = { ...persistedAssignment.plan!, nextWeeklyReviewAt: dueAt, nextStrategicReviewAt: new Date(Date.now() + 86_400_000).toISOString() };
+    writeState(state);
+
+    const need = autonomousGrowthReviewNeed(state, presenceId);
+    expect(need).toMatchObject({ assignment: { id: assignment.id }, kind: "weekly" });
+
+    const next = await runAutonomousAttention(presenceId);
+    expect(next.growthReviews?.[0]).toMatchObject({ assignmentId: assignment.id, kind: "weekly" });
+    expect(next.events.some((event) => event.title === "Growth review started")).toBe(true);
+    expect(next.events.some((event) => event.title === "Growth review persisted")).toBe(true);
+    expect(next.assignments.find((item) => item.id === assignment.id)?.plan?.nextWeeklyReviewAt).not.toBe(dueAt);
+  });
+
+  it("keeps model-only Growth reconsideration runnable when channel attention is operator-gated", () => {
+    process.env.OPENPRESENCE_AI_MOCK = "1";
+    let state = fixture();
+    const presenceId = state.presence!.id;
+    const livePresence = { ...state.presence!, environment: "live" as const, status: "live" as const };
+    state = { ...state, presence: livePresence, presences: [livePresence] };
+    state = applyOperation(state, {
+      type: "createAssignment",
+      presenceId,
+      environment: "live",
+      instruction: "Grow this Presence toward 10,000 followers while building an audience of AI founders.",
+    });
+    const assignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "activateAssignment", id: assignment.id });
+    const persistedAssignment = state.assignments.find((item) => item.id === assignment.id)!;
+    persistedAssignment.plan = { ...persistedAssignment.plan!, nextWeeklyReviewAt: new Date(Date.now() - 60_000).toISOString() };
+    writeState(state);
+    const incidentAt = new Date().toISOString();
+    upsertRecoveryIncident({
+      id: "incident_growth_review_channel_gate",
+      rootCauseKey: "native_x.credits_exhausted",
+      dependencyId: `native_x:${presenceId}`,
+      presenceId,
+      state: "needs_operator",
+      openedAt: incidentAt,
+      lastObservedAt: incidentAt,
+      affectedRunIds: [],
+      recoveryAttempts: 0,
+      safeSummary: "Channel credits are exhausted.",
+      operatorActionRequired: true,
+      updatedAt: incidentAt,
+    });
+
+    runOperationalSweep();
+    const reconsideration = listOperationalRuns(presenceId).find((run) => run.kind === "reconsideration" && run.sourceRef === assignment.id);
+    expect(reconsideration).toBeDefined();
+    expect(reconsideration?.metadata).toMatchObject({ work: "growth_review", kind: "weekly" });
+  });
+
   it("creates a GrowthRevision and updates GROWTH.md when strategyChanged is true", () => {
     let state = fixture();
     const presenceId = state.presence!.id;
@@ -133,6 +203,36 @@ describe("Continuous Growth Awareness & Strategy Adaptation", () => {
 
     const presence = nextState.presences.find((p) => p.id === presenceId);
     expect(presence?.activeGrowthRevisionRef).toBe(revision.id);
+  });
+
+  it("does not inherit a previous Presence responsibility's Growth revision", () => {
+    let state = fixture();
+    const presenceId = state.presence!.id;
+    state = applyOperation(state, {
+      type: "createAssignment",
+      presenceId,
+      environment: "live",
+      instruction: "Grow this Presence toward 10,000 followers.",
+    });
+    const previousAssignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "activateAssignment", id: previousAssignment.id });
+    const firstDecision = {
+      summary: "First responsibility strategy.", working: [], uncertain: [], weak: [], strategyChanged: true,
+      plan: { summary: "First responsibility plan." },
+    };
+    state = createGrowthReview(state, previousAssignment, "weekly", firstDecision);
+    const previousRevision = state.presences.find((item) => item.id === presenceId)?.activeGrowthRevisionRef;
+
+    state = applyOperation(state, { type: "createAssignment", presenceId, environment: "live", instruction: "Grow this Presence toward 20,000 followers." });
+    const currentAssignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "activateAssignment", id: currentAssignment.id });
+    const next = createGrowthReview(state, currentAssignment, "weekly", {
+      summary: "Second responsibility strategy.", working: [], uncertain: [], weak: [], strategyChanged: true,
+      plan: { summary: "Second responsibility plan." },
+    });
+
+    expect(previousRevision).toBeDefined();
+    expect(next.growthRevisions?.[0]?.previousRevisionRef).toBeUndefined();
   });
 
   it("records GrowthReview without creating GrowthRevision when strategyChanged is false", () => {

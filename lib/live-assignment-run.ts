@@ -1,3 +1,4 @@
+import { assignmentWindowState } from "./assignment-timeframe";
 import type { Assignment, AssignmentOutcomeClass, AssignmentRun, AssignmentRunStatus, AssignmentStatus, Execution, OpenPresenceState } from "./types";
 
 const pendingDeliveryStatuses = new Set(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"]);
@@ -271,6 +272,28 @@ export function reconcileLiveAssignmentRuns(source: OpenPresenceState, nowMs = D
     }
 
     if (execution.status === "succeeded") {
+      const verifiedOutcome = source.outcomes.some((outcome) => outcome.executionId === execution.id && outcome.status === "succeeded");
+      if (!verifiedOutcome) {
+        // Native/Bridge acknowledgement only proves that the connector
+        // accepted the request. Social Mirror evidence is the boundary that
+        // proves the public action became reality. Keep the run recoverable
+        // and visible until that evidence arrives.
+        run.status = "delivery_pending";
+        run.currentStage = "publishing";
+        run.completedAt = undefined;
+        run.lastError = undefined;
+        run.leaseOwner = undefined;
+        run.leaseExpiresAt = undefined;
+        run.updatedAt = timestamp;
+        if (assignment && !["completed", "cancelled", "blocked", "needs_operator"].includes(assignment.status)) {
+          assignment.status = "awaiting_execution";
+          assignment.work = { ...(assignment.work ?? { phase: "publishing", attempts: run.attempts, maxAttempts: run.maxAttempts, storiesResearched: 0 }), phase: "publishing", blockedReason: undefined };
+          assignment.lastOutcome = undefined;
+          assignment.nextDueAt = undefined;
+          assignment.updatedAt = timestamp;
+        }
+        continue;
+      }
       if (run.status !== "published" || run.currentStage !== "completed" || run.lastError || run.leaseOwner || run.leaseExpiresAt) {
         run.status = "published";
         run.currentStage = "completed";
@@ -285,7 +308,9 @@ export function reconcileLiveAssignmentRuns(source: OpenPresenceState, nowMs = D
 
     const activePursuit = run.pursuitWindowId
       && (source.assignmentPursuitWindows ?? []).some((window) => window.id === run.pursuitWindowId && window.status === "active");
-    if (assignment && isAutonomousPreWriteDeliveryFailure(execution)) {
+    const preWriteDeliveryWindowClosed = execution.failure?.code?.toUpperCase() === "INTENT_EXPIRED_BEFORE_CLAIM"
+      && Boolean(assignment && assignmentWindowState(assignment, nowMs) === "ended");
+    if (assignment && (isAutonomousPreWriteDeliveryFailure(execution) || preWriteDeliveryWindowClosed)) {
       const message = closeAutonomousPreWriteAssignment(assignment, execution, timestamp, nowMs);
       run.status = assignment.status === "expired_incomplete" ? "failed" : "deferred";
       run.currentStage = assignment.status === "expired_incomplete" ? "blocked" : "candidate_review";

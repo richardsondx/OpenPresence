@@ -38,12 +38,33 @@ describe("Assignment failure recovery boundaries", () => {
     expect(deferRecoverableAssignmentFailure(state, run.id)).toBe(true);
     expect(assignment.progress.verified).toBe(0);
   });
+  it("retries an unknown pre-write worker failure when no execution exists", () => {
+    const { state, assignment, run } = fixture();
+    run.lastError = "The provider returned an unusable result before an execution was formed.";
+    expect(deferRecoverableAssignmentFailure(state, run.id, Date.parse(run.createdAt))).toBe(true);
+    expect(assignment.status).toBe("active");
+    expect(assignment.progress.verified).toBe(0);
+  });
+  it("allows retry after an explicitly safe pre-write delivery close", () => {
+    const { state, assignment, run } = fixture();
+    state.executions.push({ id: "safe-pre-write", assignmentId: assignment.id, runId: run.id, status: "failed", externalRef: undefined, createdAt: run.createdAt, failure: { code: "BRIDGE_NOT_CHECKED_IN", message: "The Bridge did not check in.", retryable: true } } as never);
+    expect(deferRecoverableAssignmentFailure(state, run.id, Date.parse(run.createdAt))).toBe(true);
+  });
   it("does not retry billing errors or exhausted recovery budgets", () => {
     const { state, run } = fixture();
     run.lastError = "Your monthly spend cap has been reached.";
     expect(deferRecoverableAssignmentFailure(state, run.id)).toBe(false);
     run.lastError = "Openai returned an empty response."; run.attempts = 4;
     expect(deferRecoverableAssignmentFailure(state, run.id)).toBe(false);
+  });
+  it("blocks the Assignment instead of leaving it runnable after recovery exhaustion", () => {
+    const { state, assignment, run } = fixture();
+    assignment.systemFailures = 3;
+    run.lastError = "The live Assignment ended without a delivery, deferral, or explicit completion result.";
+    expect(deferRecoverableAssignmentFailure(state, run.id, Date.parse(run.createdAt))).toBe(false);
+    expect(assignment.status).toBe("blocked");
+    expect(assignment.lastOutcome?.class).toBe("evaluation_failed");
+    expect(assignment.nextDueAt).toBeUndefined();
   });
   it("does not replay even a failed execution from the worker", () => {
     const { state, assignment, run } = fixture();
@@ -68,12 +89,20 @@ describe("Assignment failure recovery boundaries", () => {
   });
   it("expires historical today requests without replaying their public work", () => {
     const { state, assignment } = fixture();
+    assignment.status = "active";
     assignment.instruction = "Publish six posts today";
     assignment.createdAt = "2026-09-11T19:00:00Z";
     expect(resumeRecoverableAssignmentFailures(state, Date.parse("2026-09-13T14:00:00Z"))).toEqual([assignment.id]);
     expect(assignment.status).toBe("expired_incomplete");
     expect(assignment.progress.verified).toBe(0);
     expect(assignment.nextDueAt).toBeUndefined();
+  });
+  it("does not rewrite an operator-blocked historical request as a timing expiry", () => {
+    const { state, assignment } = fixture();
+    assignment.instruction = "Publish six posts today";
+    assignment.createdAt = "2026-09-11T19:00:00Z";
+    expect(resumeRecoverableAssignmentFailures(state, Date.parse("2026-09-13T14:00:00Z"))).toEqual([]);
+    expect(assignment.status).toBe("blocked");
   });
   it("returns eligible historical model failures to the scheduler once", () => {
     const { state, assignment } = fixture();

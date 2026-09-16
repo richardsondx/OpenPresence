@@ -79,12 +79,42 @@ export function normalizeAssetLibraryState(state: OpenPresenceState) {
     createdAt: source.createdAt ?? timestamp(),
     updatedAt: source.updatedAt ?? timestamp(),
   }));
-  state.assets = (state.assets ?? []).map((asset) => ({
+  state.assets = (state.assets ?? []).map((asset) => {
+    const latestSocialPerception = (state.perceptions ?? [])
+      .filter((perception) => perception.assetId === asset.id)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+    const owningMirror = (state.mirrorObjects ?? []).find((object) => object.assetRefs?.some((ref) => ref.assetId === asset.id));
+    const owner = owningMirror?.author?.handle ? `@${owningMirror.author.handle.replace(/^@/, "")}` : owningMirror?.author?.displayName;
+    const postContext = owningMirror?.content?.text?.replace(/\s+/g, " ").trim().slice(0, 180);
+    const contextualObservation = owningMirror
+      ? `Visual attached to ${owner ?? "an observed X post"}${postContext ? ` discussing “${postContext}${postContext.length === 180 ? "…" : ""}”` : ""}. The pixels have not been inspected yet.`
+      : "Temporary visual evidence has not been inspected yet.";
+    return {
     ...asset,
     accessScope: asset.accessScope ?? assetAccessScope(asset),
     sourceOccurrences: asset.sourceOccurrences ?? [],
-  }));
+    retention: asset.retention ?? (isThirdPartyDiscovery(asset) ? "ephemeral" : "preserved"),
+    expiresAt: asset.expiresAt ?? (isThirdPartyDiscovery(asset) ? new Date(Date.parse(asset.updatedAt) + 72 * 60 * 60 * 1000).toISOString() : undefined),
+    reusePermission: asset.reusePermission ?? (isThirdPartyDiscovery(asset) ? "reference_only" : "ready_to_use"),
+    perception: asset.perception
+      ?? (latestSocialPerception?.result ? { observation: latestSocialPerception.result.observation, likelyMeaning: latestSocialPerception.result.interpretation, visibleText: latestSocialPerception.result.visibleText ? [latestSocialPerception.result.visibleText] : undefined, uncertainty: [latestSocialPerception.result.uncertainty] } : undefined)
+      ?? (isThirdPartyDiscovery(asset) ? {
+        observation: contextualObservation,
+        likelyMeaning: "Working-memory evidence only; not retained for reuse.",
+        uncertainty: ["pixels not inspected", "not selected for reuse"],
+      } : undefined),
+    // A browser blob URL is not a replayable asset source. Do not keep a
+    // broken card around after the originating X session is gone.
+    archivedAt: asset.archivedAt ?? (asset.retention !== "preserved" && ((asset.provenance?.sourceUrl?.startsWith("blob:") ?? false) || (asset.expiresAt && Date.parse(asset.expiresAt) <= Date.now())) ? timestamp() : undefined),
+    };
+  });
   return state;
+}
+
+function isThirdPartyDiscovery(asset: Asset) {
+  const origin = asset.provenance?.origin?.toLowerCase();
+  return Boolean(origin && ["discovered", "native-x", "x-bridge", "mirror_observation"].includes(origin)
+    && origin !== "operator_upload");
 }
 
 function presenceBelongsToAgent(state: OpenPresenceState, presenceId: string) {
@@ -139,7 +169,7 @@ export function effectiveAssetObservation(state: OpenPresenceState, asset: Asset
 export function deriveAssetReadiness(state: OpenPresenceState, asset: Asset): AssetReadiness {
   if (asset.status === "failed") return "failed";
   if (asset.archivedAt) return "unavailable";
-  if (!asset.storage?.storeKey && !asset.storagePath && !asset.dataUrl) return "unavailable";
+  if (!asset.storage?.storeKey && !asset.storagePath && !asset.dataUrl && !asset.provenance.sourceUrl) return "unavailable";
   if (asset.status === "queued" || asset.status === "processing") return "processing";
   const edit = latestMetadataEdit(state, asset);
   const perception = latestLibraryPerception(state, asset);
@@ -151,7 +181,15 @@ export function deriveAssetReadiness(state: OpenPresenceState, asset: Asset): As
 }
 
 export function isLibraryAsset(asset: Asset) {
-  return Boolean(asset.sourceId || asset.sourceOccurrences?.length || asset.provenance.origin === "operator_upload");
+  // A publication asset created inside one isolated Playground session is
+  // already part of the simulated execution envelope. It is not an
+  // agent-wide library item merely because normalization filled in the
+  // default `preserved` retention value. Library imports and explicitly
+  // reused assets do not carry a session id and remain subject to the full
+  // metadata/reuse contract.
+  if (asset.environment === "sandbox" && asset.sessionId && !asset.sourceId && !asset.sourceOccurrences?.length) return false;
+  return asset.retention === "preserved"
+    || (!asset.retention && Boolean(asset.sourceId || asset.sourceOccurrences?.length || asset.provenance.origin === "operator_upload"));
 }
 
 export function normalizeAssetReuseCooldownMonths(value: unknown) {
@@ -189,6 +227,9 @@ export function assetSelectionFailure(state: OpenPresenceState, assetId: string,
   if (!state.agent?.id || asset.agentId !== state.agent.id) return "That Asset belongs to another Agent and cannot be used here.";
   if (!assetIsEligibleForPresence(state, asset, options?.presenceId ?? state.presence?.id)) return "That Asset is not eligible for this Presence.";
   if (asset.archivedAt) return "That Asset is archived.";
+  if (asset.retention === "ephemeral") return "That discovery is temporary evidence. Preserve it intentionally before using it in a post.";
+  if (asset.reusePermission === "blocked") return "That Asset is blocked from reuse by its safety or rights assessment.";
+  if (asset.reusePermission === "reference_only" || asset.reusePermission === "needs_approval") return "That Asset is preserved as a reference, but it needs explicit reuse approval before publication.";
   const unavailableUntil = assetPostingUnavailableUntil(state, asset, options?.presenceId ?? state.presence?.id);
   if (unavailableUntil) return `That Asset was already published by this Presence and is unavailable for posting until ${new Date(unavailableUntil).toLocaleDateString()}.`;
   if (asset.rights?.status === "restricted") return "That Asset has restricted rights and cannot be published.";
@@ -317,7 +358,7 @@ export function searchEligibleAssets(state: OpenPresenceState, query: string, op
   const normalizedQuery = query.trim().toLowerCase();
   const presenceId = options?.presenceId ?? state.presence?.id;
   return state.assets
-    .filter((asset) => !asset.archivedAt && isLibraryAsset(asset) && asset.agentId === state.agent?.id && assetIsEligibleForPresence(state, asset, presenceId) && !assetPostingUnavailableUntil(state, asset, presenceId))
+    .filter((asset) => !asset.archivedAt && isLibraryAsset(asset) && (asset.reusePermission ?? "ready_to_use") === "ready_to_use" && asset.agentId === state.agent?.id && assetIsEligibleForPresence(state, asset, presenceId) && !assetPostingUnavailableUntil(state, asset, presenceId))
     .filter((asset) => !options?.collectionId || collectionContainsAsset(state, options.collectionId, asset.id))
     .map((asset) => {
       const effective = effectiveAssetObservation(state, asset);
@@ -438,6 +479,55 @@ export function applyAssetLibraryOperation(source: OpenPresenceState, operation:
     const asset = ownedAsset(state, operation.assetId);
     asset.accessScope = validateAccessScope(state, operation.accessScope);
     asset.updatedAt = timestamp();
+    return state;
+  }
+  if (operation.type === "reanalyzeDiscoveredAssets") {
+    const discovered = state.assets.filter((asset) => asset.agentId === state.agent!.id
+      && !asset.archivedAt
+      && ["image", "video", "gif"].includes(asset.type)
+      && ["discovered", "native-x", "x-bridge", "mirror_observation"].includes(asset.provenance.origin.toLowerCase())
+      && !asset.perception?.observation?.trim());
+    const at = timestamp();
+    for (const asset of discovered) {
+      asset.status = "processing";
+      asset.metadataReview = { status: "open" };
+      const existingJob = processingJobs.find((job) => job.assetId === asset.id && job.agentId === state.agent!.id && job.status !== "completed");
+      if (existingJob) {
+        existingJob.status = "queued";
+        existingJob.attempts = 0;
+        existingJob.progress = 0;
+        existingJob.lastError = undefined;
+        existingJob.updatedAt = at;
+      } else {
+        processingJobs.unshift({ id: recordId("asset-job"), agentId: state.agent.id, assetId: asset.id, status: "queued", attempts: 0, maxAttempts: 3, progress: 0, createdAt: at, updatedAt: at });
+      }
+      asset.updatedAt = at;
+    }
+    if (discovered.length) addEvent(state, "Discovered media analysis requested", `${discovered.length} X-discovered visual${discovered.length === 1 ? "" : "s"} will receive durable visual metadata.`, state.presence?.id);
+    return state;
+  }
+  if (operation.type === "preserveDiscoveredAsset") {
+    const asset = ownedAsset(state, operation.assetId);
+    if (!["discovered", "native-x", "x-bridge", "mirror_observation"].includes(asset.provenance.origin.toLowerCase())) throw new Error("Only an X-discovered visual can be promoted from temporary evidence.");
+    const at = timestamp();
+    asset.retention = "preserved";
+    asset.expiresAt = undefined;
+    asset.preservationReason = operation.reason.trim();
+    asset.reusePermission = "needs_approval";
+    asset.metadataReview = { status: "open" };
+    asset.status = "processing";
+    const existingJob = processingJobs.find((job) => job.assetId === asset.id && job.agentId === state.agent!.id && job.status !== "completed");
+    if (existingJob) {
+      existingJob.status = "queued";
+      existingJob.attempts = 0;
+      existingJob.progress = 0;
+      existingJob.lastError = undefined;
+      existingJob.updatedAt = at;
+    } else {
+      processingJobs.unshift({ id: recordId("asset-job"), agentId: state.agent.id, assetId: asset.id, status: "queued", attempts: 0, maxAttempts: 3, progress: 0, createdAt: at, updatedAt: at });
+    }
+    asset.updatedAt = at;
+    addEvent(state, "Discovered visual preserved", `${asset.description ?? "The discovered visual"} was kept as a reference because: ${asset.preservationReason}`, state.presence?.id);
     return state;
   }
   if (["editAssetMetadata", "approveAssetMetadata", "resolveAssetReview"].includes(operation.type)) {

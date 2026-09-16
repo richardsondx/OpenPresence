@@ -134,6 +134,7 @@ describe("continuous growth responsibility", () => {
         weak: ["Standalone posts are not yet repeatable."],
         rationale: "Replies are the strongest observed signal.",
         plan: { summary: "Reply-led discovery", dailyTargets: ["Review 10 relevant conversations"] },
+        hypothesisActions: [{ action: "create", statement: "Direct builder replies may create stronger qualified conversations.", scope: "presence", patternIds: ["social.x.v1.useful-disagreement"], confidence: "low" }],
       },
     });
     expect(next.growthReviews[0]).toMatchObject({ reviewSource: "model", changedPlan: true, planChangeSummary: "Replies are the strongest observed signal." });
@@ -142,6 +143,7 @@ describe("continuous growth responsibility", () => {
     expect(next.files.find((file) => file.kind === "GROWTH")?.content).toContain("Reply-led discovery");
     expect(next.growthFileVersions).toHaveLength(2);
     expect(next.growthFileVersions[0]).toMatchObject({ version: 2, previousVersion: 1, reviewId: next.growthReviews[0]?.id, reviewSource: "model" });
+    expect(next.operatorConversations?.flatMap((conversation) => conversation.messages).some((message) => message.agentInitiated?.kind === "breakthrough")).toBe(true);
     expect(Object.fromEntries(next.files.filter((file) => ["SOUL", "MISSION", "TASTE", "BRAIN"].includes(file.kind)).map((file) => [file.kind, file.content]))).toEqual(beforeIdentity);
   });
 
@@ -246,6 +248,15 @@ describe("continuous growth responsibility", () => {
     const native = { id: "native-x", presenceId: presence.id, channelId: "x" as const, kind: "x" as const, status: "connected" as const, access: "read-write" as const, account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: now, updatedAt: now };
     const manifest = derivePresenceCapabilityManifest({ ...state, presence, presences: [presence], bridges: [bridge], nativeConnections: [native] }, presence.id);
     expect(manifest.items.find((item) => item.capability === "quote")).toMatchObject({ availability: "available", provider: "Browser Bridge", requiresBrowser: true, canExecute: true });
+  });
+
+  it("returns to native after a temporary credit failure instead of requiring a browser forever", () => {
+    const state = fixture();
+    const now = new Date().toISOString();
+    const presence = { ...state.presence!, browserAccess: { enabled: true, learnedFallbacks: [{ action: "x.quote", reason: "X API credits are exhausted; the authorized Chrome Bridge is the continuity route.", learnedAt: now }] } };
+    const native = { id: "native-x", presenceId: presence.id, channelId: "x" as const, kind: "x" as const, status: "connected" as const, access: "read-write" as const, account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: now, updatedAt: now };
+    const manifest = derivePresenceCapabilityManifest({ ...state, presence, presences: [presence], bridges: [], nativeConnections: [native] }, presence.id);
+    expect(manifest.items.find((item) => item.capability === "quote")).toMatchObject({ availability: "available", provider: "Native X", requiresBrowser: false, canExecute: true });
   });
 
   it("withholds learned quote fallback from cognition until browser identity is verified", () => {
@@ -422,7 +433,7 @@ describe("continuous growth responsibility", () => {
   it("carries ready media into an autonomous live publication envelope", () => {
     const state = fixture();
     state.presence!.execution.post = "auto";
-    const asset = { id: "asset-chart", agentId: state.agent!.id, presenceId: state.presence!.id, type: "image" as const, mediaKind: "image" as const, status: "ready" as const, storage: { storeKey: "chart.png", mimeType: "image/png", byteSize: 4, exactHash: "hash" }, provenance: { origin: "discovered", sourceUrl: "https://example.com/chart.png", importedAt: new Date().toISOString() }, environment: "live" as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const asset = { id: "asset-chart", retention: "preserved" as const, reusePermission: "ready_to_use" as const, agentId: state.agent!.id, presenceId: state.presence!.id, type: "image" as const, mediaKind: "image" as const, status: "ready" as const, storage: { storeKey: "chart.png", mimeType: "image/png", byteSize: 4, exactHash: "hash" }, provenance: { origin: "discovered", sourceUrl: "https://example.com/chart.png", importedAt: new Date().toISOString() }, environment: "live" as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     const withAsset = { ...state, assets: [asset] };
     const published = formChatPostIntent(withAsset, "A grounded media-backed point of view.", undefined, "agent", [asset.id]);
     expect(published.publications[0]).toMatchObject({ format: "x.media-post", assetIds: [asset.id] });
@@ -431,7 +442,7 @@ describe("continuous growth responsibility", () => {
 
   it("carries ready media through live reply and quote envelopes", () => {
     const state = fixture();
-    const asset = { id: "asset-reply", agentId: state.agent!.id, presenceId: state.presence!.id, type: "image" as const, mediaKind: "image" as const, status: "ready" as const, storage: { storeKey: "reply.png", mimeType: "image/png", byteSize: 4, exactHash: "hash-reply" }, provenance: { origin: "discovered", sourceUrl: "https://example.com/reply.png", importedAt: new Date().toISOString() }, environment: "live" as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const asset = { id: "asset-reply", retention: "preserved" as const, reusePermission: "ready_to_use" as const, agentId: state.agent!.id, presenceId: state.presence!.id, type: "image" as const, mediaKind: "image" as const, status: "ready" as const, storage: { storeKey: "reply.png", mimeType: "image/png", byteSize: 4, exactHash: "hash-reply" }, provenance: { origin: "discovered", sourceUrl: "https://example.com/reply.png", importedAt: new Date().toISOString() }, environment: "live" as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     const withAsset = { ...state, assets: [asset] };
     const reply = formXReplyIntent(withAsset, "A grounded reply with evidence.", "post-1", undefined, undefined, [asset.id]);
     expect(reply.publications[0]).toMatchObject({ format: "x.media-post", assetIds: [asset.id] });

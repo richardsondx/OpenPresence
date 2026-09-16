@@ -48,6 +48,36 @@ test("Chat keeps durable responsibilities quiet until work is actually active", 
   await expect(page.getByText("Needs You", { exact: true })).toHaveCount(0);
 });
 
+test("an explicit ownership request becomes a recurring Agent-owned goal", async ({ page, request }) => {
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Jenny");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+
+  const requestText = "Take ownership of an ongoing daily publishing responsibility about useful agent decisions. Research current opportunities, choose the work, and keep going without asking me to create individual tasks.";
+  await page.getByLabel("Message Jenny").fill(requestText);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText("Assignment queued", { exact: true })).toBeVisible();
+
+  await expect.poll(async () => {
+    const snapshot = await (await request.get("/api/state")).json();
+    const assignment = snapshot.assignments?.find((item: { instruction?: string }) => item.instruction?.includes(requestText));
+    return assignment ? {
+      activation: assignment.activation?.type,
+      recurrence: assignment.recurrence?.kind,
+      createdBy: assignment.createdBy,
+      status: assignment.status,
+      environment: assignment.environment,
+      executionCount: snapshot.executions?.length ?? 0,
+    } : null;
+  }).toEqual({ activation: "continuous", recurrence: "daily", createdBy: "agent", status: "active", environment: "sandbox", executionCount: 0 });
+
+  await page.getByRole("button", { name: "Tasks", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Goals" })).toContainText("Agent-owned goal");
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Goals" })).toContainText("Agent-owned goal");
+  await expect(page.getByText("Sandbox · no public delivery", { exact: true })).toBeVisible();
+});
+
 test("Context sidebar owns its view controls and the workspace theme toggles", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
@@ -57,27 +87,18 @@ test("Context sidebar owns its view controls and the workspace theme toggles", a
   await expect(page.getByRole("button", { name: "Open context sidebar" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open Calendar" })).toHaveCount(0);
   await page.getByRole("button", { name: "Open context sidebar" }).click();
-  await expect(page.getByRole("complementary", { name: /Attention inspector/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Show Calendar" })).toBeVisible();
-  await page.getByRole("button", { name: "Show Calendar" }).click();
-  await expect(page.getByRole("complementary", { name: /Calendar inspector/ })).toBeVisible();
-  await page.getByRole("button", { name: "Open full calendar", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Schedule", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Back to Chat", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Back to Chat", exact: true }).click();
-  await expect(page).toHaveURL(/\/chat\?/);
-  await expect(page.getByRole("textbox", { name: /Message/ })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Chat mode" })).toHaveValue("chat");
-  await expect(page.getByRole("option", { name: "Chat", exact: true })).toBeAttached();
-  await expect(page.getByRole("option", { name: "Config", exact: true })).toBeAttached();
-  await page.getByRole("combobox", { name: "Chat mode" }).selectOption("teach");
-  await expect(page).toHaveURL(/\/teach/);
-  await expect(page.getByRole("heading", { name: "Teach the Agent through conversation.", exact: true })).toBeVisible();
-  await page.getByRole("combobox", { name: "Chat mode" }).selectOption("chat");
-  await expect(page).toHaveURL(/\/chat/);
-  await expect(page.getByRole("heading", { name: "Chat", exact: true })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Activity inspector" })).toBeVisible();
+  await page.getByRole("button", { name: "About", exact: true }).click();
+  await expect(page.getByRole("complementary", { name: "About inspector" })).toBeVisible();
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.getByRole("button", { name: "All tasks", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
+  const mobile = (page.viewportSize()?.width ?? 1440) < 768;
+  await page.getByRole("navigation", { name: mobile ? "Mobile navigation" : "Desktop navigation" }).getByRole("button", { name: "Chat", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Chat with Jenny", exact: true })).toBeAttached();
+  await expect(page.getByRole("combobox", { name: "Chat mode" })).toHaveCount(0);
   await expect(page.locator(".operator-chat-composer .lucide-arrow-up")).toBeVisible();
-  await expect(page.getByText("Enter to send", { exact: false })).toHaveCount(0);
+  if (mobile) await page.getByRole("button", { name: "Switch agent or open settings" }).click();
 
   const shell = page.locator("main.app-shell");
   await page.getByRole("button", { name: "Switch to dark mode" }).click();

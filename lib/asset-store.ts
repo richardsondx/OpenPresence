@@ -95,19 +95,30 @@ export async function fetchPublicAsset(url: string) {
 }
 
 /**
+ * Fetch an inspection-sized representation without writing it to the durable
+ * Asset Store. Visual research can inspect several candidates, but only the
+ * candidate that survives editorial selection should consume persistent
+ * storage.
+ */
+export async function fetchPublicAssetPreviewBytes(url: string) {
+  const downloaded = await downloadPublicAsset(url);
+  if (!downloaded.mimeType.startsWith("image/")) return downloaded;
+  try {
+    const bytes = await sharp(downloaded.bytes)
+      .resize(1400, 1400, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 82, progressive: true })
+      .toBuffer();
+    return { bytes, mimeType: "image/jpeg" };
+  } catch {
+    return downloaded;
+  }
+}
+
+/**
  * Download only an inspection-sized representation. The original bytes are
  * deliberately not persisted until a candidate has passed visual judgment.
  */
 export async function fetchPublicAssetPreview(url: string) {
-  const downloaded = await downloadPublicAsset(url);
-  if (!downloaded.mimeType.startsWith("image/")) return putAssetBytes(downloaded.bytes, { mimeType: downloaded.mimeType });
-  try {
-    const preview = await sharp(downloaded.bytes)
-      .resize(1400, 1400, { fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 82, progressive: true })
-      .toBuffer();
-    return putAssetBytes(preview, { mimeType: "image/jpeg" });
-  } catch {
-    return putAssetBytes(downloaded.bytes, { mimeType: downloaded.mimeType });
-  }
+  const preview = await fetchPublicAssetPreviewBytes(url);
+  return putAssetBytes(preview.bytes, { mimeType: preview.mimeType });
 }

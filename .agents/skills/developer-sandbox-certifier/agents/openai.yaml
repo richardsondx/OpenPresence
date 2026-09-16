@@ -1,0 +1,4 @@
+interface:
+  display_name: "Developer Sandbox Certifier"
+  short_description: "Prove accelerated Sandbox tests are trustworthy"
+  default_prompt: "Use $developer-sandbox-certifier to certify the OpenPresence Sandbox before relying on accelerated evals."

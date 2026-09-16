@@ -33,6 +33,8 @@ export function usageBrowserProjection(state: OpenPresenceState): OpenPresenceSt
   // identity and routing fields only; the usage report owns the heavy ledger.
   projection.assignments = state.assignments.map((assignment) => ({
     id: assignment.id,
+    createdAt: assignment.createdAt,
+    updatedAt: assignment.updatedAt,
     presenceId: assignment.presenceId,
     title: assignment.title,
     instruction: assignment.instruction?.slice(0, 420),

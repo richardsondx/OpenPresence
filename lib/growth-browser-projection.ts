@@ -2,6 +2,7 @@ import type { OpenPresenceState } from "./types";
 import { browserWorkspaceProjection } from "./state-browser-projection";
 import { collapseAudienceSnapshots, derivePublicHistory } from "./runtime";
 import { growthEvidenceIsInPresenceScope, growthPublicationIsInPresenceScope } from "./growth-scope";
+import { deriveGrowthProfile } from "./growth-profile";
 
 const compactText = (value: string | undefined, limit = 280) => {
   if (!value || value.length <= limit) return value;
@@ -85,6 +86,7 @@ export function growthBrowserProjection(state: OpenPresenceState, presenceId?: s
   };
   projection.growthBrowserSummary = {
     presenceId: selectedPresenceId ?? "",
+    profile: deriveGrowthProfile(state, selectedPresenceId ?? undefined),
     audience: {
       count: audienceSnapshots.length,
       latest: recentAudienceSnapshots[0],
@@ -129,7 +131,11 @@ export function growthBrowserProjection(state: OpenPresenceState, presenceId?: s
   // Keep a recent compatibility window for older browser consumers; the
   // summary above is authoritative for totals and evidence counts.
   projection.audienceSnapshots = recentAudienceSnapshots as never;
-  projection.publicationMetricSnapshots = recentPublicationSnapshots as never;
+  const templateAssignmentIds = new Set(state.assignments.filter(item => item.presenceId === selectedPresenceId && item.strategyTemplateId).map(item => item.id));
+  const templateDeliveryRefs = new Set(scoped(state.executions).filter(item => item.status === "succeeded" && item.environment === "live" && item.assignmentId && templateAssignmentIds.has(item.assignmentId) && item.externalRef).map(item => `${item.externalRef!.type}:${item.externalRef!.id}`));
+  const templateMirrorIds = new Set(scoped(state.mirrorObjects).filter(item => templateDeliveryRefs.has(`${item.externalRef.type}:${item.externalRef.id}`)).map(item => item.id));
+  const templateMetrics = publicationSnapshots.filter((item, index, all) => templateMirrorIds.has(item.mirrorObjectId) && all.findIndex(other => other.mirrorObjectId === item.mirrorObjectId) === index);
+  projection.publicationMetricSnapshots = [...recentPublicationSnapshots, ...templateMetrics.filter(item => !recentPublicationSnapshots.some(other => other.id === item.id))] as never;
 
   // Keep the small, truth-critical Mirror shape used by publication evidence
   // and derivePublicHistory. In particular, visibility and action lineage must
@@ -157,12 +163,15 @@ export function growthBrowserProjection(state: OpenPresenceState, presenceId?: s
 
   projection.assignments = scoped(state.assignments).map((assignment) => ({
     id: assignment.id,
+    createdAt: assignment.createdAt,
+    updatedAt: assignment.updatedAt,
     presenceId: assignment.presenceId,
     // The shared Agent shell is rendered around Analytics too. Keep the
     // compact identity/status fields it needs for the growth surface and inspector,
     // and the sidebar instead of returning an opaque assignment shell that
     // crashes when it tries to render a fallback title.
     title: assignment.title,
+    strategyTemplateId: assignment.strategyTemplateId,
     instruction: compactText(assignment.instruction, 420),
     environment: assignment.environment,
     status: assignment.status,
@@ -209,6 +218,7 @@ export function growthBrowserProjection(state: OpenPresenceState, presenceId?: s
     .map((execution) => ({
       id: execution.id,
       socialIntentId: execution.socialIntentId,
+      assignmentId: execution.assignmentId,
       presenceId: execution.presenceId,
       affordance: execution.affordance,
       status: execution.status,

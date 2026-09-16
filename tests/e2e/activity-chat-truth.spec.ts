@@ -76,6 +76,32 @@ test("live Chat answers an ordinary question without turning it into post planni
   expect(after.operatorConversations?.[0]?.messages.at(-1)?.role).toBe("presence");
 });
 
+test("Chat shows a compact browser activity receipt only during active browser delivery", async ({ page, request }) => {
+  expect((await request.post("/api/state", { data: { type: "reset" } })).ok()).toBeTruthy();
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Genny");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+
+  await page.route("**/api/state**", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    const presenceId = body.presence.id;
+    const now = new Date().toISOString();
+    body.operationalRuns = [{ id: "chat-browser-run", presenceId, kind: "operator_chat", state: "running", stage: "operator_chat.delivery", attemptCount: 1, recoveryCount: 0, createdAt: now, lastProgressAt: now }];
+    body.executions = [{ id: "chat-browser-execution", socialIntentId: "chat-browser-intent", presenceId, affordance: "x.reply", mode: "auto", status: "executing", attempts: 1, connector: "bridge", bridgeId: "chat-browser-bridge", runId: "chat-browser-run", idempotencyKey: "chat-browser-execution", createdAt: now, updatedAt: now, environment: "live" }];
+    await route.fulfill({ response, json: body });
+  });
+
+  await page.goto("/chat");
+  const receipt = page.getByTestId("operator-chat-browser-activity");
+  await expect(receipt).toBeVisible();
+  await expect(receipt).toContainText("Using Chrome and the browser");
+  await receipt.locator("summary").click();
+  await expect(receipt).toContainText("Authorized browser capability");
+  await expect(receipt).toContainText("Sending reply through Chrome");
+});
+
 test("live Chat turns an explicit publication direction into durable public-action work", async ({ page, request }) => {
   expect((await request.post("/api/state", { data: { type: "reset" } })).ok()).toBeTruthy();
   await page.goto("/");

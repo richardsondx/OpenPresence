@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { writeState } from "../lib/db";
 import { POST as statePost } from "../app/api/state/route";
-import { addSandboxEvent, advanceSandboxTime, applyOperation, beginOriginalPostRehearsal, completeOriginalPostRehearsal, confirmAutoMode, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, recordPreferenceEvidence, resetPlaygroundSession, startPlaygroundSession, syncPlaygroundTime } from "../lib/runtime";
+import { addSandboxEvent, advanceSandboxTime, advanceSandboxTimeWithTemporalEvents, applyOperation, beginOriginalPostRehearsal, completeOriginalPostRehearsal, confirmAutoMode, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, recordPreferenceEvidence, resetPlaygroundSession, startPlaygroundSession, syncPlaygroundTime } from "../lib/runtime";
 import type { OpenPresenceState } from "../lib/types";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
@@ -36,6 +36,96 @@ describe("Sandbox and Playground boundaries", () => {
     expect(state.presence?.environment).toBe("sandbox");
     expect(state.sandboxEnvironments).toHaveLength(1);
     expect(state.sandboxEnvironments[0]?.connectorId).toContain("sandbox-connector");
+  });
+
+  it("persists ordered temporal calendar events through a multi-day advance", () => {
+    const state = startPlaygroundSession(createAgent(input));
+    const session = state.playgroundSessions[0]!;
+    const tomorrow = new Date(Date.parse(session.virtualNow) + 24 * 60 * 60 * 1000);
+    const day = tomorrow.toLocaleDateString("en-US", { weekday: "long" });
+    state.calendar = [{ id: "calendar-temporal-proof", label: "Daily attention", instruction: "Consider one useful original idea.", day, time: "00:01", objective: "usefulness", presence: session.presenceId, mode: "auto", enabled: true, executionWindow: "day" }];
+
+    const advanced = advanceSandboxTimeWithTemporalEvents(state, session.id, 7 * 24 * 60);
+    const updated = advanced.state.playgroundSessions.find((item) => item.id === session.id)!;
+    const temporalEvents = advanced.processed.filter((event) => event.type === "calendar_attention");
+
+    expect(temporalEvents).toHaveLength(1);
+    expect(temporalEvents[0]!.at).toBeLessThanOrEqual(Date.parse(updated.virtualNow));
+    expect(updated.temporalSnapshot?.now).toBe(Date.parse(updated.virtualNow));
+    expect(updated.temporalSnapshot?.trajectory.some((record) => record.kind === "event_scheduled")).toBe(true);
+    expect(updated.temporalSnapshot?.trajectory.some((record) => record.kind === "event_fired")).toBe(true);
+  });
+
+  it("runs a due Growth Review from the persisted Sandbox clock", async () => {
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "1");
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    let state = createAgent(input);
+    state = applyOperation(state, {
+      type: "createAssignment",
+      presenceId: state.presence!.id,
+      environment: "sandbox",
+      instruction: "Grow this Presence toward 100 followers while building an audience of AI builders.",
+    });
+    const assignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "activateAssignment", id: assignment.id });
+    state = startPlaygroundSession(state);
+    const session = state.playgroundSessions[0]!;
+    const dueAt = new Date(Date.parse(session.virtualNow) - 1_000).toISOString();
+    const persistedAssignment = state.assignments.find((item) => item.id === assignment.id)!;
+    persistedAssignment.plan = { ...persistedAssignment.plan!, nextWeeklyReviewAt: dueAt, nextStrategicReviewAt: dueAt };
+    writeState(state);
+
+    const response = await statePost(new Request("http://localhost/api/state", {
+      method: "POST",
+      body: JSON.stringify({ type: "advanceSandboxTime", sessionId: session.id, minutes: 1 }),
+      headers: { "content-type": "application/json" },
+    }));
+    expect(response.status).toBe(200);
+    const next = await response.json() as OpenPresenceState;
+    const review = next.growthReviews.find((item) => item.assignmentId === assignment.id);
+    const updatedSession = next.playgroundSessions.find((item) => item.id === session.id)!;
+    expect(review).toMatchObject({ assignmentId: assignment.id, kind: "strategic" });
+    expect(Date.parse(review!.periodEnd)).toBeGreaterThanOrEqual(Date.parse(updatedSession.virtualNow));
+    expect(Date.parse(next.assignments.find((item) => item.id === assignment.id)!.plan!.nextStrategicReviewAt!)).toBeGreaterThan(Date.parse(review!.periodEnd));
+  });
+
+  it("dispatches persisted calendar events at their event-local virtual time", async () => {
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "1");
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    let state = applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    state = startPlaygroundSession(state);
+    const session = state.playgroundSessions[0]!;
+    state = addSandboxEvent(state, {
+      sessionId: session.id,
+      actionId: "post",
+      actorName: "Maya Chen",
+      content: "The next human message is more interesting when it leaves the conversation somewhere to go.",
+    });
+
+    const firstAt = new Date(Date.parse(session.virtualNow));
+    firstAt.setDate(firstAt.getDate() + 1);
+    firstAt.setHours(0, 1, 0, 0);
+    const secondAt = new Date(firstAt.getTime() + 24 * 60 * 60 * 1000);
+    const firstDay = firstAt.toLocaleDateString("en-US", { weekday: "long" });
+    const secondDay = secondAt.toLocaleDateString("en-US", { weekday: "long" });
+    state.calendar = [
+      { id: "calendar-local-time-1", label: "First attention", instruction: "Consider the conversation", day: firstDay, time: "00:01", objective: "usefulness", presence: session.presenceId, mode: "auto", enabled: true, executionWindow: "day" },
+      { id: "calendar-local-time-2", label: "Second attention", instruction: "Consider the conversation again", day: secondDay, time: "00:01", objective: "usefulness", presence: session.presenceId, mode: "auto", enabled: true, executionWindow: "day" },
+    ];
+    writeState(state);
+
+    const response = await statePost(new Request("http://localhost/api/state", {
+      method: "POST",
+      body: JSON.stringify({ type: "advanceSandboxTime", sessionId: session.id, minutes: 2 * 24 * 60 }),
+      headers: { "content-type": "application/json" },
+    }));
+    const next = await response.json();
+    const reply = next.mirrorObjects.find((item: { sessionId?: string; actorPresenceId?: string; objectType?: string }) => item.sessionId === session.id && item.actorPresenceId === session.presenceId && item.objectType === "reply");
+
+    expect(response.status).toBe(200);
+    expect(next.playgroundSessions.find((item: { id: string }) => item.id === session.id)?.virtualNow).toBe(new Date(Date.parse(session.virtualNow) + 2 * 24 * 60 * 60 * 1000).toISOString());
+    expect(reply?.occurredAt).toBe(firstAt.toISOString());
+    expect(next.calendar.find((item: { id: string }) => item.id === "calendar-local-time-1")?.lastEvaluatedAt).toBe(firstAt.toISOString());
   });
 
   it("keeps Sandbox, native X, and Bridge as one mutually exclusive route", () => {
@@ -514,6 +604,12 @@ describe("Sandbox and Playground boundaries", () => {
     expect(state.assets).toHaveLength(0);
     expect(state.perceptions).toHaveLength(0);
     expect(state.files.map((file) => file.content)).toEqual(filesBefore);
+  });
+
+  it("does not allow virtual time rollback", () => {
+    const state = startPlaygroundSession(createAgent(input));
+    const session = state.playgroundSessions[0]!;
+    expect(() => advanceSandboxTime(state, session.id, -1)).toThrow(/only move forward/i);
   });
 
   it("refreshes the default Playground clock on load but preserves manual virtual time", () => {

@@ -482,8 +482,8 @@ describe("native X connection", () => {
   });
 
   it.each([
-    { status: 402, body: { title: "credits depleted" }, expected: "no API credits remaining" },
-    { status: 403, body: { detail: "Your monthly spend cap has been reached." }, expected: "review the spending allowance" },
+    { status: 402, body: { title: "credits depleted" }, expected: "credits depleted" },
+    { status: 403, body: { detail: "Your monthly spend cap has been reached." }, expected: "Your monthly spend cap has been reached." },
   ])("turns exhausted X credits or spend caps into an actionable error ($status)", async ({ status, body, expected }) => {
     process.env.OPENPRESENCE_X_API_MOCK = "0";
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })));

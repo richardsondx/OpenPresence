@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, assertAssignmentPersistenceInvariant, assignmentIsCurrentlyProcessing, assignmentIsSatisfied, assignmentProgressLabel, compileAssignmentInstruction, createAgent, nextScheduledOccurrence, normalizeState, preflightAssignment, scheduledAssignmentIsDue } from "../lib/runtime";
+import { applyOperation, assertAssignmentPersistenceInvariant, assignmentIsCurrentlyProcessing, assignmentIsSatisfied, assignmentProgressLabel, compileAssignmentInstruction, createAgent, deriveAssignmentPresentation, nextScheduledOccurrence, normalizeState, preflightAssignment, scheduledAssignmentIsDue } from "../lib/runtime";
 import { evaluateExecutionReadiness } from "../lib/execution-readiness";
 import { assignmentRunBlocksNewWork, classifyLiveAssignmentRun, isAutonomousPreWriteDeliveryFailure, liveAssignmentRunStage, maxConcurrentPursuitDeliveries, reconcileLiveAssignmentRuns } from "../lib/live-assignment-run";
 import { reconcileOrphanedAssignmentStatuses } from "../lib/assignment-recovery";
@@ -7,6 +7,40 @@ import { reconcileOrphanedAssignmentStatuses } from "../lib/assignment-recovery"
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
 describe("canonical Assignment domain", () => {
+  it("separates verbose instructions from the Task presentation", () => {
+    const instruction = "Create a private, bounded one-time Task. Do not publish or perform any public action. Use the saved template “Action sequence from a broad claim.” Draft post: AI agents become unreliable when their success condition is left implicit. Stop immediately after the Task is saved. This is a planning task only and remains ready for review.";
+    const presentation = deriveAssignmentPresentation(instruction, "original_publication", true);
+    expect(presentation.title).toBe("Prepare a private draft from “Action sequence from a broad claim”");
+    expect(presentation.description).toContain("reviewable draft");
+    expect(presentation.description).not.toContain("publish");
+    expect(presentation.title).not.toContain("Stop immediately");
+  });
+
+  it("does not persist an instruction-shaped supplied title", () => {
+    const state = createAgent(input);
+    const instruction = "Create a private, bounded one-time Task. Do not publish or perform any public action. Use the saved template “Action sequence from a broad claim.” Draft post: AI agents become unreliable when their success condition is left implicit. Stop immediately after the Task is saved. This is a planning task only and remains ready for review.";
+    const next = applyOperation(state, {
+      type: "createAssignment",
+      instruction,
+      title: instruction,
+      presenceId: state.presence!.id,
+      environment: "live",
+    });
+    const assignment = next.assignments[0]!;
+    expect(assignment.title).toBe("Prepare a private draft from “Action sequence from a broad claim”");
+    expect(assignment.description).toContain("reviewable draft");
+    expect(assignment.instruction).toBe(instruction);
+  });
+
+  it("repairs an existing verbose Task title at the read boundary", () => {
+    const state = createAgent(input);
+    const instruction = "Create a private, bounded one-time Task. Do not publish or perform any public action. Use the saved template “Action sequence from a broad claim.” Draft post: AI agents become unreliable when their success condition is left implicit. Stop immediately after the Task is saved. This is a planning task only and remains ready for review.";
+    const assignment = compileAssignmentInstruction(state, instruction, state.presence!.id, "live");
+    const normalized = normalizeState({ ...state, assignments: [{ ...assignment, title: instruction }] });
+    expect(normalized.assignments[0]?.title).toBe("Prepare a private draft from “Action sequence from a broad claim”");
+    expect(normalized.assignments[0]?.instruction).toBe(instruction);
+  });
+
   it("repairs legacy slot-shaped records without losing their calendar-linked identity", () => {
     const state = createAgent(input);
     const presence = state.presence!;
@@ -261,6 +295,24 @@ describe("canonical Assignment domain", () => {
     expect(classifyLiveAssignmentRun({ outcomeClass: "delivery_failed", assignmentStatus: "active", newlySucceededExecution: false })).toBe("blocked");
     expect(classifyLiveAssignmentRun({ assignmentStatus: "awaiting_execution", newlySucceededExecution: false, deliveryPending: true })).toBe("delivery_pending");
     expect(liveAssignmentRunStage("delivery_pending")).toBe("publishing");
+  });
+
+  it("does not treat connector acknowledgement as verified public reality", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "createAssignment", instruction: "Publish one useful lesson about persistent agents.", presenceId: state.presence!.id, environment: "live" });
+    const assignment = state.assignments[0]!;
+    assignment.status = "working";
+    const run = { id: "assignment-run:ack-only", assignmentId: assignment.id, agentId: assignment.agentId, presenceId: assignment.presenceId, sessionId: "live:test", status: "failed" as const, currentStage: "blocked" as const, attempts: 1, maxAttempts: 4, rejectedCandidates: 0, startedAt: "2026-08-29T03:10:00.000Z", createdAt: "2026-08-29T03:10:00.000Z", updatedAt: "2026-08-29T03:12:00.000Z" };
+    state.assignmentRuns = [run];
+    state.executions = [{ id: "execution:ack-only", socialIntentId: "intent:ack-only", presenceId: assignment.presenceId, assignmentId: assignment.id, runId: run.id, affordance: "x.post", mode: "auto", status: "succeeded", attempts: 1, connector: "native", idempotencyKey: "ack-only", createdAt: run.createdAt, updatedAt: run.updatedAt, environment: "live" } as never];
+
+    const pending = reconcileLiveAssignmentRuns(state, Date.parse("2026-08-29T03:13:00.000Z"));
+    expect(pending.assignmentRuns?.[0]).toMatchObject({ status: "delivery_pending", currentStage: "publishing" });
+    expect(pending.assignments[0]).toMatchObject({ status: "awaiting_execution", progress: { verified: 0 } });
+
+    pending.outcomes = [{ id: "outcome:verified", socialIntentId: "intent:ack-only", executionId: "execution:ack-only", presenceId: assignment.presenceId, status: "succeeded", observedAt: "2026-08-29T03:14:00.000Z", metrics: {}, environment: "live" }];
+    const verified = reconcileLiveAssignmentRuns(pending, Date.parse("2026-08-29T03:15:00.000Z"));
+    expect(verified.assignmentRuns?.[0]).toMatchObject({ status: "published", currentStage: "completed" });
   });
 
   it("keeps an unclaimed connector delivery pending instead of leaving a researching orphan", () => {
@@ -519,6 +571,33 @@ describe("canonical Assignment domain", () => {
     // again; the scheduler needs to see the overdue wake and claim it.
     const later = reconcileLiveAssignmentRuns(reconciled, now + 20 * 60_000);
     expect(later.assignments.find((item) => item.id === assignment.id)?.nextDueAt).toBe(recoveredAssignment.nextDueAt);
+  });
+
+  it("expires a one-time parent only after its safe pre-dispatch envelope closes", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "createAssignment", instruction: "Publish one useful lesson once.", presenceId: state.presence!.id, environment: "live" });
+    const assignment = state.assignments[0]!;
+    assignment.timeframe = { startsAt: "2026-08-24T07:00:00.000Z", deadline: "2026-08-24T08:00:00.000Z" };
+    const runId = "assignment-run:expired-parent";
+    state.assignmentRuns = [{ id: runId, assignmentId: assignment.id, agentId: assignment.agentId, presenceId: assignment.presenceId, sessionId: "live:test", status: "failed", currentStage: "blocked", attempts: 1, maxAttempts: 4, rejectedCandidates: 0, createdAt: "2026-08-24T07:04:00.000Z", updatedAt: "2026-08-24T07:59:00.000Z", completedAt: "2026-08-24T07:59:00.000Z" }];
+    state.executions = [{ id: "execution:expired-parent", socialIntentId: "intent:expired-parent", presenceId: assignment.presenceId, assignmentId: assignment.id, runId, affordance: "x.post", mode: "auto", status: "expired", attempts: 0, connector: "bridge", idempotencyKey: "expired-parent", failure: { code: "INTENT_EXPIRED_BEFORE_CLAIM", message: "The delivery window expired before an authorized connector claimed this action.", retryable: true }, createdAt: "2026-08-24T07:59:00.000Z", updatedAt: "2026-08-24T08:00:01.000Z", environment: "live" } as never];
+
+    const reconciled = reconcileLiveAssignmentRuns(state, Date.parse("2026-08-24T08:00:01.000Z"));
+    expect(reconciled.assignments[0]).toMatchObject({ status: "expired_incomplete", progress: { verified: 0 } });
+    expect(reconciled.assignmentRuns?.[0]).toMatchObject({ status: "failed", currentStage: "blocked" });
+  });
+
+  it("reopens a failed assignment only when the operator supplies a new future window", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "createAssignment", instruction: "Publish one useful lesson once.", presenceId: state.presence!.id, environment: "live" });
+    const assignment = state.assignments[0]!;
+    assignment.status = "failed";
+    assignment.progress = { ...assignment.progress, verified: 0 };
+    const startsAt = new Date(Date.now() + 60 * 60_000).toISOString();
+    const deadline = new Date(Date.now() + 2 * 60 * 60_000).toISOString();
+    const next = applyOperation(state, { type: "updateAssignment", id: assignment.id, instruction: assignment.instruction, timeframe: { startsAt, deadline } });
+    expect(next.assignments[0]).toMatchObject({ status: "draft", timeframe: { startsAt, deadline }, progress: { verified: 0 } });
+    expect(next.assignments[0]?.work?.attempts).toBe(0);
   });
 
   it("autonomously closes a stale pre-write Bridge miss instead of asking the operator", () => {

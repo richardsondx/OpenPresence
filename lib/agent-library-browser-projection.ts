@@ -46,6 +46,8 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
   // projection omits the heavy assignment history.
   next.assignments = state.assignments.map((assignment) => ({
     id: assignment.id,
+    createdAt: assignment.createdAt,
+    updatedAt: assignment.updatedAt,
     presenceId: assignment.presenceId,
     title: assignment.title,
     instruction: assignment.instruction?.slice(0, 420),
@@ -57,6 +59,7 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
     schedule: assignment.schedule,
     work: assignment.work,
     deliverable: assignment.deliverable,
+    strategyTemplateId: assignment.strategyTemplateId,
   })) as never;
 
   if (projection === "knowledge") {
@@ -73,6 +76,21 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
     next.presenceKnowledgeBindings = state.presenceKnowledgeBindings;
   } else if (projection === "assets") {
     for (const key of ["knowledgeDocuments", "knowledgeVersions", "knowledgeRetrievalRuns"] as const) next[key] = [] as never;
+    // Retain only the delivery and measurement records used by template cards.
+    const templateTaskIds = new Set(state.assignments.filter(item => item.strategyTemplateId).map(item => item.id));
+    const templateDeliveries = state.executions.filter(item => item.assignmentId && templateTaskIds.has(item.assignmentId));
+    next.executions = [...next.executions, ...templateDeliveries.filter(item => !next.executions.some(existing => existing.id === item.id))];
+    const refs = new Set(templateDeliveries.flatMap(item => item.externalRef ? [item.externalRef.id] : []));
+    const sourceIds = new Set((state.growthHypotheses ?? []).flatMap(item => item.template?.sourceMirrorObjectIds ?? []));
+    next.mirrorObjects = state.mirrorObjects.filter(item => sourceIds.has(item.id) || (item.externalRef && refs.has(item.externalRef.id)));
+    const mirrorIds = new Set(next.mirrorObjects.map(item => item.id));
+    const latestMetrics = new Map<string, OpenPresenceState["publicationMetricSnapshots"][number]>();
+    for (const metric of state.publicationMetricSnapshots) {
+      if (!mirrorIds.has(metric.mirrorObjectId)) continue;
+      const previous = latestMetrics.get(metric.mirrorObjectId);
+      if (!previous || metric.observedAt > previous.observedAt) latestMetrics.set(metric.mirrorObjectId, metric);
+    }
+    next.publicationMetricSnapshots = [...latestMetrics.values()];
     next.assets = state.assets;
     next.assetCollections = state.assetCollections;
     next.assetCollectionMemberships = state.assetCollectionMemberships;
@@ -146,6 +164,8 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
       next.assets = compactAssets as never;
       next.assignments = state.assignments.filter((assignment) => assignmentIds.has(assignment.id)).map((assignment) => ({
         id: assignment.id,
+    createdAt: assignment.createdAt,
+    updatedAt: assignment.updatedAt,
         status: assignment.status,
         progress: assignment.progress,
         activation: assignment.activation,

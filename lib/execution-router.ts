@@ -1,3 +1,4 @@
+import { isXCreditsError } from "./x-credits";
 import { getDependencyHealth, readStateForContext } from "./db";
 import { derivePresenceCapabilityManifest } from "./runtime";
 import { bridgeExecutionStatus } from "./bridge-contract";
@@ -50,7 +51,7 @@ export function routeExecutionIntent(input: {
   const normalizedAffordance = affordance.replace(/^(x|linkedin|substack)\./, "");
   const capability = manifest.items.find((item) => item.capability === affordance || item.capability === normalizedAffordance);
 
-  const browserLearned = (presence.browserAccess?.learnedFallbacks ?? []).some((item) => item.action === affordance || item.action === normalizedAffordance);
+  const browserLearned = (presence.browserAccess?.learnedFallbacks ?? []).some((item) => !isXCreditsError(item.reason) && (item.action === affordance || item.action === normalizedAffordance));
   const browserBridge = state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.name.startsWith("OpenPresence Chrome · ") && bridgeExecutionStatus(bridge) === "connected");
 
   const bridgeHealth = getDependencyHealth("user_attached_bridge", presenceId);

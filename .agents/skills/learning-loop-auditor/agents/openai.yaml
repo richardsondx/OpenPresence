@@ -1,0 +1,4 @@
+interface:
+  display_name: "Learning Loop Auditor"
+  short_description: "Prove learning changes future Agent behavior"
+  default_prompt: "Use $learning-loop-auditor to test whether this Agent learned the right lesson and changed a future decision."

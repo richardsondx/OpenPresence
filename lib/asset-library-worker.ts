@@ -4,7 +4,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { readStateForContext, WorkspaceConflictError, writeState } from "./db";
 import { assetSourceErrorMessage, ingestLibraryImages } from "./asset-library";
-import { putAssetBytes } from "./asset-store";
+import { fetchPublicAsset, putAssetBytes } from "./asset-store";
 import { detectLibraryMedia } from "./asset-media";
 import { inspectDiscoveredAsset } from "./perception-runtime";
 import type { AssetPerception, AssetProcessingJob, OpenPresenceState } from "./types";
@@ -64,6 +64,18 @@ async function processOne(agentId: string, assetId: string) {
       const currentJob = state.assetProcessingJobs?.find((item) => item.id === job.id);
       const presenceId = state.presence?.id ?? state.presences[0]?.id;
       if (!currentAsset || !currentJob || !presenceId) throw new Error("The Asset no longer has a valid Agent and Presence context.");
+      if (currentAsset.retention === "preserved" && !currentAsset.storage?.storeKey && !currentAsset.storagePath && !currentAsset.dataUrl) {
+        const sourceUrl = currentAsset.provenance.sourceUrl;
+        if (!sourceUrl) throw new Error("The preserved discovery has no durable source URL.");
+        const stored = await fetchPublicAsset(sourceUrl);
+        currentAsset.storage = stored;
+        currentAsset.storagePath = stored.storeKey;
+        currentAsset.mimeType = stored.mimeType;
+        currentAsset.sizeBytes = stored.byteSize;
+        currentAsset.checksum = stored.exactHash;
+        currentAsset.updatedAt = now();
+        persistWithRetry(state);
+      }
       currentJob.progress = 0.35;
       currentJob.updatedAt = now();
       persistWithRetry(state);

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { applyGrowthHypothesisActions, compileSocialStrategyContext, ensureGrowthEvidenceRecords, legacyChannelStrategyGuidance, strategyUseFromDecision, summarizeStrategyPerformance } from "../lib/social-strategy";
+import { applyGrowthHypothesisActions, compileSocialStrategyContext, ensureGrowthEvidenceRecords, legacyChannelStrategyGuidance, strategyUseFromDecision, summarizeStrategyPerformance, summarizeStrategyPatternPerformance } from "../lib/social-strategy";
 import { generateAgentSocialDecision, parseAgentSocialDecision } from "../lib/ai";
 import { applyOperation, createAgent } from "../lib/runtime";
 import type { GrowthEvidenceRecord, OpenPresenceState } from "../lib/types";
@@ -60,17 +60,29 @@ describe("Social Strategy Intelligence", () => {
     const state = createAgent(input);
     const presenceId = state.presence!.id;
     state.growthEvidenceRecords = [{ id: "operator-choice", agentId: state.agent!.id, presenceId, kind: "OPERATOR_REVIEW", claimScope: "presence", statement: "The operator liked this pattern.", sourceRefs: [{ kind: "operator_input", id: "operator-choice" }], verified: true, createdAt: new Date().toISOString() } satisfies GrowthEvidenceRecord];
-    applyGrowthHypothesisActions(state, presenceId, "review-1", [{ action: "create", statement: "Proof-led originals may improve qualified conversations.", scope: "presence", patternIds: ["social.x.v1.proof-led-original"], evidenceIds: ["operator-choice"], confidence: "medium" }]);
+    applyGrowthHypothesisActions(state, presenceId, "review-1", [{ action: "create", statement: "Proof-led originals may improve qualified conversations.", scope: "presence", patternIds: ["social.x.v1.proof-led-original"], decisionTargets: [{ strategyId: "social.x.v1.proof-led-original", effect: 1 }], evidenceIds: ["operator-choice"], confidence: "medium" }]);
     expect(state.growthHypotheses?.[0]?.status).toBe("testing");
     const hypothesisId = state.growthHypotheses![0]!.id;
     applyGrowthHypothesisActions(state, presenceId, "review-2", [{ action: "support", hypothesisId, evidenceIds: ["operator-choice"] }]);
     expect(state.growthHypotheses?.[0]?.status).toBe("weakened");
 
     ensureGrowthEvidenceRecords(state, presenceId);
-    state.growthEvidenceRecords!.push({ id: "world-outcome", agentId: state.agent!.id, presenceId, kind: "WORLD_OUTCOME", claimScope: "presence", statement: "A verified outcome was observed.", sourceRefs: [{ kind: "publication_metric", id: "metric-1" }], verified: true, createdAt: new Date().toISOString() });
-    applyGrowthHypothesisActions(state, presenceId, "review-3", [{ action: "support", hypothesisId, evidenceIds: ["world-outcome"], confidence: "high" }]);
+    state.socialDecisions = ["decision-1", "decision-2"].map((id) => ({ id, agentId: state.agent!.id, presenceId, environment: "sandbox" as const, focalMirrorObjectIds: [], decision: "original_post" as const, summary: "Proof-led original", influences: [], socialStrategy: { retrievalRunId: `${id}-run`, consideredPatternIds: ["social.x.v1.proof-led-original"], selectedByAct: [{ act: "original_post", patternId: "social.x.v1.proof-led-original", mechanismId: "proof-led original" }] }, createdAt: new Date().toISOString() }));
+    state.growthEvidenceRecords!.push(...["world-outcome-1", "world-outcome-2"].map((id, index) => ({ id, agentId: state.agent!.id, presenceId, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "A verified outcome was observed.", sourceRefs: [{ kind: "publication_metric" as const, id: `metric-${index + 1}` }], verified: true, causalDecisionIds: [`decision-${index + 1}`], createdAt: new Date().toISOString() })));
+    applyGrowthHypothesisActions(state, presenceId, "review-3", [{ action: "support", hypothesisId, evidenceIds: ["world-outcome-1", "world-outcome-2"], confidence: "high" }]);
     expect(state.growthHypotheses?.[0]?.status).toBe("supported");
     expect(state.growthHypotheses?.[0]?.reviewHistory.map((item) => item.status)).toEqual(["testing", "weakened", "supported"]);
+  });
+
+  it("does not promote a hypothesis from an unrelated or single outcome", () => {
+    const state = createAgent(input);
+    const presenceId = state.presence!.id;
+    state.growthEvidenceRecords = ["unrelated-1", "unrelated-2"].map((id) => ({ id, agentId: state.agent!.id, presenceId, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Verified outcome with no causal decision lineage.", sourceRefs: [{ kind: "publication_metric" as const, id }], verified: true, createdAt: new Date().toISOString() }));
+    applyGrowthHypothesisActions(state, presenceId, "unrelated-review", [{ action: "create", statement: "Images improve qualified growth.", scope: "presence", patternIds: ["social.x.v1.proof-led-original"], decisionTargets: [{ strategyId: "social.x.v1.proof-led-original", effect: 2 }], evidenceIds: ["unrelated-1"], confidence: "high" }]);
+    const hypothesisId = state.growthHypotheses![0]!.id;
+    applyGrowthHypothesisActions(state, presenceId, "unrelated-support", [{ action: "support", hypothesisId, evidenceIds: ["unrelated-1", "unrelated-2"], confidence: "high" }]);
+    expect(state.growthHypotheses![0]!.status).toBe("weakened");
+    expect(state.growthHypotheses![0]!.supportingEvidenceIds).toEqual(["unrelated-1"]);
   });
 
   it("gives Genny verified act-level performance evidence so quote versus repost is strategic", async () => {
@@ -94,8 +106,17 @@ describe("Social Strategy Intelligence", () => {
       actorPresenceId: presenceId,
       source: "native" as const,
       trust: "untrusted_world_content" as const,
+      originExecutionId: `${id}-execution`,
     } satisfies OpenPresenceState["mirrorObjects"][number]);
     state.mirrorObjects = [mirror("quote-1", "quote"), mirror("quote-2", "quote"), mirror("repost-1", "repost"), mirror("repost-2", "repost")];
+    const strategySelections = [
+      ["quote-1", "quote", "social.x.v1.selective-amplification"],
+      ["quote-2", "quote", "social.x.v1.selective-amplification"],
+      ["repost-1", "repost", "social.x.v1.selective-amplification"],
+      ["repost-2", "repost", "social.x.v1.selective-amplification"],
+    ] as const;
+    state.executions = strategySelections.map(([mirrorId, action]) => ({ id: `${mirrorId}-execution`, socialIntentId: `${mirrorId}-intent`, presenceId, affordance: `x.${action}`, mode: "auto", status: "succeeded", attempts: 1, idempotencyKey: `${mirrorId}-key`, createdAt: observedAt, updatedAt: observedAt, environment: "live" })) as never;
+    state.socialDecisions = strategySelections.map(([mirrorId, action, patternId]) => ({ id: `${mirrorId}-decision`, agentId: state.agent!.id, presenceId, environment: "live", focalMirrorObjectIds: [mirrorId], decision: action, summary: `Selected ${action}.`, influences: [], socialIntentId: `${mirrorId}-intent`, socialStrategy: { retrievalRunId: `${mirrorId}-strategy-run`, consideredPatternIds: [patternId], selectedByAct: [{ act: action, patternId, mechanismId: "selective amplification" }] }, createdAt: observedAt })) as never;
 
     for (const [mirrorObjectId, metrics] of [
       ["quote-1", { impressions: 1_000, likes: 120, replies: 12, reposts: 18, quotes: 5 }],
@@ -131,11 +152,18 @@ describe("Social Strategy Intelligence", () => {
     expect(repost.samples).toBe(2);
     expect(quote.averageEngagementRate!).toBeGreaterThan(repost.averageEngagementRate!);
 
+    const patternPerformance = summarizeStrategyPatternPerformance(state, presenceId);
+    expect(patternPerformance).toHaveLength(2);
+    expect(patternPerformance.find((item) => item.action === "quote")).toMatchObject({ patternId: "social.x.v1.selective-amplification", mechanism: "selective amplification", samples: 2 });
+    expect(patternPerformance.find((item) => item.action === "repost")).toMatchObject({ patternId: "social.x.v1.selective-amplification", mechanism: "selective amplification", samples: 2 });
+
     const context = compileSocialStrategyContext(state, state.presence!, { invocation: "growth-mission-eval", objective: "Choose whether to quote or repost a high-signal AI builder post using measured audience engagement evidence.", availableActions: ["quote", "repost"] });
     expect(context.retrievalRun.relevantGrowthHypothesisIds).toContain("hypothesis-quote-over-repost");
     expect(context.prompt).toContain("Verified live publication performance by act");
     expect(context.prompt).toContain("quote: 2 verified publications");
     expect(context.prompt).toContain("repost: 2 verified publications");
+    expect(context.prompt).toContain("Verified performance by explicitly selected strategy pattern");
+    expect(context.prompt).toContain("quote · social.x.v1.selective-amplification");
 
     const recordedChoice = strategyUseFromDecision(context.retrievalRun, [{ action: "quote", strategyId: "social.x.v1.selective-amplification", mechanismId: "selective amplification" }]);
     expect(recordedChoice?.selectedByAct[0]).toMatchObject({ act: "quote", patternId: "social.x.v1.selective-amplification", mechanismId: "selective amplification" });
@@ -146,5 +174,26 @@ describe("Social Strategy Intelligence", () => {
     expect(decision.action).toBe("quote");
     expect(decision.rationale).toContain("verified act-level evidence");
     expect(decision.socialStrategy?.use?.selectedByAct[0]).toMatchObject({ act: "quote", patternId: "social.x.v1.selective-amplification" });
+  });
+});
+
+describe("observed strategy learning", () => {
+  it("persists a scoped, unproven lesson and retrieves it in a later decision", async () => {
+    const { learnObservedSocialPattern } = await import("../lib/social-strategy");
+    const state = createAgent(input);
+    const presence = state.presence!;
+    state.mirrorObjects.push({ id: "observed-showcase", presenceId: presence.id, bridgeId: "source", channelId: "x", externalRef: { type: "x.post", id: "123" }, objectType: "post", content: { text: "Share your developer tool and one problem it solves; I will try three." }, observedAt: new Date().toISOString(), visibility: "public", shareability: "public", environment: presence.environment });
+    // The selected source can be older than the automatic review window.
+    state.mirrorObjects.unshift(...Array.from({ length: 45 }, (_, index) => ({ ...state.mirrorObjects.at(-1)!, id: `newer-${index}`, observedAt: new Date(Date.now() + 1000).toISOString() })));
+    const learned = learnObservedSocialPattern(state, presence.id, { statement: "A developer tool showcase with specific feedback may encourage relevant participation; test reply quality.", mirrorObjectIds: ["observed-showcase"] });
+    expect(learned.hypothesis).toMatchObject({ status: "testing", confidence: "low" });
+    expect(learned.state.growthEvidenceRecords?.find(item => item.id.endsWith("observed-showcase"))).toMatchObject({ kind: "STRATEGY_OBSERVATION", verified: false });
+    const later = compileSocialStrategyContext(JSON.parse(JSON.stringify(learned.state)), presence, { invocation: "later", objective: "developer tool showcase participation", availableActions: ["original_post"] });
+    expect(later.retrievalRun.relevantGrowthHypothesisIds).toContain(learned.hypothesis.id);
+    expect(later.prompt).toContain(learned.hypothesis.statement);
+    expect(later.retrievalRun.consideredPatterns.map(item => item.id)).toContain("social.x.v1.community-showcase");
+    expect(() => learnObservedSocialPattern(state, "another-presence", { statement: "Invented lesson", mirrorObjectIds: ["observed-showcase"] })).toThrow("observed public posts");
+    expect(() => learnObservedSocialPattern(state, presence.id, { statement: "Invented lesson", mirrorObjectIds: ["missing"] })).toThrow("observed public posts");
+    expect(learned.state.executions).toEqual(state.executions);
   });
 });

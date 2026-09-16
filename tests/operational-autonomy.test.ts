@@ -3,6 +3,7 @@ import {
   claimOperationalRunLease,
   getBrowserBody,
   getDependencyHealth,
+  getRecoveryIncident,
   getOperationalRun,
   listOperationalRuns,
   listRecoveryAttempts,
@@ -260,6 +261,8 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     expect(classifyFailureRootCause("X rejected this action: Your monthly spend cap has been reached.", "native_x")).toMatchObject({
       rootCauseKey: "native_x.credits_exhausted", retryable: false, requiresOperator: true, requiresAuth: false,
     });
+    expect(classifyFailureRootCause("X has no API credits remaining for this app.", "runtime").safeSummary).toContain("X API billing");
+    expect(classifyFailureRootCause("No API credits while drafting about X.", "model_provider").safeSummary).toContain("AI model provider billing");
   });
 
   it("treats SQLite corruption as a database boundary instead of a recoverable runtime outage", () => {
@@ -334,6 +337,42 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     const health = readOperationalHealth(uniquePresence);
 
     expect(health.activeRuns.find((run) => run.id === "run_resolved_incident")).toBeUndefined();
+  });
+
+  it("resolves a fenced native observation incident after the watchdog supersedes its run", () => {
+    const uniquePresence = `presence_superseded_native_observe_${Date.now()}`;
+    const runId = `run_superseded_native_observe_${Date.now()}`;
+    const { incident } = recordOperationalFailure({
+      dependency: "runtime",
+      presenceId: uniquePresence,
+      runId,
+      error: 'Stage "native.observe" exceeded expected duration (980s elapsed vs 180s allowed)',
+    });
+    incident.state = "needs_operator";
+    incident.operatorActionRequired = true;
+    incident.currentRecoveryStep = "recover_stale_run_native.observe";
+    incident.affectedRunIds = [runId];
+    upsertRecoveryIncident(incident);
+
+    const now = new Date().toISOString();
+    upsertOperationalRun({
+      id: runId,
+      runId,
+      presenceId: uniquePresence,
+      kind: "attention",
+      state: "cancelled",
+      stage: "superseded_by_recovery_fix",
+      incidentId: incident.id,
+      createdAt: now,
+      lastProgressAt: now,
+      attemptCount: 1,
+      recoveryCount: 1,
+    });
+
+    const health = readOperationalHealth(uniquePresence);
+
+    expect(getRecoveryIncident(incident.id)?.state).toBe("resolved");
+    expect(health.incidents.find((item) => item.id === incident.id)).toBeUndefined();
   });
 
   it("does not project terminal blocked runs as active health work", () => {

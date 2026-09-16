@@ -1,0 +1,4 @@
+interface:
+  display_name: "Autonomous Operation Loop"
+  short_description: "Build outcome-owning autonomous Agent behavior"
+  default_prompt: "Use $autonomous-operation-loop to trace and improve this Agent's goal-to-outcome operation loop."

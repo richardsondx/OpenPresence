@@ -97,9 +97,10 @@ export function classifyFailureRootCause(
 
   // Credits / Billing exhaustion
   if (isXCreditsError(msg)) {
+    const xBilling = dependency === "native_x" || dependency === "runtime" && /\bX\b|twitter/i.test(msg);
     return {
       rootCauseKey: `${dependency}.credits_exhausted`,
-      safeSummary: `${dependency === "native_x" ? "X API" : "Provider"} billing is blocking access. Review available credits and spending limits to restore it.`,
+      safeSummary: `${xBilling ? "X API" : dependency === "model_provider" ? "AI model provider" : "Provider"} billing is blocking access. Review available credits and spending limits to restore it.`,
       retryable: false,
       requiresOperator: true,
       requiresAuth: false,
@@ -257,6 +258,7 @@ export function recordOperationalFailure(input: {
     };
   } else {
     incident.lastObservedAt = nowIso;
+    incident.safeSummary = classification.safeSummary;
     if (input.runId && !incident.affectedRunIds.includes(input.runId)) {
       incident.affectedRunIds.push(input.runId);
     }

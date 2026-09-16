@@ -2,6 +2,26 @@ import { randomUUID } from "node:crypto";
 import { listOperationalRuns, mergeAttentionWake, upsertOperationalRun } from "./db";
 import type { AttentionRunRequest, AttentionScope, AttentionTrigger, OperationalRun, ScheduledWake } from "./types";
 
+// Keep Attention as the integration seam for operator-facing communication;
+// the policy itself lives in a dedicated module so event resolution and future
+// conversation projections cannot grow separate importance rules.
+export {
+  PROACTIVE_UPDATE_KINDS,
+  resolveAgentInitiatedCommunication,
+  resolvePeriodicRecap,
+  resolveProactiveUpdate,
+  selectProactiveUpdates,
+  shouldSendProactiveUpdate,
+} from "./operator-initiated-communication";
+export type {
+  AgentInitiatedCommunicationCandidate,
+  AgentInitiatedCommunicationDecision,
+  CommunicationDisposition,
+  CommunicationImportance,
+  PeriodicRecapOptions,
+  ProactiveUpdateKind,
+} from "./operator-initiated-communication";
+
 const activeAttentionStates = new Set<OperationalRun["state"]>([
   "queued",
   "running",

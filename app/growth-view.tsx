@@ -4,9 +4,9 @@ import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from "
 import { Activity, ArrowUpRight, BarChart3, Check, ChevronRight, CircleAlert, Clock3, Eye, Heart, Info, LoaderCircle, Plus, ShieldCheck, Sparkles, TrendingUp, Users, X } from "lucide-react";
 import { assignmentIsOpen, audienceDeltas, capabilityProviderLabel, collapseAudienceSnapshots, derivePresenceCapabilityManifest, derivePublicHistory, externalUrlForMirrorObject, pendingReviewExecutionsForCapabilities } from "@/lib/runtime";
 import { deriveHistoricalGrowthContext } from "@/lib/growth-history";
+import { deriveGrowthProfile } from "@/lib/growth-profile";
 import { growthEvidenceIsInPresenceScope, growthPublicationIsInPresenceScope, presenceGrowthBoundary } from "@/lib/growth-scope";
 import type { Assignment, GrowthReview, MirrorObject, OpenPresenceState, PresenceAudienceSnapshot, PublicationMetricSnapshot, View } from "@/lib/types";
-import type { GrowthHypothesis } from "@/lib/types";
 
 type Mutate = (operation: unknown, requestContext?: OpenPresenceState) => Promise<OpenPresenceState | null>;
 type GrowthViewProps = {
@@ -405,59 +405,6 @@ function GrowthInsights({
   );
 }
 
-function GrowthLearning({ state, presenceId }: { state: OpenPresenceState; presenceId: string }) {
-  const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
-  const hypotheses = (state.growthHypotheses ?? [])
-    .filter((hypothesis) => hypothesis.status !== "retired")
-    .filter((hypothesis) => hypothesis.scope === "agent"
-      || (hypothesis.scope === "channel" && hypothesis.channelId === presence?.channel)
-      || (hypothesis.scope === "presence" && hypothesis.originatingPresenceId === presenceId))
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-  const evidenceById = new Map((state.growthEvidenceRecords ?? []).map((record) => [record.id, record]));
-  const disposition = (hypothesis: GrowthHypothesis) => hypothesis.status === "supported"
-    ? { label: "KEEP", tone: "positive" }
-    : hypothesis.status === "disfavored"
-    ? { label: "STOP", tone: "danger" }
-    : { label: "TEST", tone: "neutral" };
-
-  return (
-    <section className="growth-insights-section growth-learning-section" aria-label="Structured Growth learning">
-      <div className="growth-section-heading">
-        <div>
-          <SectionEyebrow>Structured learning</SectionEyebrow>
-          <h2>Hypotheses, not hidden policy</h2>
-        </div>
-        <span className="muted">World outcomes earn confidence</span>
-      </div>
-      {hypotheses.length ? (
-        <div className="growth-learning-list">
-          {hypotheses.map((hypothesis) => {
-            const result = disposition(hypothesis);
-            const evidence = [...hypothesis.supportingEvidenceIds, ...hypothesis.contradictingEvidenceIds]
-              .map((id) => evidenceById.get(id))
-              .filter((item): item is NonNullable<typeof item> => Boolean(item));
-            return (
-              <details className="growth-learning-card" key={hypothesis.id}>
-                <summary>
-                  <span className={`growth-learning-badge growth-learning-badge-${result.tone}`}>{result.label}</span>
-                  <span className="growth-learning-statement">{hypothesis.statement}</span>
-                  <span className="growth-learning-meta">{hypothesis.confidence} confidence · {hypothesis.scope}</span>
-                </summary>
-                <div className="growth-learning-detail">
-                  <p>{hypothesis.status === "weakened" ? "Evidence weakened this interpretation; it remains testable at lower confidence." : hypothesis.status === "disfavored" ? "This interpretation is disfavored and should not guide new strategy selection." : hypothesis.status === "supported" ? "A verified world outcome supports keeping this interpretation in view." : "This is a testing hypothesis, not an instruction or identity change."}</p>
-                  <small>{evidence.length ? `${evidence.length} typed evidence record${evidence.length === 1 ? "" : "s"}` : "No typed evidence attached yet"}{hypothesis.derivedFrom.length ? ` · derived from ${hypothesis.derivedFrom.join(", ")}` : ""}</small>
-                  {evidence.length > 0 && <ul>{evidence.slice(0, 5).map((record) => <li key={record.id}><strong>{record.kind}</strong> · {record.statement}</li>)}</ul>}
-                </div>
-              </details>
-            );
-          })}
-        </div>
-      ) : (
-        <p className="growth-empty-note">No structured hypotheses yet. Growth will keep observations separate from strategy until evidence justifies a learning record.</p>
-      )}
-    </section>
-  );
-}
 
 function GrowthFocusAndNext({
   assignment,
@@ -758,8 +705,12 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
   const parsedGrowthGoal = Math.floor(Number(growthGoalDraft.replaceAll(",", "").trim()));
 
   const growthBoundary = presenceGrowthBoundary(state, presence.id);
+  const growthWindowCopy = growthBoundary.startAt
+    ? `${growthBoundary.source === "recorded" ? "Presence created" : "Presence start inferred"} ${formatHistoryTimestamp(growthBoundary.startAt)} · Earlier account history is excluded.`
+    : "Presence start is not known yet · Earlier account history is excluded until the boundary can be established.";
   const assignment = state.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && assignmentIsOpen(item));
   const growthSummary: NonNullable<OpenPresenceState["growthBrowserSummary"]> | undefined = state.growthBrowserSummary?.presenceId === presence.id ? state.growthBrowserSummary : undefined;
+  const growthProfile = growthSummary?.profile ?? deriveGrowthProfile(state, presence.id);
   const snapshots = growthSummary?.audience.recent ?? collapseAudienceSnapshots((state.audienceSnapshots ?? []).filter((item) => item.presenceId === presence.id && growthEvidenceIsInPresenceScope(state, presence.id, item.observedAt)));
   const audienceSnapshotCount = growthSummary?.audience.count ?? snapshots.length;
   const latest = snapshots[0];
@@ -858,12 +809,14 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
     if (!Number.isFinite(parsedGrowthGoal) || parsedGrowthGoal < 1 || creatingGrowth) return;
     setCreatingGrowth(true);
     try {
-      await mutate({
+      const next = await mutate({
         type: "createAssignment",
         presenceId: presence.id,
         environment: presence.connectionMode === "sandbox" ? "sandbox" : "live",
         instruction: `Grow this Presence toward ${parsedGrowthGoal.toLocaleString()} followers while building an audience of ${presence.brief.audience}.`,
       });
+      const goal = next?.assignments.find((item) => item.presenceId === presence.id && item.activation?.type === "continuous" && item.successEvidence?.kind === "metric_threshold" && item.successEvidence.value === parsedGrowthGoal);
+      if (next && goal?.status === "draft" && ["ready", "ready_with_assumptions"].includes(goal.preflight?.status ?? "")) await mutate({ type: "activateAssignment", id: goal.id }, next);
       setGrowthSetupOpen(false);
       setGrowthGoalDraft("");
     } finally {
@@ -876,12 +829,31 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
       <PageHeader
         eyebrow={`${presence.name} · Growth`}
         title="Growth"
-        description="Autonomous audience growth scoreboard and performance proof."
+        description="Your audience, relationships, and what’s working."
+        actions={
+          <div className="growth-page-boundary" aria-label="Growth window">
+            <span className="growth-page-boundary-label">Growth window</span>
+            <span>{growthWindowCopy}</span>
+          </div>
+        }
       />
-      <div className="growth-scope-note" role="note">
-        <strong>Growth window</strong>
-        <span>{growthBoundary.startAt ? `${growthBoundary.source === "recorded" ? "Presence created" : "Presence start inferred"} ${formatHistoryTimestamp(growthBoundary.startAt)} · Earlier account history is excluded.` : "Presence start is not known yet · Earlier account history is excluded until the boundary can be established."}</span>
-      </div>
+
+      {growthProfile && (
+        <section className="growth-profile-card" aria-label="Growth profile">
+          <div className="growth-profile-copy">
+            <SectionEyebrow>Audience model</SectionEyebrow>
+            <h2>{growthProfile.audience}</h2>
+            <p>{growthProfile.qualifiedOutcome}</p>
+          </div>
+          <div className="growth-profile-grid">
+            <div><span>Territory</span><strong>{growthProfile.primaryTerritory.join(" · ") || "Not specified yet"}</strong></div>
+            <div><span>Relationship focus</span><strong>{growthProfile.relationshipFocus.join(" · ") || "Useful participation"}</strong></div>
+            <div><span>Active approach</span><strong>{growthProfile.activeApproach.join(" · ")}</strong></div>
+            <div><span>Media approach</span><strong>{growthProfile.mediaApproach}</strong></div>
+          </div>
+          <small>{growthProfile.confidence} confidence · {growthProfile.evidenceRefs.length} evidence reference{growthProfile.evidenceRefs.length === 1 ? "" : "s"}</small>
+        </section>
+      )}
 
       {!assignment ? (
         <section className="growth-empty settings-card">
@@ -889,9 +861,9 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
             <TrendingUp size={23} />
           </div>
           <SectionEyebrow>Continuous responsibility</SectionEyebrow>
-          <h2>Give {presence.name} a growth responsibility.</h2>
+          <h2>What do you want to grow?</h2>
           <p>
-            One long-lived Assignment owns the objective. {agentName} chooses the day-to-day work, observes the public result, and revises its approach during review.
+            Set an audience goal. {agentName} will choose the day-to-day work and review what makes a difference.
           </p>
           {!growthSetupOpen ? (
             <Button variant="primary" onClick={() => setGrowthSetupOpen(true)}>
@@ -910,7 +882,7 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
                 value={growthGoalDraft}
                 onChange={(event) => setGrowthGoalDraft(event.target.value)}
               />
-              <p id="growth-goal-help">This becomes the success measure for the long-lived responsibility. {agentName} still decides the day-to-day work.</p>
+              <p id="growth-goal-help">{agentName} chooses how to pursue this goal. You can adjust it later.</p>
               {parsedGrowthGoal >= 1 && (
                 <div className="growth-responsibility-contract" role="status">
                   <strong>Growth contract</strong>
@@ -932,9 +904,9 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
           <section className="growth-dashboard-hero" aria-label="Growth Hero Status">
             <div className="growth-hero-top">
               <div className="growth-hero-copy">
-                <SectionEyebrow>Growth status</SectionEyebrow>
-                <h1>{presence.name} {statusLabel === "Accelerating" ? "is accelerating" : statusLabel === "Autonomous" ? "is operating autonomously" : statusLabel === "Needs attention" ? "needs attention" : "is establishing a baseline"}</h1>
-                <p>{dynamicSubhead}</p>
+                <SectionEyebrow>Your goal</SectionEyebrow>
+                <h2>{goal ? `Reach ${goal.toLocaleString()} followers` : "Build a meaningful audience"}</h2>
+                {!needsAttention && <p>{dynamicSubhead}</p>}
               </div>
               <span className={`growth-status-chip growth-status-chip-${statusTone}`}>
                 {statusLabel === "Autonomous" && <Check size={13} aria-hidden="true" />}
@@ -949,31 +921,18 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
             {needsAttention && (
               <div className="growth-needs-banner" role="alert">
                 <div>
-                  <strong>Action Required: {limitationCopy[0] ?? "Growth needs your attention"}</strong>
-                  <span>Operator resolution needed for full autonomous performance.</span>
+                  <strong>{limitationCopy[0] ?? "One decision needs your attention"}</strong>
+                  <span>Review the details so the Agent can continue.</span>
                 </div>
                 <Button variant="ghost" onClick={() => onOpenAttention ? onOpenAttention() : setView("presence")}>
-                  {onOpenAttention ? "Review in Activity" : "Resolve in Settings"}
+                  {onOpenAttention ? "Review details" : "Open settings"}
                 </Button>
               </div>
             )}
 
             <div className="growth-hero-footer">
-              <div className={`growth-action-pill ${needsAttention ? "growth-action-pill-attention" : "growth-action-pill-healthy"}`}>
-                {needsAttention ? (
-                  <>
-                    <CircleAlert size={15} aria-hidden="true" />
-                    <span>Needs you: {operatorInterventionsNeeded} action{operatorInterventionsNeeded === 1 ? "" : "s"} required</span>
-                  </>
-                ) : (
-                  <>
-                    <Check size={15} aria-hidden="true" />
-                    <span>Autonomous loop active</span>
-                  </>
-                )}
-              </div>
               <span className="growth-hero-meta">
-                Objective: {displayedFollowerCount !== undefined ? displayedFollowerCount.toLocaleString() : "—"} / {goal?.toLocaleString() ?? "100,000"} followers ({progress}% progress)
+                Objective: {displayedFollowerCount !== undefined ? displayedFollowerCount.toLocaleString() : "—"} / {goal?.toLocaleString() ?? "Not set"} followers ({progress}% progress)
               </span>
             </div>
           </section>
@@ -999,7 +958,7 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
           )}
 
           {/* Layer 1: KPI Scoreboard */}
-          <section className="growth-kpi-grid" aria-label="Key Performance Indicators">
+          <section className="growth-kpi-grid" aria-label="Audience and relationships">
             <GrowthKpiCard
               metric="followers"
               onClick={() => setSelectedMetric("followers")}
@@ -1019,6 +978,16 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
               sub={`${publicationSnapshotCount} publication checks`}
             />
             <GrowthKpiCard
+              metric="relationships"
+              onClick={() => setSelectedMetric("relationships")}
+              icon={<Users size={14} />}
+              value={relationshipsCount || peopleEngagedCount || "—"}
+              delta={`${peopleEngagedCount} people engaged`}
+              sub="Substantive connections"
+            />
+          </section>
+          <details className="friendly-disclosure"><summary>More measures</summary><div className="growth-kpi-grid">
+            <GrowthKpiCard
               metric="engagement"
               onClick={() => setSelectedMetric("engagement")}
               icon={<Heart size={14} />}
@@ -1036,14 +1005,6 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
               sub={`${weeklyBreakdown.replies} replies this week`}
             />
             <GrowthKpiCard
-              metric="relationships"
-              onClick={() => setSelectedMetric("relationships")}
-              icon={<Users size={14} />}
-              value={relationshipsCount || peopleEngagedCount || "—"}
-              delta={`${peopleEngagedCount} people engaged`}
-              sub="Substantive connections"
-            />
-            <GrowthKpiCard
               metric="operator-load"
               onClick={() => setSelectedMetric("operator-load")}
               icon={<ShieldCheck size={14} />}
@@ -1052,9 +1013,10 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
               delta={operatorInterventionsNeeded === 0 ? "100% autonomous" : "Intervention needed"}
               sub={`${recoveriesHandledCount} auto-recoveries`}
             />
-          </section>
+          </div></details>
 
           {/* Layer 2: Autonomy Proof Panel */}
+          <details className="friendly-disclosure"><summary>Activity and reliability</summary>
           <GrowthAutonomyProof
             presenceName={presence.name}
             autonomousExecutionsCount={totalAutonomousActions}
@@ -1064,6 +1026,7 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
             recoveriesHandledCount={recoveriesHandledCount}
             weeklyBreakdown={weeklyBreakdown}
           />
+          </details>
 
           {/* Layer 2: Simple Trend Chart */}
           <GrowthTrendChart
@@ -1083,7 +1046,7 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
             audienceObjective={assignment.audienceObjective ?? presence.brief.audience}
           />
 
-          <GrowthLearning state={state} presenceId={presence.id} />
+
 
           {/* Layer 2: Current Focus & What Happens Next */}
           <GrowthFocusAndNext
@@ -1100,8 +1063,7 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
           <section className="growth-analyst-section" aria-label="Analyst & Deep Evidence Details">
             <div className="growth-section-heading">
               <div>
-                <SectionEyebrow>Analyst Details</SectionEyebrow>
-                <h2>Deep Evidence &amp; System Records</h2>
+                <h2>Evidence and history</h2>
               </div>
             </div>
             <div className="growth-disclosures">

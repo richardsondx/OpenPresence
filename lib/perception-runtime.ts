@@ -340,6 +340,21 @@ export async function inspectSandboxObject(state: OpenPresenceState, object: Mir
       sessionId: asset.sessionId,
     };
     next.perceptions.unshift(perception);
+    // Keep the Asset card useful even when the browser is rendering a
+    // projection that does not include the Social Mirror object. The
+    // description is a compact visual meta label, not a second copy of the
+    // full perception record.
+    const firstSentence = run.result.observation.trim().split(/(?<=[.!?])\s+/)[0]?.slice(0, 180).trim();
+    const genericDescription = !asset.description
+      || /^X (?:image|video|gif) attachment$/i.test(asset.description)
+      || /^Temporary X discovery\.?$/i.test(asset.description);
+    if (genericDescription && firstSentence) asset.description = firstSentence;
+    asset.perception = {
+      observation: run.result.observation,
+      likelyMeaning: run.result.interpretation,
+      visibleText: run.result.visibleText ? [run.result.visibleText] : undefined,
+      uncertainty: [run.result.uncertainty],
+    };
   }
   return next;
 }

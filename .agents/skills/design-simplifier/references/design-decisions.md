@@ -45,3 +45,25 @@ Record accepted design decisions here so repeated reviews do not reopen settled 
 ## Review discipline
 
 Do not reopen a decision because a new component, trend, or visual style is available. Reopen only for changed goals, changed user evidence, changed surrounding architecture, or demonstrated friction against the decision.
+
+## 2026-09-13 — Five daily destinations, responsive conversation
+
+- **Decision:** Chat, Tasks, People, Growth, Media; the same labeled icons on a mobile dock and desktop navigation. Tasks absorbs Work/Schedule. Knowledge, Teach, Test agent, Watchlist, and settings stay in the Agent menu.
+- **Evidence:** The operator found Work/Schedule indistinguishable, Lab over-prominent after setup, and Assets unnecessarily buried. Muse references illustrated compact identity, inline results, and sheets.
+- **Alternatives rejected:** Lab in daily navigation; separate Work and Schedule; copying Muse's unrelated personal-assistant destinations.
+- **Reasoning:** One Agent workspace, fewer competing concepts, direct media access, and coherent mobile/desktop paths.
+- **Tradeoff:** Setup and diagnostic tools require opening the Agent menu; their scope and capabilities remain intact.
+- **Reopen when:** Real daily journeys demonstrate a missing destination or the Agent/Presence model changes.
+
+### 2026-09-13 — Daily pages and Agent details
+
+People uses compact rows with one useful context line. Watching keeps watch plans and exploration details closed until selected. Growth leads with the goal and three audience measures; operational evidence is disclosed. Media opens the gallery without a selected inspector, and folder creation is secondary. Activity / About replaces four duplicate context tabs. Mobile sheets keep focus and offer a visible close control; desktop preserves room for the same content. These changes retain the underlying assignments, scope, review, and verified-outcome rules.
+
+## 2026-09-16 — Artifacts separates reusable materials from Growth analytics
+
+- **DESIGN CHANGE:** Daily navigation replaces Media with Artifacts, containing Templates and Media tabs. Existing `/assets` links still open Media.
+- **Evidence:** Operator explicitly rejected templates inside Growth: they visit Growth to understand account performance, and want to inspect materials created with their Agent.
+- **Decision:** Reuse the existing template/hypothesis records and visual library. Show evidence, unproven status, delivery counts, and measured results with each template; draft and scheduling actions preserve existing authority.
+- **Rejected:** A second competing library in Growth; a sixth daily navigation destination; treating saved templates or scheduled tasks as verified posts.
+- **Chat:** Anchor meaningful approach/work records to their originating receipt, hide empty approach cards, preserve run data across projections, and fit cards within the conversation width.
+- **Reopen:** Evidence that Templates and Media cannot be found or that learned hypotheses and reusable formats need distinct artifact filters.

@@ -24,6 +24,29 @@ Or:
 
 > **Your agent should not live in a chat window.**
 
+## 49. Mobile-first Agent workspace (2026-09-13)
+
+The daily destinations are **Chat, Tasks, People, Growth, and Artifacts**. Mobile uses
+one labeled icon dock; desktop uses the same destinations below an Agent switcher.
+The Agent stays the visible actor. Selecting a destination does not change identity
+or grant execution authority. Presence-scoped views retain the selected social context.
+
+Tasks combines the responsibility list and Calendar: what the Agent owns and when
+it acts are views of the same Assignments. Work is a compatibility entry, not another
+product. Growth explains objectives and evidence; its concrete actions remain Tasks.
+Artifacts contains separate Templates and Media tabs (operator direction, 2026-09-16). Templates are reusable formats and learned approaches with visible evidence and results; Media is the accessible visual library, also reachable while attaching Chat context. Growth remains the account's analytics and objectives surface. Saving a template does not authorize publication.
+
+Knowledge, Teach agent, Test agent (Agent Lab), Watchlist, and Agent settings live in
+the Agent menu. Rehearsal remains explicitly separate from live delivery.
+
+Chat uses a compact Agent header, readable grouped bubbles, durable tool receipts,
+and an always-usable composer. Mobile details use sheets; desktop uses contextual
+inspectors. Status comes from persisted work. Approvals, blocked tasks, connection
+state, and verified outcomes must remain distinguishable. Neutral surfaces and small
+Agent accents preserve OpenPresence identity; decorative imitation is not a goal.
+
+This direction supersedes earlier navigation inventories where they conflict.
+
 ## 48. Agent-first workspace direction (2026-09-02)
 
 The primary workspace is now organized around the Agent as the visible actor.

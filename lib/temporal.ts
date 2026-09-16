@@ -1,3 +1,4 @@
+import { assignmentWindowState, expireAssignmentWindows } from "./assignment-timeframe";
 import {
   claimOperationalRunLease,
   claimDueScheduledWakes,
@@ -23,6 +24,7 @@ import { bridgeExecutionStatus } from "./bridge-contract";
 import { assignmentPursuitHasHardResourceCapacity, assignmentPursuitUsage, recordRuntimeEvent, scheduledAssignmentIsDue } from "./runtime";
 import { assignmentRunBlocksNewWork, assignmentRunIsActive, isAutonomousPreWriteDeliveryFailure, reconcileLiveAssignmentRuns } from "./live-assignment-run";
 import { reconcileOrphanedAttentionEpisodes } from "./attention-episodes";
+import { autonomousGrowthReviewNeed } from "./growth-review-scheduling";
 import type {
   JsonValue,
   Execution,
@@ -132,8 +134,10 @@ export function dueLiveAssignmentsWithoutWorkers(state: OpenPresenceState, now =
     .filter((run) => assignmentRunIsActive(run))
     .map((run) => run.presenceId));
   return state.assignments.filter((assignment) => {
+    if (assignmentWindowState(assignment, now.getTime()) !== "open") return false;
     const presence = state.presences.find((item) => item.id === assignment.presenceId);
     if (!presence || presence.status !== "live" || assignment.environment === "sandbox") return false;
+    if (assignment.planningOnly) return false;
     if (occupiedPresenceIds.has(assignment.presenceId)) return false;
     const pursuit = (state.assignmentPursuitWindows ?? []).find((window) => window.assignmentId === assignment.id && window.presenceId === assignment.presenceId && window.status === "active");
     const pursuitDue = Boolean(pursuit
@@ -208,6 +212,7 @@ export function queuedLiveAssignmentRunsWithoutWorkers(state: OpenPresenceState)
     if (!presence || presence.status !== "live" || presence.environment === "sandbox") return false;
     const assignment = state.assignments.find((item) => item.id === run.assignmentId && item.presenceId === run.presenceId);
     if (!assignment || assignment.environment === "sandbox") return false;
+    if (assignment.planningOnly) return false;
     // A queued run can outlive the Assignment decision that created it. Never
     // resurrect operator-paused, completed, or cancelled responsibility just
     // because its stale queue row survived a process restart.
@@ -787,7 +792,8 @@ export function runOperationalSweep(now = new Date()): SweepResult {
       && ["queued", "running", "waiting", "recovering", "delivery_uncertain", "reconciling"].includes(run.state)
       && (run.attentionEpisodeId === episode.id || episode.runIds.includes(run.id)));
   });
-  const state = hasExpiredQueuedExecution || hasStaleBridgeExecution || hasNonRetryableVerification || hasAutonomousPreWriteFailure || hasOrphanedAttentionEpisode ? readState() : stateView;
+  const hasEndedAssignmentWindow = stateView.assignments.some((assignment) => !["completed", "completed_with_adaptation", "cancelled", "expired_incomplete"].includes(assignment.status) && assignmentWindowState(assignment, now.getTime()) === "ended");
+  const state = hasEndedAssignmentWindow || hasExpiredQueuedExecution || hasStaleBridgeExecution || hasNonRetryableVerification || hasAutonomousPreWriteFailure || hasOrphanedAttentionEpisode ? readState() : stateView;
   // A disconnected Bridge cannot perform claim-time expiry. Close stale
   // pre-dispatch intents here so the queue has a bounded lifetime and never
   // presents an undeliverable action as permanently in flight.
@@ -795,8 +801,9 @@ export function runOperationalSweep(now = new Date()): SweepResult {
   const staleBridgeExecutions = hasStaleBridgeExecution ? closeStaleBridgeExecutions(state, now) : 0;
   const closedNonRetryableVerifications = hasNonRetryableVerification ? closeNonRetryableVerificationExecutions(state, now) : 0;
   const repairedAttentionEpisodes = hasOrphanedAttentionEpisode ? reconcileOrphanedAttentionEpisodes(state, now) : 0;
+  const expiredAssignmentWindows = hasEndedAssignmentWindow ? expireAssignmentWindows(state, now.getTime()) : 0;
   const pausedExhaustedPursuits = pauseExhaustedAssignmentPursuits(state, now);
-  if (hasAutonomousPreWriteFailure || expiredQueuedExecutions > 0 || staleBridgeExecutions > 0 || closedNonRetryableVerifications > 0 || repairedAttentionEpisodes > 0 || pausedExhaustedPursuits > 0) {
+  if (expiredAssignmentWindows > 0 || hasAutonomousPreWriteFailure || expiredQueuedExecutions > 0 || staleBridgeExecutions > 0 || closedNonRetryableVerifications > 0 || repairedAttentionEpisodes > 0 || pausedExhaustedPursuits > 0) {
     reconcileLiveAssignmentRuns(state, now.getTime());
     writeState(state, { advanceWorkspaceRevision: false });
   }
@@ -809,6 +816,23 @@ export function runOperationalSweep(now = new Date()): SweepResult {
   // reader, so treating it as due here creates a no-op attention run on every
   // sweep and can starve the local runtime with repeated snapshot writes.
   for (const presence of state.presences.filter(isLiveTemporalPresence)) {
+    const growthReviewNeed = autonomousGrowthReviewNeed(state, presence.id, now);
+    const activeReconsideration = listOperationalRuns(presence.id, ["queued", "running", "recovering", "delivery_uncertain", "reconciling"])
+      .find((run) => run.kind === "reconsideration" && run.metadata?.work === "growth_review");
+    // Growth review is model-only work over already persisted evidence. It
+    // must remain runnable when a channel incident (for example exhausted X
+    // credits) blocks observation or public delivery.
+    if (growthReviewNeed && presenceRequiresOperator(presence.id)) {
+      if (!activeReconsideration) {
+        const { run } = queueAutonomyRun(presence.id, "reconsideration", {
+          sourceRef: growthReviewNeed.assignment.id,
+          stage: "growth_review.queued",
+          metadata: { source: "scheduler", work: "growth_review", kind: growthReviewNeed.kind },
+        });
+        dispatchAutonomyWorker(run.id);
+      }
+      continue;
+    }
     if (presenceRequiresOperator(presence.id)) continue;
     const nextEligibleAt = presence.selfDirectedAttention?.nextEligibleAt;
     const hasPendingAttentionWake = listScheduledWakes(presence.id).some((wake) => wake.state === "pending" && (wake.kind === "attention" || wake.kind === "self_directed_discovery"));
@@ -830,6 +854,10 @@ export function runOperationalSweep(now = new Date()): SweepResult {
       && (!exploration.nextEligibleAt || new Date(exploration.nextEligibleAt).getTime() <= now.getTime()));
     const hasBroadAttentionRun = listOperationalRuns(presence.id, ["queued", "running", "recovering", "delivery_uncertain", "reconciling"])
       .some((run) => run.kind === "attention" && run.attention?.scope === "broad");
+    if (growthReviewNeed) {
+      if (!hasBroadAttentionRun) requestAttention(presence.id, "self_directed", nowIso, "broad");
+      continue;
+    }
     if (explorationDue) {
       // Explorations are a first-class durable source of attention. They must
       // not wait behind the Presence-wide self-directed cooldown, and an
@@ -987,7 +1015,10 @@ export function runOperationalSweep(now = new Date()): SweepResult {
       }
 
       // Trigger recovery for stale operational runs
-      const dependency = run.kind === "observation" ? "native_x" : "runtime";
+      // Attention runs can execute the native observation stage too. Classify
+      // by the boundary that actually stalled so recovery and health do not
+      // turn a native X timeout into a generic runtime incident.
+      const dependency = run.kind === "observation" || run.stage === "native.observe" ? "native_x" : "runtime";
       const { incident } = recordOperationalFailure({
         dependency,
         presenceId: run.presenceId,

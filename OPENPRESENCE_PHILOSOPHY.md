@@ -52,6 +52,19 @@ OpenPresence is not trying to make a chatbot that can also post.
 
 It is trying to create software for **persistent minds with public lives**.
 
+Two principles organize everything that follows:
+
+> **The operator sets direction. The Agent owns the work.**
+
+> **The operator should be able to supervise the Agent without becoming its task manager.**
+
+The operator establishes goals, identity, boundaries, access, and meaningful
+interventions. The Agent researches, plans, creates responsibilities, follows
+through, measures, learns, and re-plans within those boundaries. This is
+supervision without management: the operator can inspect and redirect the work
+without having to decompose the Agent's Mission into a hand-maintained task
+list.
+
 ## Visual evidence is an editorial judgment
 
 Search results are possibilities, not evidence. An asset earns its place by
@@ -797,7 +810,7 @@ The philosophical distinction is:
 
 ---
 
-# 17. Schedule defines outcomes, not content
+# 17. Calendar is the visible agenda; responsibilities define outcomes
 
 Traditional social schedulers ask:
 
@@ -807,7 +820,19 @@ OpenPresence asks:
 
 > What should this Agent accomplish Tuesday morning?
 
-New scheduled work is an **Assignment** with a visible completion contract. It might say:
+Calendar is not primarily a user-authored posting schedule. It is the Agent's
+visible agenda through time. It should show upcoming planned work, active work,
+completed and verified work, and cancelled or expired intentions. Calendar is a
+truthful view of the current plan, not a second plan and not a promise that
+something will be published at a particular time.
+
+The Agent owns maintaining this agenda. The operator may inspect, redirect,
+constrain, postpone, or cancel work without becoming the scheduler. If the
+operator says, “Move this announcement; I want to announce it myself first,”
+the Agent owns the consequence: it must reconsider dependent responsibilities
+and re-plan downstream work rather than silently deleting one calendar item.
+
+New planned work is an **Assignment** with a visible completion contract. It might say:
 
 > Teach founders one useful thing about persistent agents and leave verified evidence.
 
@@ -822,13 +847,26 @@ She may:
 - produce a decision report;
 - ask for operator input when the contract cannot be safely interpreted.
 
-The words should come from the moment. An unsolicited social opportunity is different: it may receive `NO_OP` when no delegated responsibility exists. `NO_OP` is a candidate-level judgment, never completion of an active Assignment.
+The words should come from the moment. An unsolicited social opportunity is different: it may receive `NO_OP` when no active responsibility exists. `NO_OP` is a candidate-level judgment, never completion of an active Assignment.
 
-Every Assignment is preflighted for semantic clarity, capability, authority, timing, and readiness. Missing capability or authority blocks activation. Existing Standing Intent records remain available as historical records and migrate to Assignments according to their deliverable.
+Every Assignment is preflighted for semantic clarity, capability, authority, timing, and readiness. Missing capability or authority blocks activation. Existing Standing Intent records remain available as historical records and migrate to Assignments according to their deliverable. Every calendar item must retain provenance to the responsibility or intent that produced it.
 
-The operator decides the outcome and hard constraints. The Agent decides how to accomplish it. An Assignment remains active until completed with verified evidence, explicitly blocked, cancelled, or expired incomplete.
+An Assignment can have two legitimate origins:
 
-> **Autonomy is not the absence of direction. It is freedom inside delegated responsibility.**
+**Delegated Assignment** — an outcome explicitly handed to the Agent by the
+operator.
+
+**Agent-originated responsibility** — work the Agent creates because it is
+needed to pursue its Mission, a Presence goal, a Growth strategy, or an
+existing responsibility. It must remain bounded, inspectable, and traceable to
+that direction; it is not permission for arbitrary unrelated productivity.
+
+The operator can delegate outcomes and hard constraints. The Agent can create
+the responsibilities required to pursue them and decides how to accomplish
+them. An Assignment remains active until completed with verified evidence,
+explicitly blocked, cancelled, or expired incomplete.
+
+> **Autonomy is not the absence of direction. It is freedom inside owned responsibility.**
 
 Taste remains the quality boundary. A weak candidate is rejected and replaced; the Agent must not publish filler, but it also must not treat candidate rejection as completion. Silence is a valid social action. It is not completion of an explicit Assignment. Model failure, delivery failure, and social silence remain distinct outcomes.
 
@@ -846,7 +884,7 @@ The operator sets the level of responsibility. The Agent exercises judgment insi
 
 > **A publishing target is not a script.**
 
-Attention determines when a Presence looks. Publishing initiative describes its ongoing responsibility to originate. Schedule gives the operator time-bound Assignments. These are related agenda inputs, not competing schedulers; ambient attention can surface opportunities while Assignments carry delegated responsibility.
+Attention determines when a Presence looks. Publishing initiative describes its ongoing responsibility to originate. Calendar exposes time-bound and active Assignments regardless of whether they were delegated or Agent-originated. These are related agenda inputs, not competing schedulers; ambient attention can surface opportunities while responsibilities carry the work.
 
 Silence remains a valid local action. Rejecting one weak candidate is good judgment, but it does not by itself discharge a standing publishing responsibility. The runtime should record the candidate-level no-op, preserve the responsibility for a later bounded cycle, and never force filler merely to satisfy a counter.
 
@@ -1138,11 +1176,11 @@ it has failed.
 
 The social event should exist in the simulated world.
 
-Playground also gives the operator a way to create an opportunity for original judgment and to rehearse delegated work. Original Post Rehearsal does not mean “generate a post.” The Presence may publish, choose another supported format, research, inspect, or wait when no Assignment requires a public act. An Assignment such as “produce 20 original Sandbox publications” carries an expected deliverable: the operator owns the outcome while the Agent owns the ideas, research, claims, examples, formats, wording, timing strategy, and candidate rejection.
+Playground also gives the operator a way to create an opportunity for original judgment and to rehearse both delegated and Agent-originated work. Original Post Rehearsal does not mean “generate a post.” The Presence may publish, choose another supported format, research, inspect, or wait when no responsibility requires a public act. An Assignment such as “produce 20 original Sandbox publications” carries an expected deliverable: the operator sets the direction and boundaries while the Agent owns the ideas, research, claims, examples, formats, wording, timing strategy, and candidate rejection.
 
 Assignment progress is grounded in the world. A draft, model response, Social Intent, or attempted delivery is not a completed publication. Only a verified authored object in the Social Mirror counts. An empty or malformed model response is evaluation failure, not NO_OP; an unavailable connector is delivery failure, not social silence.
 
-Teach intentionally changes the Agent. Playground rehearses the Agent in a simulated social world. Original Post Rehearsal is a Playground capability for testing whether the Presence can originate something worth publishing. Calendar remains the verified history of what the Presence actually published.
+Teach intentionally changes the Agent. Playground rehearses the Agent in a simulated social world. Original Post Rehearsal is a Playground capability for testing whether the Presence can originate something worth publishing. Calendar is the visible agenda and truthful history of planned, active, verified, cancelled, and expired work; the Social Mirror remains the source of observed simulated publication outcomes.
 
 Operator calibration belongs to the rehearsal boundary. It should remain structured evidence, not a new `PREFERENCE.md`, `HUMOR.md`, or `POST_STYLE.md` personality layer, and it must not silently mutate Taste, Soul, Mission, Memory, Growth, or Presence identity.
 
@@ -1158,9 +1196,18 @@ Jenny should decide what to do.
 
 These concepts must remain distinct.
 
-**Sandbox** is the simulated deployment environment.
+**Product Sandbox** is the simulated social deployment environment exposed by
+OpenPresence for rehearsing a real Agent.
 
 **Playground** is the user experience for manipulating and evaluating that environment.
+
+The Product Sandbox must be distinguished from the **Developer Simulation
+Harness / Eval Lab**. The harness is engineering infrastructure for controlling
+clocks, injecting events, replaying trajectories, fuzzing conditions, testing
+counterfactuals, and verifying the runtime. It may operate on an isolated
+Product Sandbox, but it is not another Agent, another social world, or another
+user-facing product surface. To keep the concepts clear, “developer sandbox”
+should not be used as a synonym for the harness.
 
 In Playground the user can:
 
@@ -1178,7 +1225,7 @@ In Playground the user can:
 
 The user is not commanding Jenny.
 
-The user is manipulating the world.
+The user is manipulating the simulated world.
 
 This yields another canonical principle:
 
@@ -1188,9 +1235,9 @@ This yields another canonical principle:
 
 # 27. Rehearsal should be Channel-specific
 
-Sandbox is generic infrastructure.
-
-The world inside it is Channel-specific.
+The Product Sandbox provides the simulated environment; the Developer
+Simulation Harness provides engineering control and proof. The social world
+inside the Product Sandbox is Channel-specific.
 
 So:
 
@@ -1465,13 +1512,15 @@ This is a healthier architecture than turning one Agent into an entire operating
 
 ---
 
-# 35. Conversation is configuration
+# 35. Conversation is supervision, teaching, and intervention
 
 Chat inside OpenPresence is not primarily where the Agent's public life occurs.
 
 Real social conversations happen on the deployed Channels.
 
-Chat exists so the operator can teach and shape the Agent.
+Chat exists for more than configuration. It is the operator's natural way to
+supervise the Agent that already owns the work: to teach it, check in, supply
+context, redirect current work, and intervene when circumstances change.
 
 Examples:
 
@@ -1483,11 +1532,29 @@ Examples:
 
 > Stop treating follower count as the only signal.
 
+Other conversations may be supervision or intervention rather than durable
+configuration:
+
+> How are we doing?
+
+> Why did we get 100k views and only five followers?
+
+> This post is taking off. Can we ride it?
+
+> Tomorrow looks light. Can we push harder?
+
+Not every conversation changes configuration or creates a new Assignment. The
+Agent should answer from current work, evidence, Memory, and Growth, then own
+any resulting follow-through. A meaningful intervention may redirect or
+constrain existing responsibilities without turning the operator into their
+task manager.
+
 These should become durable configuration, proposals, preferences, Presence Brief changes, or Standing Intents when appropriate. For example, “Make this account mostly about persistent agents,” “Founders and agent builders are the audience,” and “Do not get involved in culture-war arguments here” should shape the active Presence without rewriting the Agent's global Mission or Taste.
 
-This is the philosophy behind:
+Conversation may produce configuration, but configuration is only one outcome.
+This is the broader philosophy behind:
 
-> **Conversation as configuration.**
+> **Conversation is supervision, teaching, and intervention.**
 
 The fastest way to shape a social mind should be to talk to it.
 
@@ -2113,6 +2180,10 @@ These sentences should survive implementation changes.
 
 > **The Agent owns intention. The operator owns the execution envelope.**
 
+> **The operator sets direction. The Agent owns the work.**
+
+> **The operator should be able to supervise the Agent without becoming its task manager.**
+
 > **Guidance, not a firewall.**
 
 > **Silence is a valid action.**
@@ -2133,6 +2204,8 @@ These sentences should survive implementation changes.
 
 > **An Assignment is responsibility for an outcome, not a script for the words.**
 
+> **The operator can delegate outcomes. The Agent can create the responsibilities required to pursue them.**
+
 > **Intents can expire.**
 
 > **Connector observes. Mirror represents. Pulse attends. Agent decides. Delivery acts.**
@@ -2151,6 +2224,8 @@ These sentences should survive implementation changes.
 
 > **The world is simulated. The Agent is real.**
 
+> **The Product Sandbox is the simulated social world. The Developer Simulation Harness / Eval Lab is how engineering proves it.**
+
 > **Sandbox is the environment. Playground is the control room.**
 
 > **Same mind. Same social semantics. Different world.**
@@ -2167,7 +2242,7 @@ These sentences should survive implementation changes.
 
 > **Social agency is multimodal.**
 
-> **Conversation is configuration.**
+> **Conversation is supervision, teaching, and intervention; configuration is one outcome.**
 
 > **Show decisions and evidence, not hidden chain-of-thought.**
 
@@ -2302,7 +2377,7 @@ And perhaps the most important shift is this:
 
 The user should not feel like they are operating a posting machine or babysitting fragile infrastructure.
 
-They should feel like they are teaching a mind how to show up in the world.
+They should feel like they are teaching, supervising, and trusting a mind that
+knows how to show up in the world.
 
 That is OpenPresence.
-

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Eval Lab"
+  short_description: "Test autonomous behavior across trajectories"
+  default_prompt: "Use $agent-eval-lab to build or run a trajectory-level eval that can prove this autonomous behavior wrong."

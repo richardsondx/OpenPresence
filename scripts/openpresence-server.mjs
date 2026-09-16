@@ -258,6 +258,17 @@ function stopChildren(signal) {
     releaseServerLock();
     process.exit(0);
   }
+  // A detached Next/Turbopack child can occasionally keep the wrapper alive
+  // after SIGTERM, which strands Playwright's webServer teardown indefinitely.
+  // Escalate only after a bounded grace period; ordinary shutdown still gets
+  // the first chance to flush and release its own resources.
+  const shutdownTimer = setTimeout(() => {
+    signalNextChild("SIGKILL");
+    if (scheduler) scheduler.kill("SIGKILL");
+    releaseServerLock();
+    process.exit(0);
+  }, 2_000);
+  shutdownTimer.unref();
 }
 
 startScheduler();
@@ -274,7 +285,10 @@ function startNextChild() {
     cwd: projectRoot,
     env: childEnv,
     stdio: "inherit",
-    detached: process.platform !== "win32",
+    // Playwright owns the test-mode process tree. Keeping Next attached there
+    // lets the runner terminate the actual child instead of orphaning a
+    // detached Turbopack process after the wrapper receives SIGTERM.
+    detached: process.platform !== "win32" && process.env.OPENPRESENCE_TEST_MODE !== "1",
   });
   childStartedAt = Date.now();
   child.on("error", (error) => {

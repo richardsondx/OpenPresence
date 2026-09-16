@@ -167,6 +167,7 @@ describe("state read projections", () => {
     expect(body.agentWorkspaces).toBeUndefined();
     expect(body.mirrorEvents).toBeUndefined();
     expect(body.operatorConversations).toBeInstanceOf(Array);
+    expect(body.assignmentRuns).toBeInstanceOf(Array);
     expect(body.proposals).toBeInstanceOf(Array);
     expect(JSON.stringify(body).length).toBeLessThan(600_000);
   });

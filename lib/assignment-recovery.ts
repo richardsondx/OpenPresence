@@ -1,8 +1,80 @@
+import { assertAssignmentWindowOpen, assignmentWindowState } from "./assignment-timeframe";
+import { randomUUID } from "node:crypto";
+import { isAutonomousPreWriteDeliveryFailure } from "./live-assignment-run";
 import type { AssignmentRun, OpenPresenceState } from "./types";
 import { defaultOperationalStagePolicies } from "./responsibility-continuity";
+import { isXCreditsError } from "./x-credits";
 
 export const assignmentWorkerStaleAfterMs = 15 * 60 * 1000;
 const openAssignmentRunStatuses = new Set(["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"]);
+
+/**
+ * Reopen one operator-blocked live Assignment after a fresh external check.
+ * This is deliberately state-only: the normal live Assignment worker still
+ * owns cognition, policy, delivery, and verification. Keeping the queue
+ * mutation here queues the same worker used by HTTP recovery without
+ * creating a new Assignment or bypassing the envelope.
+ */
+export function queueOperatorAssignmentRetry(
+  source: OpenPresenceState,
+  assignmentId: string,
+  presenceId: string,
+  nowMs = Date.now(),
+): { state: OpenPresenceState; run: AssignmentRun; incidentAssignmentId: string } {
+  const next = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
+  const assignment = next.assignments.find((item) => item.id === assignmentId && item.presenceId === presenceId);
+  const presence = next.presences.find((item) => item.id === presenceId)
+    ?? (next.presence?.id === presenceId ? next.presence : undefined);
+  if (!assignment || !presence) throw new Error("That blocked Assignment is no longer available in this Presence.");
+  assertAssignmentWindowOpen(assignment, nowMs);
+  if (presence.status !== "live") throw new Error("Public activity is paused. The task was not resumed.");
+  if (assignment.environment !== "live" || presence.environment === "sandbox") throw new Error("Only a live Assignment can be retried from private Chat.");
+  const billingBlockedActive = assignment.status === "active"
+    && assignment.lastOutcome?.class === "delivery_failed"
+    && isXCreditsError(assignment.lastOutcome.message);
+  if (!["blocked", "needs_operator"].includes(assignment.status) && !billingBlockedActive) {
+    throw new Error("That Assignment is not waiting for an operator recovery check.");
+  }
+
+  const active = (next.assignmentRuns ?? []).find((candidate) => candidate.assignmentId === assignment.id
+    && candidate.presenceId === presenceId
+    && openAssignmentRunStatuses.has(candidate.status));
+  if (active) return { state: next, run: active, incidentAssignmentId: assignment.id };
+
+  const pendingDeliveryStatuses = new Set(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"]);
+  const unresolvedDelivery = next.executions.find((execution) => execution.assignmentId === assignment.id
+    && execution.presenceId === presenceId
+    && pendingDeliveryStatuses.has(execution.status));
+  if (unresolvedDelivery) throw new Error("That Assignment still has an unresolved delivery. It was not retried.");
+
+  const timestamp = new Date(nowMs).toISOString();
+  const work = assignment.work ?? { phase: "candidate_review" as const, attempts: 0, maxAttempts: 4, storiesResearched: 0 };
+  const run: AssignmentRun = {
+    id: `assignment-run:operator:${randomUUID()}`,
+    assignmentId: assignment.id,
+    agentId: assignment.agentId,
+    presenceId,
+    sessionId: `live:${presenceId}`,
+    status: "queued",
+    currentStage: "candidate_review",
+    attempts: work.attempts + 1,
+    maxAttempts: work.maxAttempts,
+    rejectedCandidates: assignment.rejectedCandidates,
+    startedAt: timestamp,
+    heartbeatAt: timestamp,
+    lastProgressAt: timestamp,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  next.assignmentRuns = [run, ...(next.assignmentRuns ?? [])];
+  assignment.status = "working";
+  assignment.work = { ...work, phase: "candidate_review", attempts: run.attempts, blockedReason: undefined, lastAttemptAt: timestamp };
+  assignment.lastOutcome = undefined;
+  assignment.nextDueAt = undefined;
+  assignment.revision = (assignment.revision ?? 0) + 1;
+  assignment.updatedAt = timestamp;
+  return { state: next, run, incidentAssignmentId: assignment.id };
+}
 
 /**
  * Repair legacy parent statuses that outlived their durable worker. A parent
@@ -250,16 +322,37 @@ export function deferRecoverableAssignmentFailure(state: OpenPresenceState, runI
   if (!run || !assignment || !["failed", "blocked"].includes(run.status)) return false;
   if (["completed", "completed_with_adaptation", "cancelled", "paused", "expired_incomplete"].includes(assignment.status)) return false;
   const error = run.lastError ?? assignment.lastOutcome?.message ?? "";
-  if (!/empty response|ended without a delivery, deferral|worker stopped reporting progress|unreachable|rate.limit|timed? ?out|temporar(?:y|ily)|ECONNRESET|fetch failed/i.test(error)) return false;
+  // Before an Execution Envelope exists, the failure is intrinsically safe to
+  // retry. Keep explicit operator/dependency failures out of this path; those
+  // belong in Needs You rather than consuming a silent retry budget.
+  if (/api credits|billing|spend(?:ing)? cap|credential|authentication|token refresh|not permitted|execution settings|policy change/i.test(error)) return false;
   if (state.executions.some((execution) => execution.assignmentId === assignment.id
     && !["failed", "blocked", "cancelled", "expired", "verification-closed"].includes(execution.status))) return false;
-  // Even a failed execution may have crossed the external-write boundary.
+  // A failed execution row is not, by itself, evidence of a public write. Only
+  // an unresolved/ambiguous execution blocks retry; explicitly closed
+  // pre-write misses are safe to retry as well. This keeps model/provider
+  // failures separate from the connector side-effect boundary.
+  const startedAt = run.startedAt ?? run.createdAt;
   if (state.executions.some((execution) => execution.assignmentId === assignment.id
-    && (execution.runId === runId || execution.createdAt >= (run.startedAt ?? run.createdAt)))) return false;
+    && (execution.runId === runId || execution.createdAt >= startedAt)
+    && !isAutonomousPreWriteDeliveryFailure(execution))) return false;
   const failures = (assignment.systemFailures ?? 0) + 1;
   assignment.systemFailures = failures;
   const budget = Math.min(4, assignment.work?.maxAttempts || 4);
-  if (failures >= budget || (run.maxAttempts > 0 && run.attempts >= run.maxAttempts)) return false;
+  if (failures >= budget || (run.maxAttempts > 0 && run.attempts >= run.maxAttempts)) {
+    const at = new Date(nowMs).toISOString();
+    const message = `The Assignment worker could not complete this attempt after ${failures} bounded recovery failure${failures === 1 ? "" : "s"}. No verified public outcome was recorded. Last error: ${error || "unknown worker failure"}`;
+    assignment.status = "blocked";
+    assignment.nextDueAt = undefined;
+    assignment.work = {
+      ...(assignment.work ?? { phase: "candidate_review", attempts: run.attempts, maxAttempts: budget, storiesResearched: 0 }),
+      phase: "blocked",
+      blockedReason: message,
+    };
+    assignment.lastOutcome = { class: "evaluation_failed", message, at };
+    assignment.updatedAt = at;
+    return false;
+  }
   const at = new Date(nowMs).toISOString();
   run.status = "deferred";
   run.currentStage = "candidate_review";
@@ -283,10 +376,11 @@ export function resumeRecoverableAssignmentFailures(state: OpenPresenceState, no
     const run = (state.assignmentRuns ?? []).filter((item) => item.assignmentId === assignment.id)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
     if (!run || !["failed", "blocked", "deferred"].includes(run.status) || !/^(?:Openai returned an empty response\.|The live Assignment ended without a delivery, deferral, or explicit completion result\.|The Assignment worker stopped reporting progress and exhausted its recovery attempts\.)$/.test(run.lastError ?? "")) continue;
-    // These old relative-day requests are already outside any possible local
-    // "today". Preserve their failed history without replaying stale posts.
-    if (!assignment.schedule && /\btoday\b|first post of the day/i.test(assignment.instruction)
-      && nowMs - Date.parse(assignment.createdAt) > 26 * 60 * 60_000) {
+    // These old relative-day requests are already outside their durable local
+    // calendar window. Preserve their failed history without replaying stale posts.
+    const ended = assignmentWindowState(assignment, nowMs) === "ended";
+    if (ended && ["blocked", "needs_operator"].includes(assignment.status)) continue;
+    if (ended) {
       const at = new Date(nowMs).toISOString();
       assignment.status = "expired_incomplete";
       assignment.lastOutcome = { class: "incomplete", message: `The requested day elapsed before completion. The previous failure is retained in work history: ${run.lastError}`, at };

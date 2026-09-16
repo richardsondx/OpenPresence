@@ -11,8 +11,10 @@ describe("Usage browser projection", () => {
     state.nativeConnections = [{ id: "native-1", presenceId: state.presence!.id, kind: "x", status: "connected" }] as never;
     state.proposals = [{ id: "proposal-pending", status: "pending" }, { id: "proposal-applied", status: "applied" }] as never;
 
+    state.assignments = [{ id: "assignment", createdAt: "2026-09-12T10:00:00Z", updatedAt: "2026-09-13T10:00:00Z" }] as never;
     const projection = usageBrowserProjection(state);
 
+    expect(projection.assignments[0]).toMatchObject({ createdAt: "2026-09-12T10:00:00Z", updatedAt: "2026-09-13T10:00:00Z" });
     expect(projection.responseProjection).toBe("usage");
     expect(projection.agent?.id).toBe(state.agent?.id);
     expect(projection.presences).toHaveLength(1);

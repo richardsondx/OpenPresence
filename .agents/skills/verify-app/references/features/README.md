@@ -51,32 +51,40 @@ The current shell exposes the Agent portfolio and the active connected channel t
 | `/analytics` | Analytics shell | Selected Presence / Agent-wide Usage tab | Growth and Usage tabs; currently duplicates Growth entry content |
 | `/usage` | Usage | Agent-wide, Presence-filterable | Provider/request ledger; not provider billing or a social outcome |
 | `/schedule` | Schedule / Assignments | Selected Presence | List/Week, one-time or weekly Assignments, exact start times, completion contracts |
-| `/work` | Agent Work index | Selected Agent | Compact cross-Presence responsibility index; links to Schedule for temporal detail |
+| `/work` | Tasks alias | Selected Presence | Same List/Calendar and direct assignment editor as `/schedule` |
 | `/calendar` | Schedule alias | Selected Presence | Legacy route; resolves to the canonical Schedule view |
 | `/agent` | Agent settings | Selected Agent + connected Presence | One settings home with Identity & Brain and Presence & Autonomy sections |
 | `/knowledge` | Knowledge | Selected Agent | Documents, versions, retrieval/access audit |
-| `/assets` | Asset library | Selected Agent | Visual evidence, folders, perception, provenance, and reuse |
+| `/assets` | Asset library | Selected Agent | Separate Recent discoveries (ephemeral X working memory) and Media library (user-added + intentionally saved visuals), with visual evidence, folders, perception, provenance, and reuse |
 | Activity → Developer Diagnostics | Technical audit | Selected Presence | Advanced forensic ledger; not a primary route |
 
 ## Current navigation shell
 
-The primary desktop shell is Agent-first: a memorable Agent portfolio rail, one continuous Chat surface, Agent Lab, Knowledge, Assets, and one Agent settings home. The Agents header owns `New agent`; Chat opens directly into the selected Agent's single main conversation, with no user-facing project area, conversation creator, or duplicate conversation context card. Assignments and their progress remain contextual evidence inside Chat and Work. A single topbar context-sidebar toggle opens or collapses the inspector; once open, Attention, Calendar, Analytics, and Agent settings are selected from controls inside that inspector. The topbar has no global `Needs You` notice; actionable runtime boundaries appear in Chat as in-context notices and remain available in the focused Review queue. The active channel is shown as context on the selected Agent, not as a second top-level switcher. Presence-scoped routes remain available for operational detail, but `Activity`, `Review`, `Watching`, and legacy `Playground` are not presented as equal primary products. `Schedule` remains the temporal detail route; `Teach`, `People`, `Growth`, `Feed`, and `Usage` remain reachable by direct route or contextual links.
+Reviewed 2026-09-13: one Agent switcher and five daily destinations — Chat, Tasks,
+People, Growth, Media. Desktop uses a labeled vertical navigation; mobile uses the
+same labeled icons in a bottom dock. Mobile's header menu opens Agent selection and
+settings; the dock hides while the software keyboard is open so the composer retains
+space. Teach agent, Watchlist, Test agent, and Agent settings are in Agent menu.
+Knowledge remains an Agent-owned surface, but is intentionally not a daily Agent-menu
+destination. Test agent opens `/rehearsal` and retains the Sandbox boundary.
 
-The persistent left rail owns Agent selection and shows each Agent's active channel inline. Its fixed Resources menu exposes Work, Watchlist, Playground, and Agent settings. Work is the Agent-wide responsibility index; Watchlist is Presence-scoped attention and the contextual home for linked People; People is relationship memory reached from a linked Watchlist entry or the Watchlist toolbar. The main topbar owns only workspace context controls; it does not duplicate Agent selection or repeat active-channel context. The repeated shell is part of every journey and should be considered when evaluating cognitive load.
+Tasks uses `/schedule` and the existing assignment editor with List/Calendar modes.
+`/work` and `/calendar` resolve to this same surface. Task details open directly as a
+side inspector or mobile sheet. Media uses `/assets` and remains Agent-owned.
 
-Agent identity uses one simple, Agent-owned ghost mark per identity. The mark is intentionally stable across sidebar, settings, Chat, and Presence context; legacy Presence `avatarLook` values remain readable for older state but are no longer exposed as competing costume choices. Public history may still show a verified channel avatar when it represents the observed external actor.
+Chat's compact Agent identity header replaces the oversized Chat heading. The plus
+button (`Attach media or files`) opens a native dialog offering upload or existing
+eligible Agent media. Closing it preserves the draft. User messages, tool receipts,
+and responses preserve durable ordering and retry behavior. Context inspectors retain
+the selected Agent; Escape closes sheets and restores focus.
 
-Each configured Agent row exposes its Presence wake state directly: a green `Awake` control pauses that Presence, and an amber `Asleep` control wakes it. The state label and dot are visible in the expanded rail; the dot remains visible when the rail is collapsed. Unconfigured Agents show `Not connected` and do not expose a misleading wake control.
-
-Proof flows: `references/agent-wake-flow.json` creates Jenny, toggles the sidebar control to Asleep, wakes her again, and captures the final expanded-rail state; `references/agent-avatar-flow.json` creates Jenny, opens Agent settings, changes the curated avatar, saves it, and captures the resulting settings surface. These controls must remain semantic and presence/Agent-scoped: pausing a non-selected Agent cannot mutate the currently selected Presence, and avatar changes must persist on the Agent across its Presences.
-
-Assignments are durable responsibilities owned by an Agent. They are created from Chat, Schedule, or the Agent's work surfaces and appear in Chat as contextual Approach, Work events, review boundaries, and verified receipts. Chat itself remains one continuous Main conversation; there is no separate project object or sidebar section.
-
-Work is the explicit answer to “what is my Agent doing?” It shows the Agent-wide responsibility index plus a `Working now` section that only lists assignments with active processing or a truthful working phase. The Attention inspector may mirror that current work, but an active responsibility is not presented as completed until a verified outcome exists.
+Regression proof: `tests/e2e/responsive-workspace.spec.ts` covers both viewport
+projects, five destinations, legacy Tasks links, composer placement, media dialog
+recovery, durable chat/reload, and setup access.
 
 ## Agent-first verification contract
 
-- Selecting an Agent from the left rail changes the active Agent and opens Chat; the selection persists after refresh.
+- Selecting an Agent from the left rail changes the active Agent and opens Chat; the selection persists after refresh, including when the URL does not yet carry an Agent ID.
 - Chat sends must create a durable operator message before generation, show a working/thinking state while the worker runs, and render the Agent response in the selected thread. Public activity being paused does not disable private Chat; shared-context Chat notes are excluded from ambient Attention until explicitly delegated.
 - Agent Lab must clearly identify Sandbox, keep Rehearse and Scenarios together, and never describe simulated output as a live social outcome.
 - Agent Lab → Scenarios must render built-in and Presence-owned Scenarios from the rehearsal projection; creating a Scenario from a prompt, starting an isolated Run, opening Review, and refreshing must preserve the selected Scenario and Run evidence.

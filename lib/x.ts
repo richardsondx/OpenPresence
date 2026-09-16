@@ -159,10 +159,7 @@ function apiError(status: number, body: unknown) {
       ? body.title
       : `X API request failed (${status}).`);
   if (isXCreditsError(providerMessage)) {
-    if (/spend|product\s+cap|usagecapexceeded/i.test(providerMessage)) {
-      return new Error("X monthly spend cap has been reached. Open the X Developer Console, check Billing and usage, and review the spending allowance before retrying.");
-    }
-    return new Error("X has no API credits remaining for this app. Open the X Developer Console, check Billing and usage, add credits or choose a plan with API access, then try again.");
+    return new Error(`X API billing request rejected (HTTP ${status}): ${providerMessage}. This response does not establish the current credit balance.`);
   }
   if (status === 401) return new Error("X rejected these credentials. Check that the API key, secret, and token values came from the same app, then regenerate them if needed.");
   if (status === 403) {

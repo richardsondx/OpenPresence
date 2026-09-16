@@ -1,18 +1,20 @@
+import { saveSocialTemplate, socialPlaybookForPresence, updateSocialTemplate } from "@/lib/social-strategy";
+import { assignmentHasPendingDelivery, assignmentWindowState, expireAssignmentWindows } from "@/lib/assignment-timeframe";
 import { inspectionReportSummary } from "@/lib/chat-activity-presentation";
 import { assignmentInspectionEvidence, persistAssignmentReport } from "@/lib/assignment-private-report";
-import { isPrivateInspectionInstruction } from "@/lib/runtime";
+import { isPlanningOnlyAssignmentInstruction, isPrivateInspectionInstruction } from "@/lib/runtime";
 import { recentChatItems } from "@/lib/operator-chat-history";
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { z } from "zod";
-import { AgentPresenceScopeConflictError, dbSelectionSource, deleteBridgeCredential, deleteChannelSecret, deleteProviderSecret, getRecoveryIncident, listOperationalRuns, readAgentPresenceDirectory, readProviderSecret, readState, readStateForContext, readStateReadToken, readStateSnapshotForContext, readStateViewForContext, resolvedDbPath, saveProviderSecret, upsertOperationalRun, WorkspaceConflictError, writeState } from "@/lib/db";
+import { AgentPresenceScopeConflictError, dbSelectionSource, deleteBridgeCredential, deleteChannelSecret, deleteProviderSecret, getRecoveryIncident, listOperationalRuns, readAgentPresenceDirectory, readProviderSecret, readState, readStateForContext, readStateReadToken, readStateSnapshotForContext, readStateViewForContext, readUsageWorkspaces, resolvedDbPath, saveProviderSecret, upsertOperationalRun, WorkspaceConflictError, writeState } from "@/lib/db";
 import { EvidenceVisualAssetDiscoveryProvider, materializeCandidate, previewCandidate, TavilyAssetDiscoveryProvider } from "@/lib/asset-discovery";
 import { assessVisualFit } from "@/lib/visual-fit";
-import { AiRuntimeError, checkModelProviderAccess, generateAgentReply, generateAgentSocialDecision, generateAgentSocialEdit, generateAgentSocialJudgment, generateAssetPublicationReview, generateAssetResearchPlannerDecision, generateEvidenceLedDraft, generateEvidenceLedPublication, generateExplorationTriage, generateGrowthReview, generateIndependentModelText, generatePlaygroundTestStimulus, generatePresenceChatReply, generatePublishingPlan, generateTextOnlyAssignmentPublication } from "@/lib/ai";
+import { AiRuntimeError, checkModelProviderAccess, generateAgentReply, generateAgentSocialDecision, generateAgentSocialEdit, generateAgentSocialJudgment, generateAssetPublicationReview, generateAssetResearchPlannerDecision, generateEvidenceLedDraft, generateEvidenceLedPublication, generateExplorationTriage, generateIndependentModelText, generatePlaygroundTestStimulus, generatePresenceChatReply, generatePublishingPlan, generateTextOnlyAssignmentPublication } from "@/lib/ai";
 import type { AgentSocialDecision } from "@/lib/ai";
 import { validateScenarioFidelity } from "@/lib/scenarios";
-import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, assertRuntimeScope, assignmentIsSatisfied, beginOriginalPostRehearsal, cleanSandboxDraft, compileAgendaWork, completeOriginalPostRehearsal, confirmAutoMode, createRuntimeScope, declineSandboxIntroduction, deleteScenario, deliverSandboxExecution, deriveGrowthEvidenceSnapshot, derivePresenceCapabilityManifest, derivePublishingProgress, derivePublicHistory, deriveSelfDirectedDiscoveryPlan, duePublishingPlanWindows, ensureCapabilityRequests, expireSandboxIntents, finishExplorationSession, finishPulse, formAssignmentPostIntent, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, formXDeleteIntent, formXActionIntent, createScenarioFromPrompt, generateMissingScenarioEvents, identityLeakageReason, importScenarioDefinition, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, markCalendarSlotEvaluated, markInboundJudged, markScenarioStimulus, nativeDeliveryFailureIsConnectionScoped, openAgentRequest, publicSelfGuidance, publishingInitiativeGuidance, recordAttentionTestDecision, recordImportedXMirror, recordNativeMirror, recordNativeMirrorDeletion, recordPreferenceEvidence, recordPublishingPlanFailure, recordPublishingPlanWork, recordResourceUsageEvent, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, recordScenarioEvaluation, recordScenarioReview, renameScenario, replacePublishingPlan, resetPlaygroundSession, settleCapabilityTrialNoOpportunity, startAttentionTest, failAttentionTest, startExplorationSession, startScenarioRunState, completeScenarioRunState, stopScenarioRunState, stateForContext, structuralScenarioEvaluation, startPlaygroundSession, syncPlaygroundTime, syncPublishingInitiativeAssignment, targetIsBlockedByPerson, targetLanguageValidationForAction, unblockNativeExecutions, updateScenarioEvents, updateScenarioRequirements, recordVerifiedXReply, externalUrlForMirrorObject } from "@/lib/runtime";
+import { addSandboxEvent, advanceSandboxTimeWithTemporalEvents, applyOperation, approveSandboxIntroduction, assertRuntimeScope, assignmentIsSatisfied, beginOriginalPostRehearsal, cleanSandboxDraft, compileAgendaWork, completeOriginalPostRehearsal, confirmAutoMode, createRuntimeScope, declineSandboxIntroduction, deleteScenario, deliverSandboxExecution, derivePresenceCapabilityManifest, derivePublishingProgress, derivePublicHistory, deriveSelfDirectedDiscoveryPlan, duePublishingPlanWindows, ensureCapabilityRequests, expireSandboxIntents, finishExplorationSession, finishPulse, formAssignmentPostIntent, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, formXDeleteIntent, formXActionIntent, createScenarioFromPrompt, generateMissingScenarioEvents, identityLeakageReason, importScenarioDefinition, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, markCalendarSlotEvaluated, markInboundJudged, markScenarioStimulus, nativeDeliveryFailureIsConnectionScoped, openAgentRequest, publicSelfGuidance, publishingInitiativeGuidance, recordAttentionTestDecision, recordImportedXMirror, recordNativeMirror, recordNativeMirrorDeletion, recordPreferenceEvidence, recordPublishingPlanFailure, recordPublishingPlanWork, recordResourceUsageEvent, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, recordScenarioEvaluation, recordScenarioReview, renameScenario, replacePublishingPlan, resetPlaygroundSession, settleCapabilityTrialNoOpportunity, startAttentionTest, failAttentionTest, startExplorationSession, startScenarioRunState, completeScenarioRunState, stopScenarioRunState, stateForContext, structuralScenarioEvaluation, startPlaygroundSession, syncPlaygroundTime, syncPublishingInitiativeAssignment, targetIsBlockedByPerson, targetLanguageValidationForAction, unblockNativeExecutions, updateScenarioEvents, updateScenarioRequirements, recordVerifiedXReply, externalUrlForMirror } from "@/lib/runtime";
 import { recordSocialDecision, nativeConnectionCanObserve, recordNativeObservation, resumePresenceAfterNativeRecovery } from "@/lib/runtime";
 import { xQuoteTargetHasAvailableRoute } from "@/lib/runtime";
 import { defaultSelfDirectedAttentionPolicy } from "@/lib/runtime";
@@ -22,7 +24,8 @@ import { attentionGovernorSnapshot, requestAttentionCapacity } from "@/lib/atten
 import { requestAttention } from "@/lib/attention-coordinator";
 import { pauseExhaustedAssignmentPursuits, runOperationalSweep, scheduleOperationalSweep } from "@/lib/temporal";
 import { deriveActivityNow } from "@/lib/activity-now";
-import { createOperatorNudge, recordOperatorConversationMessage, recordNudgeAssignmentHandoff, releasePausedNudges, settleNudgeFromAssignment } from "@/lib/operator-chat";
+import { createOperatorNudge, materializeOperatorChatAttachments, recordOperatorConversationMessage, recordNudgeAssignmentHandoff, releasePausedNudges, settleNudgeFromAssignment } from "@/lib/operator-chat";
+import { canonicalUsageEvents, operatorUsageReply } from "@/lib/usage";
 
 import { findVerifiedXReply, readNativeXCredentials, readPublicXPostByUrl, readXPostsByIds, searchRecentXPosts, testXCredentials, upsertNativeXConnection, xPostIdFromUrl } from "@/lib/x";
 import { formatReplyText, operatorFeedbackText, publicExpressionText } from "@/lib/public-expression";
@@ -32,7 +35,7 @@ import { recordOperationalSuccess, resolveOperationalIncident } from "@/lib/inci
 import { isAgentCapabilityEnabled, isAgentToolEnabled } from "@/lib/types";
 import type { Asset, AssetCandidate, AssetResearchOutcome, AssetResearchSession, Assignment, AssignmentOutcomeClass, AssignmentPursuitWindow, AssignmentRun, AssignmentRunStatus, AttentionTestAction, JsonValue, MirrorObject, OpenPresenceState, Operation, RuntimeOperation, SandboxAssetInput, ScenarioStimulus, VisualNeed } from "@/lib/types";
 import { isAiMockEnabled, isTestRuntime } from "@/lib/test-runtime";
-import { cognitionSafeAssetSummary, cognitionSafeThreadAssetSummary, hasUsablePerception } from "@/lib/perception";
+import { cognitionSafeAssetSummary, cognitionSafeThreadAssetSummary, createAssetPerception, hasUsablePerception } from "@/lib/perception";
 import { compareDiscoveredAssets, inspectDiscoveredAsset, inspectSandboxObject } from "@/lib/perception-runtime";
 import { networkSearchInstruction, searchSandboxNetwork } from "@/lib/network";
 import type { NetworkSearchResult } from "@/lib/network";
@@ -53,11 +56,12 @@ import { nextSelfDirectedAttentionAt, selectBridgeDiscoveryCandidates, selectGro
 import { resumeRecoverableAssignmentFailures, deferRecoverableAssignmentFailure, deferQueuedAssignmentRunsOutsideWindow, reconcileOrphanedAssignmentStatuses, recoverStaleAssignmentRuns } from "@/lib/assignment-recovery";
 import { expireElapsedPursuitWindows } from "@/lib/state-projection";
 import { assignmentRunBlocksNewWork, assignmentRunIsActive, classifyLiveAssignmentRun, isAutonomousPreWriteDeliveryFailure, liveAssignmentRunStage, maxConcurrentPursuitDeliveries, reconcileLiveAssignmentRuns } from "@/lib/live-assignment-run";
-import { dispatchAutonomyWorker, queueAutonomyRun } from "@/lib/autonomy-worker";
+import { autonomousGrowthReviewNeed, dispatchAutonomyWorker, queueAutonomyRun } from "@/lib/autonomy-worker";
 import { deliverNativeExecutions } from "@/lib/native-execution-delivery";
 import { normalizeCurationSources, runCanonicalEditorialDiscovery, classifyFeedbackLayers, synthesizeEditorialCalibration, evaluateTasteProposalOnHeldOutSet, generatePublicationPackage } from "@/lib/editorial-curation";
 import type { EditorialFeedbackEvent, EditorialOpportunity, EditorialReference, FileProposal, SourceLead } from "@/lib/types";
 import { runRelationshipStudy } from "@/lib/relationship-study";
+import { runModelGrowthReview } from "@/lib/growth-review-worker";
 import { cognitionSafeDMInstructionsForObject, cognitionSafePeopleNoteProjection } from "@/lib/people-notes";
 import { analyzeSchedulePrompt, isAdaptiveDistributionPrompt, modelScheduleDrafts } from "@/lib/schedule-prompt";
 import { readRuntimeScopeCookie, setRuntimeScopeCookie } from "@/lib/runtime-scope";
@@ -143,7 +147,7 @@ const activityProjectionKeys = new Set<keyof OpenPresenceState>([
 
 const chatProjectionKeys = new Set<keyof OpenPresenceState>([
   "agent", "agents", "activeAgentId", "activePresenceId", "presence", "presences", "onboarded", "workspaceRevision", "proposals",
-  "assignments", "actions", "executions", "outcomes", "socialIntents", "socialDecisions", "mirrorObjects", "nativeConnections", "bridges", "channelDefinitions", "metrics",
+  "assignments", "assignmentRuns", "actions", "executions", "outcomes", "socialIntents", "socialDecisions", "mirrorObjects", "nativeConnections", "bridges", "channelDefinitions", "metrics", "assets",
   "operationalRuns", "attentionEpisodes", "operatorThreads", "operatorConversations", "operatorNudges",
 ]);
 
@@ -333,6 +337,24 @@ function chatProjection(state: OpenPresenceState): OpenPresenceState {
     attemptHistory: assignment.attemptHistory?.slice(-8),
   });
   projection.assignments = scoped(state.assignments, 24).map(compactAssignment) as never;
+  // Keep the run receipt alongside every Assignment visible in Chat. A run
+  // may be terminal while its linked message is still the active narrative;
+  // dropping it on refresh makes the same work appear to start over or vanish.
+  const visibleAssignmentIds = new Set((projection.assignments ?? []).map((assignment) => assignment.id));
+  const recentRuns = scoped(state.assignmentRuns, 80);
+  const linkedRuns = (state.assignmentRuns ?? []).filter((run) => visibleAssignmentIds.has(run.assignmentId)
+    && (!presenceId || run.presenceId === undefined || run.presenceId === presenceId));
+  const runDate = (run: NonNullable<OpenPresenceState["assignmentRuns"]>[number]) => Date.parse(run.updatedAt ?? run.createdAt ?? "") || 0;
+  const activeStatuses = new Set(["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"]);
+  const latestByAssignment = new Map<string, NonNullable<OpenPresenceState["assignmentRuns"]>[number]>();
+  for (const run of linkedRuns.sort((left, right) => runDate(right) - runDate(left))) {
+    if (!latestByAssignment.has(run.assignmentId)) latestByAssignment.set(run.assignmentId, run);
+  }
+  const pinnedRuns = [...latestByAssignment.values()];
+  const activeRuns = linkedRuns.filter((run) => activeStatuses.has(run.status) && !pinnedRuns.some((pinned) => pinned.id === run.id));
+  const retained = [...pinnedRuns, ...activeRuns];
+  projection.assignmentRuns = [...retained, ...recentRuns.filter((run) => !retained.some((kept) => kept.id === run.id))]
+    .slice(0, 120) as never;
   const executionIsInFlight = (execution: OpenPresenceState["executions"][number]) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"].includes(execution.status);
   projection.executions = scoped(state.executions, 60).map((execution) => {
     const compact = { ...execution };
@@ -351,6 +373,14 @@ function chatProjection(state: OpenPresenceState): OpenPresenceState {
     ...conversation,
     messages: conversation.messages.slice(-100),
   })) as never;
+  const chatPresence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+  projection.assets = state.assets.filter((asset) => {
+    if (asset.agentId !== state.agent?.id || asset.provenance.origin.toLowerCase() !== "operator_upload" || asset.status !== "ready" || asset.archivedAt) return false;
+    if (asset.environment && asset.environment !== (chatPresence?.environment ?? "live")) return false;
+    return asset.accessScope?.mode === "all_agent_presences"
+      || asset.accessScope?.mode !== "selected_presences"
+      || asset.accessScope.presenceIds.includes(presenceId ?? "");
+  }) as never;
 
   const targetIds = new Set((projection.executions ?? []).map((execution) => execution.target?.id).filter((id): id is string => Boolean(id)));
   const mirrors = state.mirrorObjects.filter((object) => !presenceId || object.presenceId === presenceId);
@@ -833,7 +863,7 @@ async function materializeLiveDecisionAssets(source: OpenPresenceState, presence
     const assetIds: string[] = [];
     for (const selected of mediaSelections.filter((item) => item.sourceUrl).slice(0, 4)) {
       const existing = next.assets.find((asset) => asset.presenceId === presence.id && asset.environment === "live" && asset.status === "ready" && asset.provenance.sourceUrl === selected.sourceUrl);
-      if (existing) {
+      if (existing && isLibraryAsset(existing) && existing.reusePermission === "ready_to_use") {
         assetIds.push(existing.id);
         continue;
       }
@@ -848,7 +878,17 @@ async function materializeLiveDecisionAssets(source: OpenPresenceState, presence
         semanticKind: selected.kind === "chart" ? "chart" : selected.kind === "video" ? "clip" : selected.kind === "gif" ? "meme" : "other",
       };
       try {
-        const result = await materializeCandidate(candidate, { agentId, presenceId: presence.id, environment: "live", origin: "discovered", semanticKind: candidate.semanticKind });
+        const result = await materializeCandidate(candidate, { agentId, presenceId: presence.id, environment: "live", origin: "discovered", semanticKind: candidate.semanticKind, retention: "preserved", preservationReason: `Selected for possible reuse in: ${selected.name ?? selected.kind}`, reusePermission: "reference_only" });
+        // Discovered media follows the same durable visual-memory path as an
+        // operator upload. Downloading bytes alone is not useful Agent
+        // metadata, and must never leave the library with a generic
+        // "Imported visual" placeholder when inspection can run.
+        const inspection = await inspectDiscoveredAsset(next, result.asset, { visualBrief: selected.name ?? selected.kind, sourcePageUrl: selected.sourcePageUrl, publisher: selected.publisher });
+        if (inspection.attempted && inspection.providerId) {
+          result.asset.perception = { observation: inspection.result.observation, likelyMeaning: inspection.result.interpretation, visibleText: inspection.result.visibleText ? [inspection.result.visibleText] : undefined, uncertainty: [inspection.result.uncertainty] };
+          result.asset.metadataReview = { status: inspection.error ? "open" : "resolved" };
+          next.perceptions.unshift(createAssetPerception({ asset: result.asset, presenceId: presence.id, level: "resolve", result: inspection.result, providerId: inspection.providerId }));
+        }
         const reuseReason = liveAssetReuseReason(next, presence.id, [result.asset.id]);
         if (reuseReason) return { state: recordRuntimeEvent(next, presence.id, "Live media blocked", reuseReason, "warning"), assetIds: [] as string[], error: reuseReason };
         next.assets.unshift(result.asset);
@@ -1180,29 +1220,6 @@ function recordCapabilityFeedback(before: OpenPresenceState, next: OpenPresenceS
   return ensureCapabilityRequests(changes.length ? applyOperation(next, { type: "recordCapabilityChange", presenceId: id, changes }) : next, id);
 }
 
-async function runModelGrowthReview(source: OpenPresenceState, assignment: Assignment, kind: import("@/lib/types").GrowthReviewKind) {
-  const presence = source.presences.find((item) => item.id === assignment.presenceId) ?? source.presence;
-  if (!presence) return source;
-  const snapshot = deriveGrowthEvidenceSnapshot(source, presence.id);
-  const evidence = {
-    evidenceSnapshot: snapshot,
-    capabilities: derivePresenceCapabilityManifest(source, presence.id).items,
-  };
-  try {
-    const decision = await generateGrowthReview(source, assignment, kind, evidence);
-    return applyOperation(source, { type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind, modelDecision: decision });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "The selected model could not complete the Growth Review.";
-    openAgentRequest(source, { presenceId: presence.id, assignmentId: assignment.id, kind: "growth_review", importance: "blocking", title: "Growth Review needs a model runtime", need: "Connect the selected model so the Agent can evaluate evidence and revise growth tactics autonomously.", why: detail, currentWorkaround: "The prior plan remains active; no adaptive review is claimed until a model-backed review succeeds.", dedupeKey: `${presence.id}:${assignment.id}:growth-review` });
-    const currentAssignment = source.assignments.find((item) => item.id === assignment.id);
-    if (currentAssignment?.plan) {
-      const retryAt = new Date(Date.now() + 60 * 60_000).toISOString();
-      currentAssignment.plan = { ...currentAssignment.plan, ...(kind === "strategic" ? { nextStrategicReviewAt: retryAt } : { nextWeeklyReviewAt: retryAt }), updatedAt: new Date().toISOString() };
-    }
-    return recordRuntimeEvent(source, presence.id, "Growth Review unavailable", detail, "warning", { sourceObjectId: assignment.id });
-  }
-}
-
 function scheduledAssignmentIsDue(assignment: Assignment, now = new Date()) {
   if (!assignment.schedule || assignment.environment !== "live" || !["original_publication", "meaningful_engagement"].includes(assignment.deliverable.type)) return false;
   if (!(["draft", "active", "working"].includes(assignment.status))) return false;
@@ -1302,18 +1319,27 @@ async function runScheduledLiveAssignments(source: OpenPresenceState, presenceId
     && ["completed", "completed_with_adaptation"].includes(assignment.status));
   if (!assignment || (["completed", "completed_with_adaptation", "cancelled", "failed", "expired_incomplete"].includes(assignment.status) && !pursuitMayContinueCompletedAssignment)) return source;
 
-  // Reconsider relevance after recovery before constructing any new intent.
-  // More than 26 hours is outside the original "today" in every local day,
-  // including a daylight-saving transition. Pending writes still reconcile.
-  if (!assignment.schedule && /\btoday\b|first post of the day/i.test(assignment.instruction)
-    && Date.now() - Date.parse(assignment.createdAt) > 26 * 60 * 60_000
-    && !source.executions.some((execution) => execution.assignmentId === assignment.id
-      && ["claimed", "executing", "verification-pending"].includes(execution.status))) {
-    const at = new Date().toISOString();
+  const windowState = assignmentWindowState(assignment);
+  if (windowState === "upcoming") return source;
+  if (windowState === "ended") {
+    // A prior operator/dependency decision is already the truthful terminal
+    // explanation. Deadline cleanup must not overwrite it with a generic
+    // timing label, even if an old wake arrives afterward.
+    if (["blocked", "needs_operator", "paused", "failed"].includes(assignment.status)) return source;
+    // The deadline closes the ability to start another act, but an envelope
+    // created before it may still become verified reality. Keep that
+    // responsibility in reconciliation until the delivery settles.
+    if (assignmentHasPendingDelivery(source, assignment.id)) {
+      assignment.status = "awaiting_execution";
+      assignment.work = { ...(assignment.work ?? assignmentWorkDefaults(assignment)), phase: "publishing", blockedReason: undefined };
+      assignment.lastOutcome = undefined;
+      assignment.nextDueAt = undefined;
+      assignment.updatedAt = new Date().toISOString();
+      return source;
+    }
     assignment.status = "expired_incomplete";
-    assignment.lastOutcome = { class: "incomplete", message: "The requested day elapsed before completion. Recovery will not publish this expired request.", at };
     assignment.nextDueAt = undefined;
-    assignment.updatedAt = at;
+    assignment.lastOutcome = { class: "incomplete", message: "The time window ended before the task was completed. See work history for what happened.", at: new Date().toISOString() };
     return source;
   }
 
@@ -2062,6 +2088,7 @@ function queueLiveAssignmentRun(source: OpenPresenceState, assignmentId: string,
   if (existing) return { state: next, run: existing };
   const assignment = next.assignments.find((item) => item.id === assignmentId && item.presenceId === presenceId);
   if (!assignment) throw new Error("That live Assignment is no longer available.");
+  if (assignment.planningOnly || assignment.status === "draft") throw new Error("This Task is saved for review and must be explicitly started before work can begin.");
   const otherActiveRun = next.assignmentRuns.find((run) => run.presenceId === presenceId
     && run.assignmentId !== assignmentId
     && assignmentRunIsActive(run));
@@ -2190,6 +2217,7 @@ function queueNextScheduledLiveAssignment(source: OpenPresenceState, presenceId:
   }
   const assignment = source.assignments.find((item) => {
     if (item.presenceId !== presenceId) return false;
+    if (item.planningOnly) return false;
     if (assignmentPursuitBlocksNormalScheduling(source, item.id, presenceId)) return false;
     // A completed no-op/rejection budget and a future backoff are durable
     // scheduler gates. Ignoring either gate made every Activity poll create
@@ -2304,12 +2332,19 @@ async function processLiveAssignmentRun(runId: string) {
     const linkedExecution = merged.executions
       .filter((execution) => execution.assignmentId === queued.assignmentId && (execution.runId === runId || (!execution.runId && execution.createdAt >= (queued.startedAt ?? queued.createdAt))))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+    const linkedOutcome = linkedExecution
+      ? merged.outcomes.find((outcome) => outcome.executionId === linkedExecution.id && outcome.status === "succeeded")
+      : undefined;
     const deliveryPending = Boolean(
       (linkedExecution && ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing"].includes(linkedExecution.status))
-      || (linkedExecution?.status === "verification-pending" && linkedExecution.failure?.retryable !== false),
+      || (linkedExecution?.status === "verification-pending" && linkedExecution.failure?.retryable !== false)
+      || (linkedExecution?.status === "succeeded" && !linkedOutcome),
     );
     const workerStatus = classifyLiveAssignmentRun({
-      outcomeClass: failureOutcome?.class,
+      // A connector acknowledgement is not channel truth. Suppress the
+      // Assignment's optimistic completion label until a matching succeeded
+      // Outcome has been recorded by Social Mirror reconciliation.
+      outcomeClass: linkedOutcome ? failureOutcome?.class : failureOutcome?.class === "assignment_completed" ? undefined : failureOutcome?.class,
       assignmentStatus: resultingAssignment?.status,
       newlySucceededExecution,
       deliveryPending,
@@ -2446,8 +2481,13 @@ function createRequiredAssignmentFromOperatorNudge(source: OpenPresenceState, pr
   }
   if (!assignment) throw new Error("The new Assignment could not be activated.");
   if (assignment.status === "draft") {
-    next = applyOperation(next, { type: "activateAssignment", id: assignment.id });
-    assignment = next.assignments.find((item) => item.id === assignment?.id);
+    if (assignment.planningOnly || isPlanningOnlyAssignmentInstruction(assignment.instruction)) {
+      assignment.planningOnly = true;
+      assignment.nextDueAt = undefined;
+    } else {
+      next = applyOperation(next, { type: "activateAssignment", id: assignment.id });
+      assignment = next.assignments.find((item) => item.id === assignment?.id);
+    }
   }
   if (!assignment) throw new Error("The new Assignment could not be activated.");
   if (assignment.status === "blocked" && assignment.lastOutcome?.message === "The target social post was not found in the Social Mirror.") {
@@ -2467,7 +2507,9 @@ function createRequiredAssignmentFromOperatorNudge(source: OpenPresenceState, pr
   const ready = ["ready", "ready_with_assumptions"].includes(assignment.preflight?.status ?? "");
   const hasOpenRun = (next.assignmentRuns ?? []).some((run) => run.assignmentId === assignment?.id && !terminalAssignmentRunStatuses.has(run.status));
   let runId: string | undefined;
-  if (nextPresence?.environment === "sandbox") {
+  if (assignment.planningOnly) {
+    next = recordNudgeAssignmentHandoff(next, nudge.id, "Private planning Task saved and ready for review. Nothing will be published until you explicitly start it.");
+  } else if (nextPresence?.environment === "sandbox") {
     next = recordNudgeAssignmentHandoff(next, nudge.id, "Sandbox Assignment created. Open Playground to run this rehearsal; nothing will publish to a live channel.");
   } else if (ready && nextPresence?.status === "live" && !hasOpenRun && ["active", "accepted", "planning", "working", "awaiting_execution"].includes(assignment.status)) {
     const queued = queueLiveAssignmentRun(next, assignment.id, presenceId);
@@ -3007,7 +3049,7 @@ async function runOnDemandAttentionTest(source: OpenPresenceState, presenceId: s
     const action = chosen.action as AttentionTestAction;
     const quoteText = action === "quote" ? chosen.text.trim() : undefined;
     if (action === "quote" && !quoteText) continue;
-    const targetUrl = externalUrlForMirrorObject(candidate, candidate.author?.handle);
+    const targetUrl = externalUrlForMirror(candidate, candidate.author?.handle);
     const decisionInput = { decision: action, summary: chosen.rationale ?? decision.rationale, focalMirrorObjectIds: [candidate.id], origin: { kind: "self_directed_discovery" as const, refId: testId }, influences: ["Brain", "Mission", "Taste", "Presence brief", "Current observed context"], confidence: "medium" as const, autobiographicalEventIds: decision.autobiographicalEventIds, socialStrategy: decision.socialStrategy };
     next = recordAttentionTestDecision(next, { testId, action, rationale: chosen.rationale ?? decision.rationale ?? "Genny found this worth a social signal.", target: candidate.externalRef, targetUrl, quoteText });
     const before = new Set(next.executions.map((item) => item.id));
@@ -3256,7 +3298,7 @@ async function researchAssignmentAsset(source: OpenPresenceState, presence: NonN
     for (const candidate of candidates.filter((item) => item.mediaUrl && item.sourcePageUrl && item.publisher && item.sourcePageUrl !== item.mediaUrl && !item.isThumbnail)) {
       if (research.candidates.some((item) => item.candidate.mediaUrl === candidate.mediaUrl)) continue;
       try {
-        const result = await materializeCandidate(candidate, { agentId: source.agent?.id ?? "", presenceId: presence.id, sessionId, environment: "sandbox" });
+        const result = await previewCandidate(candidate, { agentId: source.agent?.id ?? "", presenceId: presence.id, sessionId, environment: "sandbox" });
         const inspection = await inspectDiscoveredAsset(source, result.asset, { story: story?.claim ?? story?.trigger, evidenceNeed: evidenceNeed?.question, visualBrief: JSON.stringify(visualBrief), sourcePageUrl: candidate.sourcePageUrl, publisher: candidate.publisher });
         if (!inspection.attempted || !inspection.providerId) {
           lastError = inspection.error ?? "The candidate pixels could not be inspected by a configured vision runtime.";
@@ -3266,8 +3308,10 @@ async function researchAssignmentAsset(source: OpenPresenceState, presence: NonN
         candidate.perception = inspection.result;
         candidate.semanticKind = inspection.result.visualForm;
         const fit = assessVisualFit(visualBrief, candidate);
-        const sourceEvidenceId = result.sourceEvidence?.id;
-        research.candidates.push({ id: candidate.id, candidate, assetId: result.asset.id, perception: inspection.result, sourceEvidenceId, rejectionReasons: fit.fits ? undefined : fit.reasons });
+        // The inspected bytes are a short-lived preview. Do not link a
+        // rejected candidate to a durable Asset; only the selected candidate
+        // is materialized below after the editorial gate passes.
+        research.candidates.push({ id: candidate.id, candidate, perception: inspection.result, rejectionReasons: fit.fits ? undefined : fit.reasons });
         materialized.set(candidate.id, result);
         if (!fit.fits) lastError = fit.reasons.join(" ");
       } catch (error) {
@@ -3293,18 +3337,30 @@ async function researchAssignmentAsset(source: OpenPresenceState, presence: NonN
         if (finalReview.status === "text_only") break;
         continue;
       }
-      stored.asset.semanticKind = selected.perception.visualForm;
-      stored.asset.description = selected.candidate.title ?? selected.candidate.name;
-      stored.asset.perception = { observation: selected.perception.observation, likelyMeaning: selected.perception.interpretation, visibleText: selected.perception.visibleText ? [selected.perception.visibleText] : undefined, uncertainty: [selected.perception.uncertainty] };
+      const durable = await materializeCandidate(selected.candidate, {
+        agentId: source.agent?.id ?? "",
+        presenceId: presence.id,
+        sessionId,
+        environment: "sandbox",
+        semanticKind: selected.perception.visualForm,
+        retention: "preserved",
+        preservationReason: "Selected by the bounded Sandbox visual-evidence review for this Assignment.",
+        reusePermission: "ready_to_use",
+      });
+      durable.asset.semanticKind = selected.perception.visualForm;
+      durable.asset.description = selected.perception.observation.trim().split(/(?<=[.!?])\s+/)[0]?.slice(0, 240) || (selected.candidate.title ?? selected.candidate.name);
+      durable.asset.perception = { observation: selected.perception.observation, likelyMeaning: selected.perception.interpretation, visibleText: selected.perception.visibleText ? [selected.perception.visibleText] : undefined, uncertainty: [selected.perception.uncertainty] };
+      selected.sourceEvidenceId = durable.sourceEvidence?.id;
+      selected.assetId = durable.asset.id;
       research.status = "selected";
       research.selectedCandidateId = selected.id;
       research.updatedAt = new Date().toISOString();
       const next = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
       next.assetResearchSessions.unshift(research);
-      next.assets.unshift(stored.asset);
-      if (stored.sourceEvidence) next.sourceEvidence.unshift(stored.sourceEvidence);
+      next.assets.unshift(durable.asset);
+      if (durable.sourceEvidence) next.sourceEvidence.unshift(durable.sourceEvidence);
       const recorded = recordRuntimeEvent(next, presence.id, "Visual evidence selected", `${selected.candidate.publisher ?? "Source"} · ${selected.candidate.title ?? selected.candidate.name}. The original media was downloaded, inspected, source-linked, and jointly reviewed with the post text.`, "positive", { sessionId });
-      return { state: recorded, asset: { existingAssetId: stored.asset.id, name: selected.candidate.title ?? selected.candidate.name, kind: selected.perception.visualForm === "chart" ? "chart" as const : selected.assetId ? "image" as const : "image" as const, sourceUrl: selected.candidate.mediaUrl, sourcePageUrl: selected.candidate.sourcePageUrl, publisher: selected.candidate.publisher }, draft: reviewedDraft };
+      return { state: recorded, asset: { existingAssetId: durable.asset.id, name: selected.candidate.title ?? selected.candidate.name, kind: selected.perception.visualForm === "chart" ? "chart" as const : "image" as const, sourceUrl: selected.candidate.mediaUrl, sourcePageUrl: selected.candidate.sourcePageUrl, publisher: selected.candidate.publisher }, draft: reviewedDraft };
     }
     if (planner.decision === "search_again" && planner.query) { query = planner.query; research.status = "search_again"; continue; }
     if (planner.decision === "text_only") { research.status = "text_only"; break; }
@@ -3328,12 +3384,9 @@ async function researchAssignmentAsset(source: OpenPresenceState, presence: NonN
   const failure = new Error(`${legacyOutcomeMessage} The Asset Research Session inspected ${research.candidates.filter((candidate) => Boolean(candidate.perception)).length} candidate(s) across ${research.searchHistory.length} bounded search attempt(s).`) as Error & { researchState?: OpenPresenceState; assignmentOutcome?: "candidate_rejected" };
   const failureState = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
   failureState.assetResearchSessions.unshift(research);
-  // Keep inspected, rejected media available for operator review. This is not
-  // a publication or a usage record; it is the bounded evidence trail that
-  // explains why the controller did not publish it.
-  const retained = [...materialized.values()];
-  failureState.assets.unshift(...retained.map((item) => item.asset));
-  failureState.sourceEvidence.unshift(...retained.flatMap((item) => item.sourceEvidence ? [item.sourceEvidence] : []));
+  // Rejected candidates remain represented by their bounded perception and
+  // source metadata in the research session. Their preview bytes are
+  // intentionally discarded; only a selected candidate becomes durable.
   failure.researchState = failureState;
   failure.assignmentOutcome = "candidate_rejected";
   throw failure;
@@ -3680,8 +3733,8 @@ async function researchAssignmentAssetEvidenceFirst(source: OpenPresenceState, p
       }
       try {
         const result = await previewCandidate(candidate, { agentId: source.agent?.id ?? "", presenceId: presence.id, sessionId, environment: "sandbox" });
-        materialized.set(candidate.id, { asset: result.asset });
-        return { id: candidate.id, candidate, asset: result.asset };
+        materialized.set(candidate.id, { asset: result.asset, sourceEvidence: result.sourceEvidence });
+        return { id: candidate.id, candidate, asset: result.asset, sourceEvidence: result.sourceEvidence };
       } catch (error) {
         const reason = error instanceof Error ? error.message : "The candidate preview could not be fetched.";
         research.candidates.push({ id: candidate.id, candidate, rejectionReasons: [reason] });
@@ -3729,7 +3782,7 @@ async function researchAssignmentAssetEvidenceFirst(source: OpenPresenceState, p
         const perception = comparison.judgments[item.id];
         const accepted = comparison.rankedAcceptableIds.includes(item.id);
         const previous = research.candidates.find((candidate) => candidate.id === item.id);
-        const record = { id: item.id, candidate: { ...item.candidate, perception, semanticKind: perception?.visualForm }, assetId: item.asset.id, perception, sourceEvidenceId: item.sourceEvidence?.id, rejectionReasons: accepted ? undefined : ["The visual comparator inspected this candidate but did not rank it acceptable for the visual brief."] };
+        const record = { id: item.id, candidate: { ...item.candidate, perception, semanticKind: perception?.visualForm }, perception, sourceEvidenceId: item.sourceEvidence?.id, rejectionReasons: accepted ? undefined : ["The visual comparator inspected this candidate but did not rank it acceptable for the visual brief."] };
         if (previous) Object.assign(previous, record); else research.candidates.push(record);
       });
       const acquireStarted = Date.now();
@@ -3739,18 +3792,10 @@ async function researchAssignmentAssetEvidenceFirst(source: OpenPresenceState, p
         const selected = research.candidates.find((item) => item.id === candidateId);
         const preview = materialized.get(candidateId);
         if (!selected || !preview?.asset || !selected.perception) continue;
-        try {
-          const stored = await materializeCandidate(selected.candidate, { agentId: source.agent?.id ?? "", presenceId: presence.id, sessionId, environment: "sandbox", semanticKind: selected.perception.visualForm });
-          selectedStored = stored;
-          selectedId = candidateId;
-          materialized.set(candidateId, stored);
-          selected.assetId = stored.asset.id;
-          selected.sourceEvidenceId = stored.sourceEvidence?.id;
-        } catch (error) {
-          lastError = error instanceof Error ? error.message : "The candidate original asset could not be acquired.";
-          selected.rejectionReasons = [lastError];
-          continue;
-        }
+        selectedStored = preview;
+        selectedId = candidateId;
+        selected.assetId = preview.asset.id;
+        selected.sourceEvidenceId = preview.sourceEvidence?.id;
         const editorialStarted = Date.now();
         if (onProgress) await onProgress("publishing");
         const editorial = await generateEvidenceLedPublication(sandboxCognitionSource(source, presence), { assignment: assignment.instruction, topicHint, reframedThesis: research.reframedThesis, reframeRationale: research.reframeRationale, evidenceSummary: comparison.evidenceSummary, sourceEvidence: selectedStored.sourceEvidence, perception: selected.perception });
@@ -3776,8 +3821,32 @@ async function researchAssignmentAssetEvidenceFirst(source: OpenPresenceState, p
           selectedStored = undefined;
           continue;
         }
+        try {
+          // Acquire durable bytes only after the candidate, its pixels, and
+          // the joint text/visual review all pass. Rejected previews must not
+          // leave a durable file behind.
+          selectedStored = await materializeCandidate(selected.candidate, {
+            agentId: source.agent?.id ?? "",
+            presenceId: presence.id,
+            sessionId,
+            environment: "sandbox",
+            semanticKind: selected.perception.visualForm,
+            retention: "preserved",
+            preservationReason: "Selected by the bounded Sandbox visual-evidence review for this Assignment.",
+            reusePermission: "ready_to_use",
+          });
+          selectedId = candidateId;
+          selected.assetId = selectedStored.asset.id;
+          selected.sourceEvidenceId = selectedStored.sourceEvidence?.id;
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : "The candidate original asset could not be acquired.";
+          selected.rejectionReasons = [lastError];
+          selectedId = undefined;
+          selectedStored = undefined;
+          continue;
+        }
         selectedStored.asset.semanticKind = selected.perception.visualForm;
-        selectedStored.asset.description = selected.candidate.title ?? selected.candidate.name;
+        selectedStored.asset.description = selected.perception.observation.trim().split(/(?<=[.!?])\s+/)[0]?.slice(0, 240) || (selected.candidate.title ?? selected.candidate.name);
         selectedStored.asset.perception = { observation: selected.perception.observation, likelyMeaning: selected.perception.interpretation, visibleText: selected.perception.visibleText ? [selected.perception.visibleText] : undefined, uncertainty: [selected.perception.uncertainty] };
         research.status = "selected";
         research.selectedCandidateId = selectedId;
@@ -3785,8 +3854,8 @@ async function researchAssignmentAssetEvidenceFirst(source: OpenPresenceState, p
         recordVisualStage(research, "publish", Date.now(), 0, 1);
         const next = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
         replaceResearchSession(next, research);
-        for (const item of materialized.values()) if (!next.assets.some((asset) => asset.id === item.asset.id)) next.assets.unshift(item.asset);
-        for (const item of materialized.values()) if (item.sourceEvidence && !next.sourceEvidence.some((evidence) => evidence.id === item.sourceEvidence!.id)) next.sourceEvidence.unshift(item.sourceEvidence);
+        if (!next.assets.some((asset) => asset.id === selectedStored!.asset.id)) next.assets.unshift(selectedStored!.asset);
+        if (selectedStored.sourceEvidence && !next.sourceEvidence.some((evidence) => evidence.id === selectedStored!.sourceEvidence!.id)) next.sourceEvidence.unshift(selectedStored.sourceEvidence);
         return { state: recordRuntimeEvent(next, presence.id, "Visual evidence selected", `${selected.candidate.publisher ?? "Source"} · ${selected.candidate.title ?? selected.candidate.name}. Four or fewer previews were compared together, then the selected evidence grounded the final publication.`, "positive", { sessionId }), asset: { existingAssetId: selectedStored.asset.id, name: selected.candidate.title ?? selected.candidate.name, kind: selected.perception.visualForm === "chart" ? "chart" as const : "image" as const, sourceUrl: selected.candidate.mediaUrl, sourcePageUrl: selected.candidate.sourcePageUrl, publisher: selected.candidate.publisher }, draft: editorial.text };
       }
       recordVisualStage(research, "acquire", acquireStarted, comparison.rankedAcceptableIds.length, selectedId ? 1 : 0);
@@ -3809,8 +3878,9 @@ async function researchAssignmentAssetEvidenceFirst(source: OpenPresenceState, p
   const inspectedCount = research.candidates.filter((candidate) => Boolean(candidate.perception)).length;
   const failureState = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
   replaceResearchSession(failureState, research);
-  for (const item of materialized.values()) if (!failureState.assets.some((asset) => asset.id === item.asset.id)) failureState.assets.unshift(item.asset);
-  for (const item of materialized.values()) if (item.sourceEvidence && !failureState.sourceEvidence.some((evidence) => evidence.id === item.sourceEvidence!.id)) failureState.sourceEvidence.unshift(item.sourceEvidence);
+  // Do not persist preview candidates on a failed or text-only run. The
+  // research session keeps the decision evidence without turning every
+  // search result into library storage.
   if (visualNeed.importance !== "required") {
     const textOnly = await generateTextOnlyAssignmentPublication(sandboxCognitionSource(failureState, presence), { assignment: assignment.instruction, visualNeed, outcome, story: research.storyCandidate, evidenceSummary: research.evidenceSummary });
     if (textOnly.status === "ready" && textOnly.text.trim()) {
@@ -3883,7 +3953,9 @@ async function runSandboxAgentCycle(source: OpenPresenceState, sessionId: string
     : [];
   if (!inbound && gatedConversationObjects.length) {
     let next = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
-    for (const item of gatedConversationObjects) next = markSandboxObjectJudged(next, sessionId, item.externalRef.id);
+    for (const item of gatedConversationObjects) {
+      next = markSandboxObjectJudged(next, sessionId, item.externalRef.id);
+    }
     next.events.unshift({ id: `sandbox-event:${randomUUID()}`, type: "decision", title: "Conversation pacing held", detail: "The Presence left a closed or cooling conversation alone because the newest exchange added no substantive reason to reopen it.", time: new Date().toISOString(), tone: "quiet", presenceId: presence.id, sessionId, sourceObjectId: gatedConversationObjects[0]?.id });
     return next;
   }
@@ -4141,7 +4213,13 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
     ? decision.action === "message" ? inbound?.author?.externalRef ?? inbound?.externalRef : inbound?.externalRef
     : undefined;
   if (targetedActions.has(decision.action) && !target) {
-    const next = JSON.parse(JSON.stringify(actionSource)) as OpenPresenceState;
+    let next = JSON.parse(JSON.stringify(actionSource)) as OpenPresenceState;
+    const latestSandboxObjectId = source.events.find((item) => item.title === "Sandbox event observed" && item.sessionId === sessionId)?.sourceObjectId;
+    const targetMirror = inbound
+      ?? source.mirrorObjects.find((item) => item.id === latestSandboxObjectId)
+      ?? mirror[0];
+    next = recordRuntimeEvent(next, presence.id, "Social plan formed", JSON.stringify({ action: "no_op", rationale: "The Agent found no valid conversation target, so no action was formed." }), "neutral", { sessionId, sourceObjectId: targetMirror?.id });
+    if (targetMirror) next = markSandboxObjectJudged(next, sessionId, targetMirror.externalRef.id);
     next.events.unshift({ id: `sandbox-event:${randomUUID()}`, type: "decision", title: `${presence.name} chose silence`, detail: "The Agent found no valid conversation target, so no action was formed.", time: new Date().toISOString(), tone: "quiet", presenceId: presence.id, sessionId, sourceObjectId: inbound?.id });
     return next;
   }
@@ -4576,29 +4654,69 @@ function dispatchAssignmentWorker(runId: string) {
   assignmentWorkers.set(runId, work);
 }
 
-function sandboxDueCalendarSlots(state: OpenPresenceState, sessionId: string, from: string, to: string) {
-  const session = state.playgroundSessions.find((item) => item.id === sessionId);
-  if (!session) return [];
-  const start = new Date(from).getTime();
-  const end = new Date(to).getTime();
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
-  return state.calendar.flatMap((slot) => {
-    if (!slot.enabled || slot.presence !== session.presenceId) return [];
-    for (let cursor = new Date(start); cursor.getTime() <= end; cursor.setDate(cursor.getDate() + 1)) {
-      const weekday = cursor.toLocaleDateString("en-US", { weekday: "long" });
-      if (weekday !== slot.day) continue;
-      const [hours, minutes] = slot.time.split(":").map(Number);
-      const due = new Date(cursor);
-      due.setHours(hours, minutes, 0, 0);
-      const evaluationKey = `${slot.id}:${localDateKey(due)}`;
-      if (due.getTime() > start && due.getTime() <= end && !session.evaluatedSlotIds.includes(evaluationKey)) return [{ slot, evaluationKey }];
-    }
-    return [];
-  });
-}
-
 function localDateKey(value = new Date()) {
   return `${value.getFullYear()}-${value.getMonth() + 1}-${value.getDate()}`;
+}
+
+async function applySandboxTemporalEvents(source: OpenPresenceState, sessionId: string, processed: Array<{ id: string; type: string; status?: string; payload?: unknown; at: number }>) {
+  let next = source;
+  const initialSession = next.playgroundSessions.find((item) => item.id === sessionId);
+  if (!initialSession) return next;
+  const finalVirtualNow = initialSession.virtualNow;
+  try {
+    for (const event of processed) {
+      if (event.type === "scenario_stimulus") {
+        if (event.status && event.status !== "fired") continue;
+        if (!event.payload || typeof event.payload !== "object") continue;
+        const payload = event.payload as { scenarioRunId?: unknown; scenarioStimulusId?: unknown; stimulus?: unknown };
+        if (payload.scenarioRunId === undefined || typeof payload.scenarioRunId !== "string" || typeof payload.scenarioStimulusId !== "string" || !payload.stimulus || typeof payload.stimulus !== "object") continue;
+        const run = next.scenarioRuns.find((item) => item.id === payload.scenarioRunId && item.playgroundSessionId === sessionId);
+        const stimulus = payload.stimulus as ScenarioStimulus;
+        if (!run || run.status !== "active" || run.nextStimulusIndex >= (next.scenarioVersions.find((item) => item.id === run.scenarioVersionId)?.worldSpec.stimuli.length ?? 0)) continue;
+        const version = next.scenarioVersions.find((item) => item.id === run.scenarioVersionId);
+        const stimulusIndex = version?.worldSpec.stimuli.findIndex((item) => item.id === payload.scenarioStimulusId) ?? -1;
+        if (!version || stimulusIndex < 0 || stimulusIndex < run.nextStimulusIndex) continue;
+        const actor = version.worldSpec.startingWorld?.actors?.find((item) => item.id === stimulus.actorRef);
+        const target = stimulus.targetRef ? next.mirrorObjects.find((item) => item.id === stimulus.targetRef || item.externalRef.id === stimulus.targetRef)?.externalRef : undefined;
+        const session = next.playgroundSessions.find((item) => item.id === sessionId);
+        if (!session) continue;
+        session.virtualNow = new Date(event.at).toISOString();
+        session.virtualTimeMode = "manual";
+        next = addSandboxEvent(next, { sessionId, actionId: stimulus.type, kind: stimulus.type, actorName: actor?.displayName ?? stimulus.actorRef, actorHandle: actor?.handle, profile: actor?.profile, content: stimulus.content, language: stimulus.language ?? "en", assets: stimulus.assets, targetExternalRef: target, source: "scenario", trust: "untrusted_world_content", scenarioStimulusId: stimulus.id, temporalEventId: event.id });
+        next = await runSandboxAgentCycle(next, sessionId);
+        next = markScenarioStimulus(next, run.id, stimulusIndex + 1);
+        continue;
+      }
+      if (event.type !== "calendar_attention" || !event.payload || typeof event.payload !== "object") continue;
+      const payload = event.payload as { slotId?: unknown; evaluationKey?: unknown };
+      if (typeof payload.slotId !== "string" || typeof payload.evaluationKey !== "string") continue;
+      const session = next.playgroundSessions.find((item) => item.id === sessionId);
+      const slot = next.calendar.find((item) => item.id === payload.slotId && item.enabled);
+      if (!session || !slot || session.evaluatedSlotIds.includes(payload.evaluationKey)) continue;
+
+      // The kernel has already advanced the persisted snapshot to the end of
+      // the bulk request. Rewind only the compatibility session clock while
+      // dispatching this event so all existing Sandbox cognition/delivery
+      // helpers observe the event's causal virtual time. Restore the final
+      // clock after the whole ordered batch completes.
+      const eventVirtualNow = new Date(event.at).toISOString();
+      session.virtualNow = eventVirtualNow;
+      session.virtualTimeMode = "manual";
+      session.evaluatedSlotIds.push(payload.evaluationKey);
+      next = markCalendarSlotEvaluated(next, slot.id, eventVirtualNow);
+      const localSession = next.playgroundSessions.find((item) => item.id === sessionId);
+      if (!localSession) continue;
+      next.events.unshift({ id: `sandbox-calendar:${randomUUID()}`, type: "decision", title: "Calendar attention started", detail: `${next.presences.find((item) => item.id === localSession.presenceId)?.name ?? "The Presence"} is evaluating “${slot.instruction}” in the simulated world at ${eventVirtualNow}.`, time: eventVirtualNow, tone: "positive", presenceId: localSession.presenceId, sessionId: localSession.id, sourceTemporalEventId: event.id });
+      next = await runSandboxAgentCycle(next, sessionId, slot.instruction);
+    }
+  } finally {
+    const session = next.playgroundSessions.find((item) => item.id === sessionId);
+    if (session) {
+      session.virtualNow = finalVirtualNow;
+      session.virtualTimeMode = "manual";
+    }
+  }
+  return next;
 }
 
 async function runDuePublishingPlanWindows(source: OpenPresenceState, sessionId: string, from: string, to: string) {
@@ -4675,13 +4793,21 @@ async function executeScenarioRun(source: OpenPresenceState, runId: string) {
   const version = next.scenarioVersions.find((item) => item.id === run.scenarioVersionId);
   if (!version) throw new Error("That Scenario version is unavailable.");
   const sessionId = run.playgroundSessionId;
-  for (let index = run.nextStimulusIndex; index < version.worldSpec.stimuli.length; index += 1) {
-    const stimulus = version.worldSpec.stimuli[index]!;
-    const actor = version.worldSpec.startingWorld?.actors?.find((item) => item.id === stimulus.actorRef);
-    const target = stimulus.targetRef ? next.mirrorObjects.find((item) => item.id === stimulus.targetRef || item.externalRef.id === stimulus.targetRef)?.externalRef : undefined;
-    next = addSandboxEvent(next, { sessionId, actionId: stimulus.type, kind: stimulus.type, actorName: actor?.displayName ?? stimulus.actorRef, actorHandle: actor?.handle, profile: actor?.profile, content: stimulus.content, language: stimulus.language ?? "en", assets: stimulus.assets, targetExternalRef: target, source: "scenario", trust: "untrusted_world_content", scenarioStimulusId: stimulus.id });
-    next = await runSandboxAgentCycle(next, sessionId);
-    next = markScenarioStimulus(next, runId, index + 1);
+  const session = next.playgroundSessions.find((item) => item.id === sessionId);
+  if (!session) throw new Error("That Scenario Run has no Sandbox session.");
+  const originMs = Date.parse(run.startedAt);
+  if (!Number.isFinite(originMs)) throw new Error("That Scenario Run has an invalid virtual clock origin.");
+  if (run.nextStimulusIndex < version.worldSpec.stimuli.length) {
+    let finalOffsetMinutes = 0;
+    for (let index = 0; index < version.worldSpec.stimuli.length; index += 1) {
+      finalOffsetMinutes = version.worldSpec.stimuli[index]!.offsetMinutes ?? finalOffsetMinutes;
+      if (index >= run.nextStimulusIndex) continue;
+    }
+    const deltaMs = originMs + finalOffsetMinutes * 60_000 - Date.parse(session.virtualNow);
+    if (!Number.isFinite(deltaMs) || deltaMs < 0 || deltaMs % 60_000 !== 0) throw new Error("That Scenario Run cannot resume from a non-minute virtual clock.");
+    const advanced = advanceSandboxTimeWithTemporalEvents(next, sessionId, deltaMs / 60_000);
+    next = expireSandboxIntents(advanced.state, sessionId);
+    next = await applySandboxTemporalEvents(next, sessionId, advanced.processed);
   }
   next = completeScenarioRunState(next, runId, "completed");
   const evaluation = structuralScenarioEvaluation(next, runId);
@@ -4790,7 +4916,7 @@ const capabilities = z.object({ inbound: z.boolean(), reconcile: z.boolean(), af
 const channelDefinition = z.object({ id: channelId, name: z.string().trim().min(1).max(120), description: z.string().max(500).optional(), icon: z.string().max(40).optional(), domain: z.string().trim().max(300).optional(), entities: z.array(z.object({ id: z.string().min(1), label: z.string().min(1) })).max(100), affordances: z.array(z.object({ id: z.string().min(1), label: z.string().min(1), description: z.string().min(1) })).max(100), supportedAssetKinds: z.array(z.enum(["image", "video", "gif", "audio", "document", "chart", "link"])).max(7).optional(), formats: z.array(z.object({ id: z.string().min(1), label: z.string().min(1), description: z.string().min(1), channel: channelId })).max(100), relationships: z.array(z.object({ from: z.string(), to: z.array(z.string()), relation: z.enum(["contains", "replies-to", "mentions", "direct"]) })).max(100), metrics: z.array(z.object({ id: z.string(), label: z.string() })).max(100), discovery: z.array(z.object({ id: z.string().min(1), label: z.string().min(1), description: z.string().max(500).optional() })).max(50).optional(), playbook: z.string().max(10_000).optional(), privacyDefaults: z.object({ visibility: z.enum(["public", "private-community", "private-thread", "direct-message", "unknown"]), shareability: z.enum(["presence-only", "agent-wide", "public"]) }), builtIn: z.boolean().optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime() });
 const presenceInput = z.object({ channel: channelId, name: z.string().trim().min(1).max(120).optional(), handle: z.string().trim().min(1).max(80), mode: z.enum(["agent", "ghost"]), accent: z.string().regex(/^#[0-9a-f]{6}$/i), avatarLook: z.enum(["core", "professional", "casual", "playful", "pirate", "scholar", "operator"]).optional(), channelDefinition: channelDefinition.optional(), connectionMode: z.enum(["sandbox", "native", "bridge"]).optional() });
 const presenceBrief = z.object({ purpose: z.string().trim().min(1).max(1000), audience: z.string().trim().min(1).max(500), primaryTerritory: z.array(z.string().trim().min(1).max(160)).max(20), adjacentTerritory: z.array(z.string().trim().min(1).max(160)).max(20), boundaries: z.array(z.string().trim().min(1).max(160)).max(20) });
-const presenceChatAsset = z.object({ name: z.string().trim().min(1).max(160), kind: z.enum(["image", "video", "gif", "audio", "document", "chart", "link"]), mimeType: z.string().trim().max(120).optional(), dataUrl: z.string().max(2_500_000).optional(), sourceUrl: z.string().url().max(2000).optional() });
+const presenceChatAsset = z.object({ name: z.string().trim().min(1).max(160), kind: z.enum(["image", "video", "gif", "audio", "document", "chart", "link"]), mimeType: z.string().trim().max(120).optional(), dataUrl: z.string().max(2_500_000).optional(), sourceUrl: z.string().url().max(2000).optional(), existingAssetId: z.string().trim().min(1).max(160).optional() });
 const languagePolicy = z.object({ avoid: z.array(z.string().trim().min(1).max(160)).max(100), prohibited: z.array(z.string().trim().min(1).max(160)).max(100) });
 const resourceBudget = z.object({ maxEstimatedCostCentsPerDay: z.number().int().min(0).max(100_000).optional(), maxModelCallsPerDay: z.number().int().min(0).max(10_000).optional(), maxVisionCallsPerDay: z.number().int().min(0).max(10_000).optional(), maxChannelReadsPerDay: z.number().int().min(0).max(10_000).optional(), maxHydrationsPerDay: z.number().int().min(0).max(10_000).optional() });
 const selfDirectedAttention = z.object({ enabled: z.boolean().optional(), intensity: z.enum(["quiet", "balanced", "curious", "custom"]), mediaUnderstanding: z.enum(["when_needed", "off"]), budget: resourceBudget.optional(), lastRunAt: z.string().datetime().optional(), nextEligibleAt: z.string().datetime().optional(), lastRunId: z.string().optional() });
@@ -4846,6 +4972,8 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("approveAssetMetadata"), assetId: z.string().min(1), ...assetMetadataFields }),
   z.object({ type: z.literal("resolveAssetReview"), assetId: z.string().min(1), observation: z.string().trim().min(1).max(4000), likelyMeaning: z.string().trim().max(2000).optional(), visibleText: z.array(z.string().trim().max(500)).max(30).optional(), semanticKind: assetSemanticKind.optional(), uncertainty: z.array(z.string().trim().max(300)).max(20).optional(), note: z.string().trim().max(2000).optional() }),
   z.object({ type: z.literal("reanalyzeAsset"), assetId: z.string().min(1) }),
+  z.object({ type: z.literal("reanalyzeDiscoveredAssets") }),
+  z.object({ type: z.literal("preserveDiscoveredAsset"), assetId: z.string().min(1), reason: z.string().trim().min(8).max(500) }),
   z.object({ type: z.literal("archiveAsset"), assetId: z.string().min(1) }),
   z.object({ type: z.literal("restoreAsset"), assetId: z.string().min(1) }),
   z.object({ type: z.literal("resumeAttention"), presenceId: z.string().min(1).optional() }),
@@ -4910,7 +5038,7 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("setExplorationEngagement"), id: z.string().min(1), mode: z.enum(["surface", "opportunistic", "objective"]), objective: z.string().trim().max(2000).optional() }),
   z.object({ type: z.literal("lookNow"), id: z.string().min(1).optional(), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("retryOperatorChat"), presenceId: z.string().min(1), messageId: z.string().min(1) }),
-  z.object({ type: z.literal("sendPresenceNudge"), presenceId: z.string().min(1), threadId: z.string().min(1).optional(), content: z.string().trim().min(1).max(20_000), attachments: z.array(presenceChatAsset).max(12).optional(), clientRequestId: z.string().trim().min(1).max(160).optional() }),
+  z.object({ type: z.literal("sendPresenceNudge"), presenceId: z.string().min(1), threadId: z.string().min(1).optional(), assignmentId: z.string().min(1).optional(), content: z.string().trim().min(1).max(20_000), attachments: z.array(presenceChatAsset).max(12).optional(), clientRequestId: z.string().trim().min(1).max(160).optional() }),
   z.object({ type: z.literal("cancelOperatorChat"), presenceId: z.string().min(1), runId: z.string().min(1) }),
   z.object({ type: z.literal("retryPresenceNudge"), presenceId: z.string().min(1), nudgeId: z.string().min(1) }),
   z.object({ type: z.literal("createAssignmentFromNudge"), presenceId: z.string().min(1), nudgeId: z.string().min(1), title: z.string().trim().min(1).max(240).optional() }),
@@ -4951,8 +5079,11 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("setAgentLanguagePolicy"), policy: languagePolicy }),
   z.object({ type: z.literal("setPresenceLanguagePolicy"), policy: languagePolicy }),
   z.object({ type: z.literal("overrideLanguagePolicy"), id: z.string().min(1) }),
-  z.object({ type: z.literal("createAssignment"), instruction: z.string().trim().min(1).max(4000), presenceId: z.string().min(1).optional(), sessionId: z.string().min(1).optional(), environment: z.enum(["sandbox", "live"]).optional(), objective: z.enum(["audience_growth", "education", "relationship", "reflection"]).optional(), delegationPolicy: z.enum(["keep_moving", "ask_before_change", "stop_on_deviation"]).optional(), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional(), assetConstraint: z.object({ collectionId: z.string().min(1).optional(), required: z.boolean().optional() }).optional() }),
-  z.object({ type: z.literal("updateAssignment"), id: z.string().min(1), instruction: z.string().trim().min(1).max(4000), objective: z.enum(["audience_growth", "education", "relationship", "reflection"]).optional(), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).nullable().optional(), assetConstraint: z.object({ collectionId: z.string().min(1).optional(), required: z.boolean().optional() }).optional() }),
+  z.object({ type: z.literal("saveSocialTemplate"), presenceId: z.string().min(1), title: z.string().trim().min(1).max(160), body: z.string().trim().min(1).max(4000), whenToUse: z.string().max(1000).optional(), visualGuidance: z.string().max(800).optional(), mirrorObjectIds: z.array(z.string().min(1)).max(30).optional() }),
+  z.object({ type: z.literal("updateSocialTemplate"), presenceId: z.string().min(1), hypothesisId: z.string().min(1), body: z.string().trim().min(1).max(4000), whenToUse: z.string().max(1000).optional(), visualGuidance: z.string().max(800).optional() }),
+  z.object({ type: z.literal("scheduleSocialTemplate"), presenceId: z.string().min(1), hypothesisId: z.string().min(1), startsAt: z.string().datetime({ offset: true }), deadline: z.string().datetime({ offset: true }) }),
+  z.object({ type: z.literal("createAssignment"), title: z.string().trim().min(1).max(240).optional(), timeframe: z.object({ startsAt: z.string().datetime({ offset: true }), deadline: z.string().datetime({ offset: true }) }).optional(), instruction: z.string().trim().min(1).max(4000), presenceId: z.string().min(1).optional(), sessionId: z.string().min(1).optional(), environment: z.enum(["sandbox", "live"]).optional(), objective: z.enum(["audience_growth", "education", "relationship", "reflection"]).optional(), delegationPolicy: z.enum(["keep_moving", "ask_before_change", "stop_on_deviation"]).optional(), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional(), assetConstraint: z.object({ collectionId: z.string().min(1).optional(), required: z.boolean().optional() }).optional() }),
+  z.object({ type: z.literal("updateAssignment"), title: z.string().trim().min(1).max(240).optional(), timeframe: z.object({ startsAt: z.string().datetime({ offset: true }), deadline: z.string().datetime({ offset: true }) }).optional(), id: z.string().min(1), instruction: z.string().trim().min(1).max(4000), objective: z.enum(["audience_growth", "education", "relationship", "reflection"]).optional(), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).nullable().optional(), assetConstraint: z.object({ collectionId: z.string().min(1).optional(), required: z.boolean().optional() }).optional() }),
   z.object({ type: z.literal("analyzeSchedulePrompt"), prompt: z.string().trim().min(12).max(4000), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("confirmSchedulePrompt"), promptId: z.string().trim().min(1).max(120), presenceId: z.string().min(1), drafts: z.array(z.object({ instruction: z.string().trim().min(1).max(4000), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40), date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/).optional() }), objective: z.enum(["audience_growth", "education", "relationship", "reflection"]).optional(), environment: z.enum(["sandbox", "live"]).optional(), delegationPolicy: z.enum(["keep_moving", "ask_before_change", "stop_on_deviation"]).optional(), plan: z.object({ summary: z.string().trim().min(1).max(2000), dailyTargets: z.array(z.string().trim().min(1).max(500)).max(20), publishingApproach: z.array(z.string().trim().min(1).max(500)).max(20), discoveryDirections: z.array(z.string().trim().min(1).max(500)).max(20), relationshipFocus: z.array(z.string().trim().min(1).max(500)).max(20), hypotheses: z.array(z.string().trim().min(1).max(500)).max(20), capabilitiesConsidered: z.array(z.string().trim().min(1).max(500)).max(20).optional(), stopConditions: z.array(z.string().trim().min(1).max(500)).max(20).optional(), evidenceNeeded: z.array(z.string().trim().min(1).max(500)).max(20).optional(), nextWeeklyReviewAt: z.string().datetime().optional(), nextStrategicReviewAt: z.string().datetime().optional(), source: z.enum(["agent", "operator"]) }).optional() })).min(1).max(24) }),
   z.object({ type: z.literal("activateAssignment"), id: z.string().min(1), delegationPolicy: z.enum(["keep_moving", "ask_before_change", "stop_on_deviation"]).optional() }),
@@ -4993,7 +5124,7 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("removeSandboxObject"), sessionId: z.string().min(1), objectId: z.string().min(1) }),
   z.object({ type: z.literal("inspectSandboxMedia"), sessionId: z.string().min(1), objectId: z.string().min(1) }),
   z.object({ type: z.literal("addSandboxEvent"), sessionId: z.string().min(1), kind: z.string().trim().min(1).max(40).optional(), actionId: z.string().trim().min(1).max(60).optional(), actorId: z.string().trim().min(1).max(100).optional(), actorName: z.string().trim().max(120).optional(), actorHandle: z.string().trim().max(80).optional(), profile: z.object({ bio: z.string().trim().max(1000).optional(), location: z.string().trim().max(200).optional(), roles: z.array(z.string().trim().min(1).max(120)).max(10).optional(), skills: z.array(z.string().trim().min(1).max(120)).max(20).optional(), introductionPermission: z.enum(["allowed", "ask-first", "not-available"]).optional() }).optional(), content: z.string().trim().max(4000).optional(), language: z.string().trim().max(20).optional(), assets: z.array(z.object({ name: z.string().trim().min(1).max(160), kind: z.enum(["image", "video", "gif", "audio", "document", "chart", "link"]), mimeType: z.string().trim().max(120).optional(), dataUrl: z.string().max(2_500_000).optional(), sourceUrl: z.string().url().max(2000).optional() })).max(4).optional(), targetExternalRef: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(), parentExternalRef: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(), observeOnly: z.boolean().optional() }),
-  z.object({ type: z.literal("advanceSandboxTime"), sessionId: z.string().min(1), minutes: z.number().int().min(-1440).max(43200) }),
+  z.object({ type: z.literal("advanceSandboxTime"), sessionId: z.string().min(1), minutes: z.number().int().min(0).max(43200) }),
   z.object({ type: z.literal("runSandboxPulse"), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("considerOriginalPublication"), sessionId: z.string().min(1), inspiration: z.string().trim().max(2000).optional() }),
   z.object({ type: z.literal("generatePlaygroundStimulus"), sessionId: z.string().min(1), presenceId: z.string().min(1).optional(), targetAffordance: z.enum(["quote", "repost", "like", "reply", "silence"]), topic: z.string().trim().max(1000).optional() }),
@@ -5031,6 +5162,10 @@ function validateRequestLineage(state: OpenPresenceState, parsed: RuntimeOperati
   if (parsed.type === "askPresenceToReply" || parsed.type === "askPresenceToIgnore") {
     const target = state.mirrorObjects.find((item) => item.id === parsed.objectId);
     if (!target || target.presenceId !== parsed.presenceId || (parsed.sessionId && target.sessionId !== parsed.sessionId)) throw new Error("That observed post is no longer available in this Presence context.");
+  }
+  if (parsed.type === "sendPresenceNudge" && parsed.assignmentId) {
+    const assignment = state.assignments.find((item) => item.id === parsed.assignmentId && item.presenceId === parsed.presenceId);
+    if (!assignment) throw new Error("That planned item is no longer available in this Presence.");
   }
   // Presence chat sessions also use `sessionId`, but they are a separate
   // durable collection from Playground worlds and must not be conflated.
@@ -5226,7 +5361,7 @@ export async function POST(request: Request) {
     }
     if (parsed.type === "addSandboxEvent" && !parsed.actionId && !parsed.kind) throw new Error("Choose a simulated situation.");
     const context = requestContext(request);
-    const assetOperationTypes = new Set(["connectAssetSource", "rescanAssetSource", "pauseAssetSource", "resumeAssetSource", "createAssetCollection", "updateAssetCollection", "archiveAssetCollection", "addAssetToCollection", "removeAssetFromCollection", "setAssetAccessScope", "editAssetMetadata", "approveAssetMetadata", "resolveAssetReview", "reanalyzeAsset", "archiveAsset", "restoreAsset"]);
+    const assetOperationTypes = new Set(["connectAssetSource", "rescanAssetSource", "pauseAssetSource", "resumeAssetSource", "createAssetCollection", "updateAssetCollection", "archiveAssetCollection", "addAssetToCollection", "removeAssetFromCollection", "setAssetAccessScope", "editAssetMetadata", "approveAssetMetadata", "resolveAssetReview", "reanalyzeAsset", "reanalyzeDiscoveredAssets", "preserveDiscoveredAsset", "archiveAsset", "restoreAsset"]);
     if (assetOperationTypes.has(parsed.type)) {
       const runtimeToken = readRuntimeScopeCookie(request.headers.get("cookie"));
       if (!runtimeToken) return NextResponse.json({ error: "A server-resolved RuntimeScope is required for Asset Library operations." }, { status: 401 });
@@ -5235,9 +5370,14 @@ export async function POST(request: Request) {
       assertRuntimeScope(scoped, runtimeScope);
       const next = applyOperation(scoped, parsed as RuntimeOperation);
       writeState(next);
-      if (parsed.type === "reanalyzeAsset") {
+      if (parsed.type === "reanalyzeAsset" || parsed.type === "preserveDiscoveredAsset") {
         const { queueAssetProcessing } = await import("@/lib/asset-library-worker");
         queueAssetProcessing(runtimeScope.agentId, [parsed.assetId]);
+      }
+      if (parsed.type === "reanalyzeDiscoveredAssets") {
+        const { queueAssetProcessing } = await import("@/lib/asset-library-worker");
+        const ids = next.assets.filter((asset) => asset.agentId === runtimeScope.agentId && asset.status === "processing").map((asset) => asset.id);
+        queueAssetProcessing(runtimeScope.agentId, ids);
       }
       return stateResponse(request, next);
     }
@@ -5291,6 +5431,35 @@ export async function POST(request: Request) {
       current.workspaceRevision = context.workspaceRevision;
     }
     validateRequestLineage(current, parsed as unknown as RuntimeOperation);
+    if (parsed.type === "saveSocialTemplate") {
+      const saved = saveSocialTemplate(current, parsed.presenceId, { ...parsed, source: "operator" });
+      writeState(saved.state);
+      return stateResponse(request, saved.state);
+    }
+    if (parsed.type === "updateSocialTemplate") {
+      const saved = updateSocialTemplate(current, parsed.presenceId, parsed.hypothesisId, parsed);
+      writeState(saved.state);
+      return stateResponse(request, saved.state);
+    }
+    if (parsed.type === "scheduleSocialTemplate") {
+      const lesson = socialPlaybookForPresence(current, parsed.presenceId).find(item => item.id === parsed.hypothesisId);
+      if (!lesson?.template || ["retired", "disfavored"].includes(lesson.status)) throw new Error("Choose an available template from this Presence's playbook.");
+      if (Date.parse(parsed.startsAt) <= Date.now() || Date.parse(parsed.deadline) <= Date.parse(parsed.startsAt)) throw new Error("Choose a future start and a later finish time.");
+      const presence = current.presences.find(item => item.id === parsed.presenceId)!;
+      const sourceLine = lesson.template.source === "observed_post"
+        ? `This format was abstracted from ${lesson.template.sourceCount ?? lesson.template.sourceMirrorObjectIds?.length ?? "multiple"} observed public source posts. `
+        : "";
+      const beforeIds = new Set(current.assignments.map(item => item.id));
+      let next = applyOperation(current, { type: "createAssignment", presenceId: parsed.presenceId, environment: presence.environment === "sandbox" ? "sandbox" : "live", title: `Use ${lesson.template.title}`, description: `Apply ${lesson.template.title} to a current audience-relevant idea and verify the result.`, strategyTemplateId: lesson.id, timeframe: { startsAt: parsed.startsAt, deadline: parsed.deadline }, instruction: `Create and publish one context-appropriate original post using the reusable format ${lesson.id}: ${lesson.template.title}. Structure: ${lesson.template.body}. ${lesson.template.whenToUse ?? ""} ${sourceLine}${lesson.template.audienceFit ? `This format is intended for ${lesson.template.audienceFit}. ` : ""}${lesson.template.visualGuidance ? `Visual guidance: ${lesson.template.visualGuidance}. ` : ""}Compare media with text-only; attach one authorized durable visual only when it materially improves proof, comprehension, identity, or attention for this idea, and never invent or use uninspected media. Adapt the structure using current evidence and known identity facts. Do not invent age, location, credentials, results, or other missing personal facts. If necessary facts are unavailable, ask for them or omit those slots. Follow existing publishing permissions. Verify the post before counting it complete.` });
+      const assignment = next.assignments.find(item => !beforeIds.has(item.id));
+      if (!assignment) throw new Error("An equivalent task already exists; no duplicate was created.");
+      assignment.strategyTemplateId = lesson.id;
+      next = applyOperation(next, { type: "activateAssignment", id: assignment.id });
+      writeState(next);
+      scheduleOperationalSweep();
+      return stateResponse(request, next);
+    }
+
     if (parsed.type === "analyzeSchedulePrompt") {
       // Analysis is intentionally a read-only request. The proposal carries
       // no durable IDs and is only eligible for persistence after the
@@ -5596,13 +5765,28 @@ export async function POST(request: Request) {
       }
       if (conversationPresence) {
         let next = current;
+        let operatorAttachments = parsed.attachments;
+        let newlyMaterializedAssetIds: string[] = [];
+        if (parsed.attachments?.length) {
+          const materialized = await materializeOperatorChatAttachments(current, parsed.presenceId, parsed.attachments);
+          next = materialized.state;
+          operatorAttachments = materialized.attachments;
+          newlyMaterializedAssetIds = materialized.newAssetIds;
+        }
         // Persist the operator's turn before invoking the model. The private
         // conversation should remain truthful even if the model is slow,
         // unavailable, or the process restarts while it is being generated.
         next = hasSharedContext
-          ? createOperatorNudge(next, { ...parsed, privateConversation: true }).state
-          : recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, threadId: parsed.threadId, content: parsed.content, clientRequestId: parsed.clientRequestId });
-        writeState(next);
+          ? createOperatorNudge(next, { ...parsed, attachments: operatorAttachments, privateConversation: true }).state
+          : recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, threadId: parsed.threadId, content: parsed.content, clientRequestId: parsed.clientRequestId, assignmentId: parsed.assignmentId });
+        if (newlyMaterializedAssetIds.length) {
+          const { createAssetProcessingJobs, queueAssetProcessing } = await import("@/lib/asset-library-worker");
+          createAssetProcessingJobs(next, next.agent!.id, newlyMaterializedAssetIds);
+          writeState(next);
+          queueAssetProcessing(next.agent!.id, newlyMaterializedAssetIds);
+        } else {
+          writeState(next);
+        }
         const operatorConversation = next.operatorConversations?.find((item) =>
           item.presenceId === parsed.presenceId
           && (!parsed.threadId || item.threadId === parsed.threadId || item.id === parsed.threadId || (!item.threadId && `thread:${item.id}` === parsed.threadId)),
@@ -6303,6 +6487,44 @@ export async function POST(request: Request) {
       const presence = current.presences.find((item) => item.id === presenceId) ?? current.presence;
       if (!assignment || !presence || assignment.environment === "sandbox") throw new Error("That live Assignment is no longer available.");
       const internalDispatch = request.headers.get("x-openpresence-internal-dispatch") === "assignment";
+      // Planning-only work is intentionally held for operator review. A
+      // normal executable draft, however, may be explicitly started by a
+      // direct `runLiveAssignment` request. Keeping every draft behind this
+      // early return strands ready live work and prevents deadline cleanup or
+      // private inspections from ever reaching their worker.
+      if (assignment.planningOnly) {
+        if (internalDispatch) return NextResponse.json({ accepted: true, assignmentId: parsed.assignmentId, paused: true }, { status: 202 });
+        return stateResponse(request, current);
+      }
+      if (assignment.status === "draft") {
+        // Expired drafts are terminal before activation. This keeps an old
+        // recovered request from being reopened merely because a direct run
+        // was requested after its declared window.
+        if (assignmentWindowState(assignment) === "ended") {
+          if (!assignmentHasPendingDelivery(current, assignment.id) && expireAssignmentWindows(current) > 0) writeState(current);
+          return stateResponse(request, current);
+        }
+        if (internalDispatch || !["ready", "ready_with_assumptions"].includes(assignment.preflight?.status ?? "")) {
+          if (internalDispatch) return NextResponse.json({ accepted: true, assignmentId: parsed.assignmentId, paused: true }, { status: 202 });
+          return stateResponse(request, current);
+        }
+        const activated = applyOperation(current, { type: "activateAssignment", id: assignment.id });
+        const queued = queueLiveAssignmentRun(activated, assignment.id, presenceId);
+        writeState(queued.state);
+        void dispatchLiveAssignmentWorker(queued.run.id);
+        return stateResponse(request, queued.state);
+      }
+      const queuedRun = internalDispatch && current.assignmentRuns?.find((run) => run.assignmentId === assignment.id && run.presenceId === presenceId && run.sessionId === `live:${presenceId}` && run.status === "queued");
+      const windowState = assignmentWindowState(assignment);
+      // A queued scheduler wake is already durable work. Allow that worker to
+      // settle a closed window (without forming a new intent); reject only a
+      // new/manual request after the deadline. Return the settled state rather
+      // than manufacturing an API error for a task that simply cannot start.
+      if (windowState === "ended" && !queuedRun) {
+        if (!assignmentHasPendingDelivery(current, assignment.id) && expireAssignmentWindows(current) > 0) writeState(current);
+        return stateResponse(request, current);
+      }
+      if (windowState === "upcoming") throw new Error("This task has not reached its start time yet.");
       const pursuit = activeAssignmentPursuitWindow(current, parsed.assignmentId);
       // The scheduler can select work and lose the race to an operator pause
       // or terminal decision before its POST arrives. A stale internal wake is
@@ -6415,17 +6637,46 @@ export async function POST(request: Request) {
     if (parsed.type === "advanceSandboxTime") {
       const currentSession = current.playgroundSessions.find((item) => item.id === parsed.sessionId);
       if (!currentSession) throw new Error("That Playground session no longer exists.");
-      const from = currentSession.virtualNow;
-      let next = expireSandboxIntents(advanceSandboxTime(current, parsed.sessionId, parsed.minutes), parsed.sessionId);
-      const updatedSession = next.playgroundSessions.find((item) => item.id === parsed.sessionId)!;
-      for (const { slot, evaluationKey } of sandboxDueCalendarSlots(next, parsed.sessionId, from, updatedSession.virtualNow)) {
-        const session = next.playgroundSessions.find((item) => item.id === parsed.sessionId)!;
-        session.evaluatedSlotIds.push(evaluationKey);
-        next = markCalendarSlotEvaluated(next, slot.id);
-        next.events.unshift({ id: `sandbox-calendar:${randomUUID()}`, type: "decision", title: "Calendar attention started", detail: `${next.presences.find((item) => item.id === session.presenceId)?.name ?? "The Presence"} is evaluating “${slot.instruction}” in the simulated world.`, time: new Date().toISOString(), tone: "positive", presenceId: session.presenceId, sessionId: session.id });
-        next = await runSandboxAgentCycle(next, parsed.sessionId, slot.instruction);
+      let next = current;
+      // A multi-day jump is still a sequence of causal days. Advancing the
+      // kernel once and waking only at the endpoint makes a continuous
+      // responsibility look autonomous while silently skipping its daily
+      // operating loop. Keep each bounded day in the existing temporal
+      // boundary so events, plan windows, and autonomous attention can be
+      // observed in the same order they would have occurred in real time.
+      let remainingMinutes = parsed.minutes;
+      while (remainingMinutes > 0) {
+        const chunkMinutes = Math.min(24 * 60, remainingMinutes);
+        const from = next.playgroundSessions.find((item) => item.id === parsed.sessionId)?.virtualNow;
+        if (!from) throw new Error("That Playground session no longer exists.");
+        const advanced = advanceSandboxTimeWithTemporalEvents(next, parsed.sessionId, chunkMinutes);
+        next = expireSandboxIntents(advanced.state, parsed.sessionId);
+        next = await applySandboxTemporalEvents(next, parsed.sessionId, advanced.processed);
+        const updatedSession = next.playgroundSessions.find((item) => item.id === parsed.sessionId)!;
+        // Sandbox time is causal time. Evaluate the same autonomous Growth
+        // checkpoint against the session clock so a compressed week can
+        // produce the review, plan cadence, and operator update it would have
+        // produced in live time.
+        const sandboxGrowthReview = autonomousGrowthReviewNeed(next, updatedSession.presenceId, new Date(updatedSession.virtualNow));
+        if (sandboxGrowthReview) {
+          next = await runModelGrowthReview(next, sandboxGrowthReview.assignment, sandboxGrowthReview.kind, { reviewAt: new Date(updatedSession.virtualNow) });
+        }
+        const publishingHistoryBefore = next.publishingPlans
+          .filter((plan) => plan.presenceId === updatedSession.presenceId)
+          .reduce((count, plan) => count + (plan.workHistory?.length ?? 0), 0);
+        next = await runDuePublishingPlanWindows(next, parsed.sessionId, from, updatedSession.virtualNow);
+        const publishingHistoryAfter = next.publishingPlans
+          .filter((plan) => plan.presenceId === updatedSession.presenceId)
+          .reduce((count, plan) => count + (plan.workHistory?.length ?? 0), 0);
+        const handledPublishingWindow = publishingHistoryAfter > publishingHistoryBefore;
+        const updatedPresence = next.presences.find((item) => item.id === updatedSession.presenceId);
+        const hasContinuousResponsibility = next.assignments.some((assignment) => assignment.presenceId === updatedSession.presenceId && assignment.status === "active" && assignment.activation?.type === "continuous");
+        if (!handledPublishingWindow && (updatedPresence?.selfDirectedAttention?.enabled || hasContinuousResponsibility)) {
+          next = recordRuntimeEvent(next, updatedSession.presenceId, "Sandbox autonomous attention wake", `${updatedPresence?.name ?? "The Presence"} is continuing its own operating loop after the simulated clock advanced.`, "positive", { sessionId: parsed.sessionId });
+          next = await runSandboxAgentCycle(next, parsed.sessionId);
+        }
+        remainingMinutes -= chunkMinutes;
       }
-      next = await runDuePublishingPlanWindows(next, parsed.sessionId, from, updatedSession.virtualNow);
       writeState(next);
       return stateResponse(request, next);
     }
@@ -6846,9 +7097,25 @@ export async function POST(request: Request) {
     if (parsed.type === "wakePresence" || parsed.type === "runPulse") {
       const presenceId = pulsePresenceId(next, parsed);
       const expectedPresence = presenceId ? next.presences.find((item) => item.id === presenceId) ?? next.presence : next.presence;
-      if (presenceId && expectedPresence?.status === "live") {
+      const hasReadableNativeConnection = Boolean(presenceId && expectedPresence?.channel === "x" && next.nativeConnections.some((item) => item.presenceId === presenceId && (item.kind === "x" || item.channelId === "x") && nativeConnectionCanObserve(item, expectedPresence.handle)));
+      // A live X check with an already-readable native connection can use the
+      // deterministic reconciliation path below in the test runtime. Keep
+      // the queued broad path for wake/launch and for production workers, but
+      // do not let a concurrent plan wake race the direct inbound pulse.
+      const useBroadAttention = presenceId && expectedPresence?.status === "live"
+        && (!isTestRuntime() || parsed.type === "wakePresence" || !hasReadableNativeConnection);
+      if (useBroadAttention) {
         const hasQueuedNudge = next.operatorNudges?.some((item) => item.presenceId === presenceId && item.status === "queued");
-        const trigger = parsed.type === "runPulse" ? "operator_check" : hasQueuedNudge ? "operator_nudge" : "inbound_event";
+        // A first wake is broad attention, not merely an inbound observer:
+        // with no public footing the Agent must be allowed to decide whether
+        // to make its initial contribution and establish its operating plan.
+        const trigger = parsed.type === "runPulse"
+          ? "operator_check"
+          : hasQueuedNudge
+            ? "operator_nudge"
+            : isLaunchCandidate(next, presenceId)
+              ? "operator_check"
+              : "inbound_event";
         const receipt = requestAttention(presenceId, trigger, new Date().toISOString(), trigger === "inbound_event" ? "observe_inbound" : "broad");
         const requested = recordRuntimeEvent(next, presenceId, receipt.runId ? "Check joined active attention" : "Check requested", receipt.runId ? "The signal joined the current Attention responsibility." : `${expectedPresence.name} will observe, judge, and verify any warranted act in one durable run.`, "positive", { runId: receipt.runId });
         writeState(requested);
@@ -6857,6 +7124,11 @@ export async function POST(request: Request) {
         const run = receipt.runId
           ? listOperationalRuns(presenceId).find((item) => item.id === receipt.runId)
           : listOperationalRuns(presenceId).find((item) => item.kind === "attention" && item.attention?.signalIds.includes(receipt.signalId));
+        // Test/runtime callers use the receipt as a synchronization boundary.
+        // Await the worker created by the sweep so they observe its durable
+        // Social Mirror/Intent/Execution result rather than a pre-worker
+        // snapshot. Live callers retain the background handoff below.
+        if (isTestRuntime() && run?.id) await dispatchAutonomyWorker(run.id);
         return stateResponse(request, requested, { runId: run?.id ?? receipt.wake?.id, receiptOnly: true });
       }
       const hasNativeRead = Boolean(presenceId && next.nativeConnections.some((item) => item.presenceId === presenceId && (item.kind === "x" || item.channelId === "x") && nativeConnectionCanObserve(item, expectedPresence?.handle)));
@@ -6928,7 +7200,13 @@ export async function POST(request: Request) {
       const deterministicReply = conversation?.messages.at(-1)?.role === "agent" && conversation.messages.at(-1)?.change ? conversation.messages.at(-1)?.content : undefined;
       const knowledge = next.presence ? compileKnowledgeContext(next, { presenceId: next.presence.id, query: parsed.content, purpose: "operator_chat" }) : undefined;
       if (knowledge) next = knowledge.state;
-      const reply = deterministicReply ?? await generateAgentReply(next, parsed.content, parsed.conversationId, { knowledgeContext: knowledge?.packet }).catch((error: unknown) => {
+      const usageWorkspaces = [...readUsageWorkspaces(), {
+        agent: next.agent,
+        presences: next.presences,
+        resourceUsageEvents: next.resourceUsageEvents,
+      }];
+      const usageEvents = canonicalUsageEvents(usageWorkspaces, new Set(usageWorkspaces.map((workspace) => workspace.agent?.id).filter((id): id is string => Boolean(id)))).get(next.agent?.id ?? "") ?? [];
+      const reply = deterministicReply ?? operatorUsageReply(next, parsed.content, usageEvents) ?? await generateAgentReply(next, parsed.content, parsed.conversationId, { knowledgeContext: knowledge?.packet }).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "The selected AI provider could not answer.";
         console.warn("Agent runtime unavailable", message);
         return `I’m not able to answer yet. ${message}`;

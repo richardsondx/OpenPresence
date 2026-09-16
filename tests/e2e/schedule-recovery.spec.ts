@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test.use({ viewport: { width: 1440, height: 1000 }, isMobile: false });
+test.afterEach(async ({ page }) => { await page.unrouteAll({ behavior: "ignoreErrors" }); });
 
 test.beforeEach(async ({ request }) => {
   const reset = await request.post("/api/state", { data: { type: "reset" } });
@@ -103,23 +104,20 @@ test("today keeps current work visible and a Schedule decision is actionable in 
   const notice = page.getByTestId("operator-chat-needs-you");
   await expect(notice).toBeVisible();
   await expect(notice).toHaveCount(1);
-  await expect(notice.locator("xpath=following-sibling::*[1][self::form[contains(@class, 'operator-chat-composer')]]")).toHaveCount(1);
-  await notice.getByRole("button", { name: "Review details", exact: true }).click();
-  const queue = page.getByTestId("needs-you-queue");
-  await expect(queue).toBeVisible();
-  await expect(queue.getByRole("heading", { name: "Needs You", exact: true })).toBeVisible();
-  await expect(queue).toContainText("Resolve the operator decision");
-  await queue.getByRole("button", { name: "Open Assignment details", exact: true }).click();
+  await expect(notice.locator("xpath=ancestor::*[contains(@class, 'operator-chat-history')]")).toHaveCount(1);
+  await notice.getByText("Task details", { exact: true }).click();
+  await expect(notice).toContainText("Resolve the operator decision");
 
-  await expect(page.getByRole("heading", { name: "Schedule", exact: true })).toBeVisible();
+  await page.goto(`/schedule?agentId=${base.agent.id}&presenceId=${presenceId}`);
+  await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /Open .*Assignment Resolve the operator decision without losing the responsibility\./ }).click();
   await expect(page.getByRole("complementary", { name: "Assignment details" })).toContainText("Resolve the operator decision");
-  await expect(page.getByRole("complementary", { name: "Assignment details" }).getByRole("button", { name: "Retry Assignment", exact: true })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Assignment details" }).getByRole("button", { name: "Retry attempt", exact: true })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Assignment details" }).getByRole("button", { name: "Close Assignment", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: todayButtonLabel, exact: true }).click();
   const schedule = page.getByRole("region", { name: "Schedule list" });
-  await expect(schedule.getByText("Research the current builder conversation.", { exact: true })).toBeVisible();
-  await expect(schedule.getByText("Resolve the operator decision without losing the responsibility.", { exact: true })).toBeVisible();
+  await expect(schedule.getByText("Resolve the operator decision", { exact: true })).toBeVisible();
 });
 
 test("health alert opens the Needs You queue instead of sending the operator to general settings", async ({ page, request }) => {
@@ -177,7 +175,7 @@ test("health alert opens the Needs You queue instead of sending the operator to 
   await page.goto(`/chat?agentId=${base.agent.id}&presenceId=${presenceId}`);
   const notice = page.getByTestId("operator-chat-needs-you");
   await expect(notice).toBeVisible();
-  await notice.getByRole("button", { name: "Review details", exact: true }).click();
+  await notice.getByRole("button", { name: "Review decision", exact: true }).click();
   const queue = page.getByTestId("needs-you-queue");
   await expect(queue).toBeVisible();
   await expect(queue.getByRole("heading", { name: "Needs You", exact: true })).toBeVisible();
@@ -271,11 +269,11 @@ test("Week keeps unscheduled open Assignments visible without inventing timing",
   expect(created.ok()).toBeTruthy();
 
   await page.goto(`/schedule?agentId=${base.agent.id}&presenceId=${presenceId}`);
-  await expect(page.getByRole("heading", { name: "What Genny may work on", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Week", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Calendar", exact: true }).click();
 
-  const week = page.getByRole("region", { name: /Weekly schedule/ });
-  await expect(week.getByRole("heading", { name: "Responsibilities within a few hours", exact: true })).toBeVisible();
+  const week = page.getByRole("region", { name: "Tasks without a fixed start time" });
+  await expect(week.getByRole("heading", { name: "No fixed start time", exact: true })).toBeVisible();
   await expect(week.getByText(instruction, { exact: true })).toBeVisible();
   await expect(week.getByRole("heading", { name: "Nothing shown on this calendar", exact: true })).toHaveCount(0);
 });

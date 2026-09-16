@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { useWorkspaceSurface } from "@/lib/use-workspace-surface";
+import { useCallback, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, CircleSlash2, Eye, Pencil, Plus, Users, X } from "lucide-react";
 import { isCognitionEligibleMirrorObject } from "@/lib/social-context";
 import { peopleForPresence, resolveCanonicalPerson } from "@/lib/network-memory";
 import { readPeopleNote } from "@/lib/people-notes";
 import { autobiographicalEventsForPerson } from "@/lib/autobiographical-memory";
-import type { ChannelDefinition, ChannelId, OpenPresenceState, Presence, RelationshipInsight, RelationshipStudyMode, Watch } from "@/lib/types";
+import type { ChannelDefinition, ChannelId, OpenPresenceState, PersonIdentity, PersonMemorySource, Presence, Relationship, RelationshipInsight, RelationshipStudyMode, Watch } from "@/lib/types";
 
 type Mutate = (operation: unknown, requestContext?: OpenPresenceState) => Promise<OpenPresenceState | null>;
 type RelationshipPolicy = { learning: "off" | "selective"; engagement: "observe_only" | "when_worthwhile" | "maintain_relationship"; rhythm?: "light" | "regular" };
@@ -23,7 +24,6 @@ type PeopleViewProps = {
   PageHeader: PageHeaderComponent;
   ChannelAvatar: ChannelAvatarComponent;
   channelLabel: (channel: ChannelId, definitions?: ChannelDefinition[]) => string;
-  formatTime: (value: string) => string;
   formatDateTime: (value: string) => string;
   watchRelationshipPolicy: (watch: Watch, state: OpenPresenceState) => RelationshipPolicy | undefined;
   watchPolicyFromPurpose: (purpose?: string) => RelationshipPolicy | undefined;
@@ -40,7 +40,23 @@ const REQUEST_TYPE_OPTIONS = [
   { id: "introduction", label: "Introductions" },
 ] as const;
 
-export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, ChannelAvatar, channelLabel, formatTime, formatDateTime, watchRelationshipPolicy, watchPolicyFromPurpose, watchPlanSummary, onOpenWatchlist, initialFilterMode }: PeopleViewProps) {
+function memorySourceForPerson(person: { memorySource?: PersonMemorySource }, identity?: PersonIdentity, relationship?: Relationship): PersonMemorySource | undefined {
+  // Legacy manually-added people can be identified from the operator-confirmed
+  // identity evidence. Interaction history is the next safest inference; if
+  // neither exists, keep the origin unknown rather than claiming authorship.
+  return person.memorySource
+    ?? (identity?.verificationMethod === "operator_confirmed" ? "operator" : undefined)
+    ?? (relationship?.lastMeaningfulInteractionAt ? "agent" : undefined);
+}
+
+function memorySourceLabel(source: PersonMemorySource | undefined, agentName: string) {
+  if (source === "operator") return "Added by you";
+  if (source === "agent") return `Remembered by ${agentName}`;
+  if (source === "watchlist") return "Found via Watchlist";
+  return "Remembered · origin unavailable";
+}
+
+export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, ChannelAvatar, channelLabel, formatDateTime, watchRelationshipPolicy, watchPolicyFromPurpose, watchPlanSummary, onOpenWatchlist, initialFilterMode }: PeopleViewProps) {
   const presence = state.presence ?? state.presences[0];
   const agentName = state.agent?.name ?? "the Agent";
   const [query, setQuery] = useState("");
@@ -59,6 +75,9 @@ export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, 
   const [studyError, setStudyError] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteBusy, setNoteBusy] = useState(false);
+  const detailRef = useRef<HTMLElement>(null);
+  const closeDetail = useCallback(() => setSelectedId(null), []);
+  useWorkspaceSurface(detailRef, Boolean(selectedId), closeDetail);
   if (!presence) return null;
 
   const visiblePeople = peopleForPresence(state, presence).filter((person) => {
@@ -180,17 +199,17 @@ export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, 
   };
   const insightEvidence = (insight: RelationshipInsight) => insight.evidenceRefs.map((ref) => {
     const mirror = ref.kind === "mirror_object" ? state.mirrorObjects.find((item) => item.id === ref.id) : undefined;
-    return <details className="relationship-insight-evidence" key={`${insight.id}:${ref.id}`}><summary>Why does {agentName} think this?</summary><p>{mirror?.content?.text ?? "This evidence is recorded in the relationship study receipt."}</p><small>{mirror ? formatTime(mirror.occurredAt ?? mirror.observedAt) : ref.kind.replaceAll("_", " ")}</small></details>;
+    return <details className="relationship-insight-evidence" key={`${insight.id}:${ref.id}`}><summary>Why does {agentName} think this?</summary><p>{mirror?.content?.text ?? "This evidence is recorded in the relationship study receipt."}</p><small>{mirror ? formatDateTime(mirror.occurredAt ?? mirror.observedAt) : ref.kind.replaceAll("_", " ")}</small></details>;
   });
 
   return <div className="people-page">
     <PageHeader
       className="people-header"
-      eyebrow="Presence relationships"
+      eyebrow={presence.name}
       title="People"
-      description={<>People is {presence.name}&apos;s relationship memory: who the Agent knows, follows, and has boundaries with. Use Watchlist to tell it what to monitor; noticing someone does not automatically create a relationship.</>}
+      description={`The people ${presence.name} knows and the conversations worth continuing.`}
       actionsClassName="heading-actions"
-      actions={<><Button variant="secondary" onClick={onOpenWatchlist}><Eye size={14} /> Open Watchlist</Button><Button variant="primary" onClick={() => setRemembering((value) => !value)}><Plus size={14} /> Remember a person</Button></>}
+      actions={<><Button variant="secondary" onClick={onOpenWatchlist}><Eye size={14} /> Watchlist</Button><Button variant="primary" onClick={() => setRemembering((value) => !value)}><Plus size={14} /> Add person</Button></>}
     />
     {remembering && <section className="people-composer" aria-label="Remember a person">
       <div><SectionEyebrow>Explicit memory</SectionEyebrow><h2>Who should {presence.name} remember?</h2><p>This creates identity context without inventing prior interaction history.</p></div>
@@ -198,9 +217,9 @@ export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, 
       <div className="people-form-actions"><Button variant="ghost" onClick={() => setRemembering(false)}>Cancel</Button><Button variant="primary" disabled={!rememberName.trim() || !rememberExternalId.trim()} onClick={() => void remember()}>Remember</Button></div>
     </section>}
     <div className="people-toolbar" style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-      <div style={{ display: "flex", gap: "4px" }}>
-        <button type="button" className={`button button-small ${filterMode === "all" ? "button-secondary" : "button-ghost"}`} onClick={() => setFilterMode("all")}>All Remembered</button>
-        <button type="button" className={`button button-small ${filterMode === "following" ? "button-secondary" : "button-ghost"}`} onClick={() => setFilterMode("following")}>Following · Verified</button>
+      <div className="people-filter-tabs" role="group" aria-label="Filter people">
+        <button type="button" className={`button button-small ${filterMode === "all" ? "button-secondary" : "button-ghost"}`} onClick={() => setFilterMode("all")}>Everyone</button>
+        <button type="button" className={`button button-small ${filterMode === "following" ? "button-secondary" : "button-ghost"}`} onClick={() => setFilterMode("following")}>Following</button>
         <button type="button" className={`button button-small ${filterMode === "watched" ? "button-secondary" : "button-ghost"}`} onClick={() => setFilterMode("watched")}>Watched</button>
         <button type="button" className={`button button-small ${filterMode === "boundaries" ? "button-secondary" : "button-ghost"}`} onClick={() => setFilterMode("boundaries")}>Boundaries</button>
       </div>
@@ -213,6 +232,7 @@ export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, 
       const followed = isPersonFollowed(person.id);
       const blocked = identity?.contactability?.status === "blocked_by_person";
       const displayInfo = resolveCanonicalPerson(state, person.id, presence.id);
+      const memorySource = memorySourceForPerson(person, identity, rel);
       const avatarUrl = displayInfo.avatarUrl ?? identity?.avatarUrl ?? state.mirrorObjects.find((item) => item.presenceId === presence.id && (item.environment ?? "live") === (presence.environment ?? "live") && item.author?.externalRef?.id === identity?.externalActorId)?.author?.avatarUrl;
 
       return <button type="button" className={`people-row ${blocked ? "people-row-blocked" : ""} ${selected?.id === person.id ? "active" : ""}`} key={person.id} onClick={() => { const closing = selected?.id === person.id; setSelectedId(closing ? null : person.id); setNoteDraft(closing ? "" : readPeopleNote(state, presence.id, person.id)?.markdown ?? ""); setFactPage(1); }}>
@@ -222,10 +242,10 @@ export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, 
           <small>
             {displayInfo.handleLabel}
             {" · "}
-            {rel?.lastMeaningfulInteractionAt ? `Last interacted ${formatTime(rel.lastMeaningfulInteractionAt)}` : "Remembered explicitly"}
+            {rel?.lastMeaningfulInteractionAt ? `Last interacted ${formatDateTime(rel.lastMeaningfulInteractionAt)}` : memorySourceLabel(memorySource, agentName)}
             {blocked ? " · Blocked this Presence" : followed ? " · Following · Verified" : ""}
           </small>
-          <span>{blocked ? "Automatic follow and interaction attempts are suppressed." : followed ? "Following to stay aware of their contributions." : rel?.lastMeaningfulInteractionAt ? "Relationship context available." : "Remembered explicitly."}</span>
+
         </span>
         <span className="people-row-trailing">
           {blocked && <span className="people-boundary-badge" aria-label="No contact: this person blocked this Presence"><CircleSlash2 size={11} /> No contact</span>}
@@ -233,7 +253,7 @@ export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, 
         </span>
       </button>;
     })}</section>
-    {selected && <section className="person-inspector" aria-label={`${selectedDisplayInfo.displayName} relationship`}>
+    {selected && <section ref={detailRef} className="person-inspector" aria-label={`${selectedDisplayInfo.displayName} relationship`}>
       <div className="person-inspector-heading">
         <div>
           <SectionEyebrow>Person</SectionEyebrow>
@@ -270,10 +290,10 @@ export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, 
         <div style={{ display: "grid", gap: "6px", fontSize: "13px", marginTop: "6px" }}>
           <div><strong>Status:</strong> {selectedIsBlocked ? "Blocked this Presence on X" : selectedIsFollowed ? "Following · Verified on X" : "Not followed"}</div>
           {selectedIsBlocked && <div className="people-contactability-note"><strong>Automation:</strong> No reply, like, repost, quote, or follow candidates will be created for this person. An explicit operator-requested action can check again; a verified success updates this status.</div>}
-          {selectedIsBlocked && selectedIdentity?.contactability?.observedAt && <div><strong>Observed:</strong> {formatTime(selectedIdentity.contactability.observedAt)}</div>}
+          {selectedIsBlocked && selectedIdentity?.contactability?.observedAt && <div><strong>Observed:</strong> {formatDateTime(selectedIdentity.contactability.observedAt)}</div>}
           {selectedIsWatched && <div><strong>Watch:</strong> Active watchlist target</div>}
           <div><strong>Interactions:</strong> {recentHistory.length} recorded interaction{recentHistory.length === 1 ? "" : "s"}</div>
-          {relationship?.lastMeaningfulInteractionAt && <div><strong>Last interaction:</strong> {formatTime(relationship.lastMeaningfulInteractionAt)}</div>}
+          {relationship?.lastMeaningfulInteractionAt && <div><strong>Last interaction:</strong> {formatDateTime(relationship.lastMeaningfulInteractionAt)}</div>}
           {followDecisionSummary && <details className="person-reason person-follow-reason">
             <summary><span>Why {presence.name} followed</span><ChevronRight size={14} /></summary>
             <p>{followDecisionSummary}</p>
@@ -302,7 +322,7 @@ export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, 
       </div>}
 
       <div className="person-inspector-section relationship-study-section">
-        <div className="relationship-study-heading"><div><SectionEyebrow>Relationship understanding</SectionEyebrow><h3>{latestStudy ? `Last studied ${formatTime(latestStudy.completedAt ?? latestStudy.createdAt)}` : `${agentName} hasn't studied ${selectedDisplayInfo.displayName} yet`}</h3></div><span className="relationship-study-status">{latestInsights ? "Evidence-backed" : "Basic context"}</span></div>
+        <div className="relationship-study-heading"><div><SectionEyebrow>Relationship understanding</SectionEyebrow><h3>{latestStudy ? `Last studied ${formatDateTime(latestStudy.completedAt ?? latestStudy.createdAt)}` : `${agentName} hasn't studied ${selectedDisplayInfo.displayName} yet`}</h3></div><span className="relationship-study-status">{latestInsights ? "Evidence-backed" : "Basic context"}</span></div>
         <p>{latestStudy ? `${latestStudy.evidenceRefs.length} evidence item${latestStudy.evidenceRefs.length === 1 ? "" : "s"} reviewed${newStudyEvidenceCount ? ` · ${newStudyEvidenceCount} new since then` : ""}.` : "Watching collects evidence cheaply. Learn this person is an explicit research action and does not happen automatically."}</p>
         {latestInsights && <div className="relationship-briefing"><div><strong>Current approach</strong><p>{selectedIsBlocked ? "Observe the verified boundary. Do not interact with, target, or research this person for engagement." : latestInsights.currentApproach.statement}</p>{!selectedIsBlocked && insightEvidence(latestInsights.currentApproach)}</div>{[...latestInsights.interests, ...latestInsights.currentFocus, ...latestInsights.publicInteractionPatterns, ...latestInsights.directRelationshipPatterns].slice(0, 6).map((insight) => <div key={insight.id}><strong>{insight.category.replaceAll("_", " ")}</strong><p>{insight.statement}</p><small className="relationship-insight-confidence">{insight.confidence}</small>{insightEvidence(insight)}</div>)}</div>}
         {latestStudy && <small className="relationship-study-receipt">Receipt · {latestStudy.resourceUsage.channelReads} X reads · {latestStudy.resourceUsage.hydrations} hydrations · {latestStudy.resourceUsage.modelCalls} model calls · {latestStudy.resourceUsage.visionCalls} vision calls</small>}
@@ -318,10 +338,10 @@ export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, 
         <p>Private Markdown context for {presence.name} and this person. It stays scoped to this Presence and is only supplied when judging their request.</p>
         <textarea aria-label={`Presence note for ${selectedDisplayInfo.displayName}`} value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} rows={5} placeholder="A small note that may help this Presence understand future requests…" />
         <Button variant="secondary" disabled={noteBusy} onClick={() => void savePeopleNote()}>{noteBusy ? "Saving…" : "Save Presence note"}</Button>
-        {selectedNote && <small>Revision {selectedNote.revision} · updated {formatTime(selectedNote.updatedAt)}</small>}
+        {selectedNote && <small>Revision {selectedNote.revision} · updated {formatDateTime(selectedNote.updatedAt)}</small>}
       </div>
       <div className="person-inspector-section"><SectionEyebrow>Open threads</SectionEyebrow>{loops.length ? <ul>{loops.map((loop) => <li key={loop.id}>{loop.description}</li>)}</ul> : <p>No open loops.</p>}</div>
-      <div className="person-inspector-section"><SectionEyebrow>Recent interactions</SectionEyebrow>{recentHistory.length ? <div className="person-history">{recentHistory.map((item) => <article key={item.id}><small>{formatTime(item.occurredAt ?? item.observedAt)}</small><p>{item.content?.text ?? "[no text]"}</p></article>)}</div> : <p>No Mirror-backed interactions yet.</p>}</div>
+      <div className="person-inspector-section"><SectionEyebrow>Recent interactions</SectionEyebrow>{recentHistory.length ? <div className="person-history">{recentHistory.map((item) => <article key={item.id}><small>{formatDateTime(item.occurredAt ?? item.observedAt)}</small><p>{item.content?.text ?? "[no text]"}</p></article>)}</div> : <p>No Mirror-backed interactions yet.</p>}</div>
       <div className="person-inspector-section person-request-access-section"><SectionEyebrow>Public request access</SectionEyebrow><p>{selectedDelegationGrant ? "This person has an explicit delegation grant for the allowed request types." : "Watching and remembering this person does not allow them to ask the Presence to do work."}</p><Button variant="secondary" onClick={() => void toggleSelectedDelegation()} disabled={!selectedIdentity || delegationBusy}>{selectedDelegationGrant ? "Revoke request access" : "Allow this person to submit requests"}</Button><small>The grant is only considered when the Presence policy is set to People I allow. Requests still enter operator review.</small></div>
       <div className="person-inspector-actions"><Button variant="ghost" onClick={() => void mutate({ type: "forgetRelationship", relationshipId: relationship?.id })} disabled={!relationship}>Forget relationship</Button><Button variant="ghost" disabled={selectedIsBlocked} onClick={() => void mutate({ type: "createWatch", presenceId: presence.id, query: selectedIdentity?.handle ?? selected.displayName, purpose: "Keep this person in attention without treating Watching as relationship memory." })}>{selectedIsBlocked ? "Watch paused by boundary" : "Watch"}</Button></div>
       {relationship && <div className="person-correction"><label>Correct memory<textarea aria-label="Correct relationship memory" value={correction} onChange={(event) => setCorrection(event.target.value)} placeholder="What should the Agent remember instead?" rows={3} /></label><Button variant="secondary" disabled={!correction.trim()} onClick={() => void correct()}><Pencil size={14} /> Save correction</Button></div>}

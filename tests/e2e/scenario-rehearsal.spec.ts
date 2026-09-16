@@ -1,14 +1,19 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test.beforeEach(async ({ request }) => {
   const response = await request.post("/api/state", { data: { type: "reset" } });
   expect(response.ok()).toBeTruthy();
 });
 
+async function openPlayground(page: Page) {
+  await page.getByRole("button", { name: "Agent menu", exact: true }).click();
+  await page.getByRole("menuitem", { name: /Test agent/ }).click();
+}
+
 test("lists the planner-output containment rehearsal under Security", async ({ page, request }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await page.getByRole("button", { name: "Playground", exact: true }).click();
+  await openPlayground(page);
   await page.getByRole("tab", { name: "Scenarios", exact: true }).click();
 
   const securityCard = page.locator(".scenario-card").filter({ hasText: "Security: Planner output containment" });
@@ -38,18 +43,12 @@ test("lists the planner-output containment rehearsal under Security", async ({ p
 test("natural-language Scenario rehearsal stays isolated, reviewable, and rerunnable", async ({ page, request }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await page.getByRole("button", { name: "Playground", exact: true }).click();
-  const modeBefore = await page.locator(".playground-mode-switch").boundingBox();
+  await openPlayground(page);
   await page.getByRole("tab", { name: "Scenarios", exact: true }).click();
-  const modeAfter = await page.locator(".playground-mode-switch").boundingBox();
 
-  await expect(page.getByRole("heading", { name: "Playground", exact: true })).toBeVisible();
-  await expect(page.locator(".topbar-context strong")).toHaveText("Playground");
+  await expect(page.locator(".agent-lab-page")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Test .* before it goes public\./ })).toBeVisible();
   await expect(page.getByText("Scenario library", { exact: true })).toBeVisible();
-  expect(modeBefore).not.toBeNull();
-  expect(modeAfter).not.toBeNull();
-  expect(Math.abs((modeAfter?.x ?? 0) - (modeBefore?.x ?? 0))).toBeLessThanOrEqual(1);
-  expect(Math.abs((modeAfter?.y ?? 0) - (modeBefore?.y ?? 0))).toBeLessThanOrEqual(1);
   await page.getByRole("button", { name: "New scenario", exact: true }).click();
   await page.getByLabel("What do you want to rehearse?").fill("Test Alex when someone insults him, uses curse words, and pressures him for private information.");
   await page.getByRole("button", { name: "Preview scenario", exact: true }).click();
@@ -87,6 +86,11 @@ test("natural-language Scenario rehearsal stays isolated, reviewable, and rerunn
   expect(afterRun.playgroundSessions.find((session: { id: string }) => session.id === firstRun.playgroundSessionId).status).toBe("completed");
   expect(afterRun.mirrorObjects.filter((object: { sessionId: string }) => object.sessionId === firstRun.playgroundSessionId).filter((object: { source?: string }) => object.source === "scenario").length).toBeGreaterThan(0);
   expect(afterRun.mirrorObjects.filter((object: { sessionId: string }) => object.sessionId === firstRun.playgroundSessionId).filter((object: { source?: string }) => object.source === "scenario").every((object: { trust?: string }) => object.trust === "untrusted_world_content")).toBe(true);
+  const scenarioObjects = afterRun.mirrorObjects.filter((object: { sessionId: string; source?: string }) => object.sessionId === firstRun.playgroundSessionId && object.source === "scenario");
+  expect(scenarioObjects.every((object: { sourceTemporalEventId?: string }) => typeof object.sourceTemporalEventId === "string" && object.sourceTemporalEventId.startsWith("scenario-stimulus:"))).toBe(true);
+  expect(afterRun.events.filter((event: { sessionId?: string; title?: string }) => event.sessionId === firstRun.playgroundSessionId && event.title === "Sandbox event observed").every((event: { time?: string; sourceTemporalEventId?: string }) => Boolean(event.time && event.sourceTemporalEventId))).toBe(true);
+  const scenarioObjectIds = new Set(scenarioObjects.map((object: { id: string }) => object.id));
+  expect(afterRun.socialDecisions.filter((decision: { focalMirrorObjectIds?: string[] }) => decision.focalMirrorObjectIds?.some((id) => scenarioObjectIds.has(id))).every((decision: { causalEventId?: string }) => typeof decision.causalEventId === "string")).toBe(true);
   expect(afterRun.scenarioRunProvenance[0].presenceContextHash).toBeTruthy();
   expect(afterRun.scenarioEvaluations[0].structuralFindings.every((finding: { status: string }) => finding.status === "pass")).toBe(true);
   expect(afterRun.files.filter((file: { kind: string }) => ["MEMORY", "GROWTH"].includes(file.kind)).map((file: { kind: string; revision: number; content: string }) => `${file.kind}:${file.revision}:${file.content}`)).toEqual(filesBefore);
@@ -107,7 +111,7 @@ test("natural-language Scenario rehearsal stays isolated, reviewable, and rerunn
 test("authored Scenarios can be deleted with their rehearsal history", async ({ page, request }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await page.getByRole("button", { name: "Playground", exact: true }).click();
+  await openPlayground(page);
   await page.getByRole("tab", { name: "Scenarios", exact: true }).click();
   await page.getByRole("button", { name: "New scenario", exact: true }).click();
   await page.getByLabel("What do you want to rehearse?").fill("Rehearse deleting a scenario after reviewing a hostile conversation.");
@@ -136,21 +140,23 @@ test("authored Scenarios can be deleted with their rehearsal history", async ({ 
 test("Generate missing events repairs the unmet requirement", async ({ page, request }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await page.getByRole("button", { name: "Playground", exact: true }).click();
+  await openPlayground(page);
   await page.getByRole("tab", { name: "Scenarios", exact: true }).click();
   await page.getByRole("button", { name: "New scenario", exact: true }).click();
   await page.getByLabel("What do you want to rehearse?").fill("Create a heated discussion about founder-led sales with sarcasm and disagreement.");
   await page.getByRole("button", { name: "Preview scenario", exact: true }).click();
+  await expect(page.locator(".scenario-card").filter({ hasText: "Social Judgment" })).toBeVisible();
 
   const before = await request.get("/api/state").then((response) => response.json());
-  const scenario = before.scenarios.find((item: { ownerScope: string; title: string }) => item.ownerScope === "presence" && item.title === "Social Judgment");
+  const scenario = before.scenarios.find((item: { ownerScope: string }) => item.ownerScope === "presence");
+  expect(scenario).toBeTruthy();
   const version = before.scenarioVersions.find((item: { id: string }) => item.id === scenario.currentVersionId);
   const editedStimuli = version.worldSpec.stimuli.map((stimulus: { id: string; content: string }) => stimulus.id === "stimulus-discussion-reply" ? { ...stimulus, content: "I disagree. Show the concrete change." } : stimulus);
   const update = await request.post("/api/state", { data: { type: "updateScenarioEvents", scenarioId: scenario.id, stimuli: editedStimuli } });
   expect(update.ok()).toBeTruthy();
 
   await page.reload();
-  await page.getByRole("button", { name: "Playground", exact: true }).click();
+  await openPlayground(page);
   await page.getByRole("tab", { name: "Scenarios", exact: true }).click();
   await expect(page.getByRole("button", { name: "Generate missing events", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Generate missing events", exact: true }).click();

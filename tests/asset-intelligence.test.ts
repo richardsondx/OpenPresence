@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { normalizeAssetCandidates, materializeCandidate, TavilyAssetDiscoveryProvider } from "@/lib/asset-discovery";
+import { normalizeAssetCandidates, materializeCandidate, previewCandidate, TavilyAssetDiscoveryProvider } from "@/lib/asset-discovery";
 import { fetchPublicAsset, putAssetBytes, readAssetBytes } from "@/lib/asset-store";
 import { duplicateContext, epistemicState, usageFor } from "@/lib/asset-intelligence";
 import type { Asset, AssetUsage } from "@/lib/types";
@@ -99,6 +99,17 @@ describe("Asset Intelligence Runtime", () => {
       expect(result.asset.provenance.sourceIdentityStatus).toBe("unknown");
       expect(result.sourceEvidence?.assetIds).toContain(result.asset.id);
       expect(result.asset.rights?.status).toBe("unknown");
+    } finally { globalThis.fetch = original; }
+  });
+
+  it("keeps rejected visual previews in memory instead of the durable Asset store", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => new Response(Buffer.from("preview-image"), { status: 200, headers: { "content-type": "image/png" } })) as typeof fetch;
+    try {
+      const result = await previewCandidate({ id: "preview", query: "topic", name: "Candidate chart", mediaUrl: "https://cdn.example.com/chart.png", sourcePageUrl: "https://publisher.example/chart", provider: "test" }, { agentId: "agent", presenceId: "presence", environment: "sandbox" });
+      expect(result.asset.storage).toBeUndefined();
+      expect(result.asset.dataUrl).toMatch(/^data:image\/(?:png|jpeg);base64,/);
+      expect(result.asset.retention).toBe("ephemeral");
     } finally { globalThis.fetch = original; }
   });
 

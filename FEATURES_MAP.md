@@ -47,7 +47,7 @@ The Agent owns **what is worth doing**. The operator owns **how a Presence may a
 | Knowledge library | Agent with Presence access | Knowledge / Manage Agent / Settings | `lib/knowledge.ts`, `app/api/knowledge/route.ts` | `tests/knowledge.test.ts`, `tests/e2e/knowledge.spec.ts` |
 | Presence identity, Ghost, brief, public self | Presence | Settings | `PresenceView`, `lib/runtime.ts`, `lib/types.ts` | `tests/presence-identity.test.ts`, `tests/identity-boundary.test.ts` |
 | Attention rhythm and publishing initiative | Presence | Settings / Schedule | `attention-governor`, publishing-plan runtime | `tests/attention-governor.test.ts`, `tests/publishing-plan.test.ts` |
-| Operator Chat, Teach, Rehearsal | Agent / Presence | Chat / Teach / Rehearsal | `OperatorChatView`, `TeachView`, `PresenceChatView` | `tests/conversation-boundary.test.ts`, `tests/activity-chat-truth.spec.ts`, `tests/scenario-rehearsal.spec.ts` |
+| Operator Chat, Teach, Rehearsal | Agent / Presence | Chat / Teach / Rehearsal | `OperatorChatView`, `TeachView`, `PresenceChatView`, `lib/operator-chat-harness.ts` | `tests/conversation-boundary.test.ts`, `tests/activity-chat-truth.spec.ts`, `tests/scenario-rehearsal.spec.ts`, `tests/e2e/natural-supervision.spec.ts`, `qa-learnings/conversation-prompt-evals/` |
 | Activity and autonomy | Presence / Runtime | Activity | `LiveView`, `autonomy-worker`, `activity-now` | `tests/e2e/activity-delivery-trace.spec.ts`, `tests/operational-autonomy.test.ts` |
 | Watching: Watchlist and Explorations | Presence | Watching | `WatchingView`, `lib/runtime.ts`, `autonomy-worker` | `tests/e2e/watching.spec.ts`, `tests/explorations.test.ts` |
 | People and relationships | Presence | People | `PeopleView`, `network-memory`, `conversation-episodes` | `tests/network.test.ts`, `tests/conversation-episodes.test.ts` |
@@ -216,7 +216,7 @@ The user sees Recommended, Gentle, and Custom rhythm; Quiet/Balanced/Curious/Cus
 
 These are three different ways to work with the Agent:
 
-- **Chat** is a private operator conversation that can provide context or create an explicit Assignment.
+- **Chat** is a lightweight supervisory conversation: the Agent operates autonomously, while the operator checks progress, raises concerns, shares opportunities, gives feedback, or asks for a specific action. It can provide context or create an explicit Assignment when the user actually delegates an outcome.
 - **Teach** is an Agent-level teaching conversation for what to notice, protect, pursue, or leave alone; durable meaning still needs the protected-change path.
 - **Rehearsal** is a private Presence-scoped social thread for trying posts/replies without publishing or silently teaching the Agent.
 
@@ -229,7 +229,9 @@ These are three different ways to work with the Agent:
 
 **User POV**
 
-Chat shows link previews, consideration status, assignment handoff, verified actions, and failures. Teach explains that the transcript stays with the Agent while durable meaning belongs in Brain. Rehearsal explicitly says nothing publishes or silently teaches the Agent.
+Chat shows link previews, consideration status, assignment handoff, verified actions, and failures. Supervisory replies should answer the direct point first, take the smallest warranted runtime action, and stay short unless the operator asks for detail. Growth, Calendar, plan, and Activity state are grounded context for these turns. Teach explains that the transcript stays with the Agent while durable meaning belongs in Brain. Rehearsal explicitly says nothing publishes or silently teaches the Agent.
+
+Natural-supervision QA covers realistic utterances such as progress checks, growth concerns, intensity requests, shared posts, breaking opportunities, feedback, and casual strategy questions. It also checks the reverse direction: the Agent may initiate a private update only for a meaningful breakthrough, problem, opportunity, permission need, material strategy change, or useful recap, not for every routine action receipt.
 
 **QA expectations**
 

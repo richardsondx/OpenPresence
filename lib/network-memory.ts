@@ -5,6 +5,7 @@ import type {
   OpenPresenceState,
   Person,
   PersonIdentity,
+  PersonMemorySource,
   Presence,
   Relationship,
   RelationshipContextProjection,
@@ -16,6 +17,12 @@ import type {
 import { languagesMatch } from "./language-policy";
 
 const now = () => new Date().toISOString();
+
+function sourceToMemorySource(source: "operator" | "current-context" | "watched"): PersonMemorySource {
+  if (source === "operator") return "operator";
+  if (source === "watched") return "watchlist";
+  return "agent";
+}
 
 export function evidenceRefFromMirror(object: MirrorObject): EvidenceRef {
   return { kind: "mirror_object", id: object.id, sourcePresenceId: object.presenceId, observedAt: object.observedAt };
@@ -318,8 +325,8 @@ export function createRememberedPerson(
     : (!isPlaceholderIdentity(person?.displayName) ? person!.displayName : candidateName);
 
   const nextPerson: Person = person
-    ? { ...person, displayName: resolvedDisplayName, updatedAt: timestamp }
-    : { id: personId, agentId: input.agentId, displayName: resolvedDisplayName, memoryState: "active", createdAt: timestamp, updatedAt: timestamp };
+    ? { ...person, displayName: resolvedDisplayName, memorySource: person.memorySource ?? (existingIdentity?.verificationMethod === "operator_confirmed" ? "operator" : sourceToMemorySource(input.source)), updatedAt: timestamp }
+    : { id: personId, agentId: input.agentId, displayName: resolvedDisplayName, memoryState: "active", memorySource: sourceToMemorySource(input.source), createdAt: timestamp, updatedAt: timestamp };
 
   const candidateHandle = input.handle?.trim();
   const resolvedHandle = !isPlaceholderIdentity(candidateHandle)

@@ -36,3 +36,12 @@ The Review route must have an active `Review` navigation item, a `Needs You` hea
 - Review is not a second Activity dashboard and must not duplicate the first-run card, right-now summary, or Activity history.
 - Sandbox approvals and incidents remain Sandbox evidence; do not report them as live delivery.
 - A stale or incomplete Activity projection must degrade to a readable fallback, not a client exception.
+
+## Billing recovery guidance (2026-09-13)
+
+X billing incidents show affected tasks in a disclosure and a plain external link to
+X Developer Console. They do not offer a billing button that opens Agent settings.
+The bounded `Check again` action performs a fresh read-only X connection check and
+clears only the stale incident when X accepts the saved credentials; it does not
+claim that a write or publication succeeded. Any blocked Assignment remains
+blocked until its normal worker verifies a real outcome.

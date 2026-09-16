@@ -8,6 +8,8 @@ export const toolActivityLabels: Record<string, string> = {
   search_posts: "Searched posts", search_knowledge: "Searched knowledge", search_assets: "Found media",
   inspect_asset: "Inspected media", relationship_history: "Reviewed relationship history",
   social_action: "Social action", inspect_execution: "Checked delivery", retry_action: "Retried action",
+  retry_assignment: "Checked paused work", learn_social_pattern: "Saved strategy lesson",
+  save_social_template: "Saved strategy template", list_social_playbook: "Read strategy playbook",
 };
 
 export function recordValue(value: unknown): Record<string, unknown> | undefined {
@@ -16,27 +18,51 @@ export function recordValue(value: unknown): Record<string, unknown> | undefined
 const text = (value: unknown) => typeof value === "string" ? value : undefined;
 const records = (value: unknown) => Array.isArray(value) ? value.map(recordValue).filter((item): item is Record<string, unknown> => Boolean(item)) : [];
 
-/** Only system-owned, recognizable tool receipts become activity UI. */
+/** Only system-owned tool receipts become activity UI. Unknown tools still get
+ * a safe generic activity projection instead of leaking their payload. */
 export function chatToolReceipt(message: Pick<OperatorConversationMessage, "role" | "content">) {
   if (message.role !== "system") return undefined;
   try {
     const receipt = recordValue(JSON.parse(message.content));
-    return receipt && typeof receipt.tool === "string" && toolActivityLabels[receipt.tool] ? receipt : undefined;
+    return receipt && typeof receipt.tool === "string" && receipt.tool.trim() ? receipt : undefined;
   } catch { return undefined; }
 }
 
 export function toolActivitySummary(receipt: Record<string, unknown>) {
   const tool = String(receipt.tool);
+  const title = toolActivityLabels[tool] ?? "Completed assistant action";
   const result = recordValue(receipt.result);
   const error = text(receipt.error) ?? text(result?.error);
   const failed = Boolean(error || result?.status === "failed");
+  if (tool === "save_social_template") {
+    const hypothesis = recordValue(result?.hypothesis);
+    const template = recordValue(hypothesis?.template);
+    const templateTitle = text(template?.title) ?? "strategy template";
+    return {
+      title, status: failed ? "Failed" : "Saved", failed,
+      summary: failed ? error ?? "The strategy template could not be saved." : `Saved “${templateTitle}” as an unproven format for future experiments.`,
+      limit: failed ? undefined : "Saving a template does not schedule or publish a post.",
+    };
+  }
+  if (tool === "list_social_playbook") {
+    const templates = Array.isArray(result?.templates) ? result.templates : [];
+    return {
+      title, status: failed ? "Failed" : "Finished", failed,
+      summary: failed ? error ?? "The strategy playbook could not be loaded." : `Found ${templates.length} reusable strategy format${templates.length === 1 ? "" : "s"}.`,
+    };
+  }
+  if (tool === "retry_assignment") return {
+    title, status: failed ? "Still blocked" : result?.status === "queued" ? "Retry queued" : "Not resumed", failed,
+    summary: error ?? text(result?.note) ?? "The task has not been resumed.",
+    limit: "The existing task will report its outcome. A connection check does not confirm publication.",
+  };
   if (tool === "check_connection") {
     const passed = result?.status === "passed";
     const account = text(result?.account)?.replace(/^@/, "");
     const checks = Array.isArray(result?.checks) ? result.checks : [];
     const confirmed = [checks.includes("account authentication") ? "account authentication" : "", checks.includes("recent-post read") ? "reading recent posts" : ""].filter(Boolean);
     return {
-      title: toolActivityLabels[tool], status: failed ? "Failed" : passed ? "Passed" : "Finished", failed,
+      title, status: failed ? "Failed" : passed ? "Passed" : "Finished", failed,
       summary: failed ? error ?? "The connection check failed." : passed ? `${account ? `@${account}: ` : ""}${confirmed.length ? `${confirmed.join(" and ")} worked.` : "The requested check passed."}` : "The check finished without a confirmed result.",
       limit: "Read-only check. Publishing and the credit balance were not tested.",
     };
@@ -50,7 +76,7 @@ export function toolActivitySummary(receipt: Record<string, unknown>) {
   const searchKey: Record<string, string> = { search_web: "sources", search_posts: "posts", search_people: "people", discover_assets: "candidates" };
   const matches = searchKey[tool] && Array.isArray(result?.[searchKey[tool]]) ? result[searchKey[tool]] as unknown[] : tool === "search_assets" && Array.isArray(receipt.result) ? receipt.result : undefined;
   const summary = error ?? (matches ? `Found ${matches.length} ${searchKey[tool] ?? "media items"}.` : deliveryResults.length ? deliveryResults.map((item) => `${text(item.action) ?? "Action"}: ${item.verified === true ? "verified" : text(item.status)?.replaceAll("_", " ").replaceAll("-", " ") ?? "unconfirmed"}`).join(" · ") : text(result?.note) ?? text(receipt.query) ?? text(receipt.instruction) ?? text(recordValue(receipt.post)?.text) ?? "Result available below.");
-  return { title: toolActivityLabels[tool], status, failed: failed || deliveryFailed, summary, limit: receipt.delivered === false ? "No public action was delivered." : undefined };
+  return { title, status, failed: failed || deliveryFailed, summary, limit: receipt.delivered === false ? "No public action was delivered." : undefined };
 }
 
 /** Read historical reports without rewriting their original evidence. */
@@ -79,4 +105,16 @@ export function inspectionReportSummary(evidence: Record<string, unknown>): stri
     latest ? `Latest recorded delivery failure${failureDate ? ` (${failureDate})` : ""}: ${text(latest.message) ?? "No error detail was saved."}` : "No delivery failures appear in this saved history.",
     "These records don’t confirm whether the spending-limit issue is fixed now. No public action was taken.",
   ].join("\n\n");
+}
+
+/** Route projections may omit timestamps while the Chat snapshot is loading. */
+export function compareRecentChatAssignments(left: { updatedAt?: string; createdAt?: string }, right: { updatedAt?: string; createdAt?: string }) {
+  const time = (item: typeof left) => {
+    for (const value of [item.updatedAt, item.createdAt]) {
+      const parsed = typeof value === "string" ? Date.parse(value) : NaN;
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return 0;
+  };
+  return time(right) - time(left);
 }

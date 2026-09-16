@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { networkSearchInstruction, searchNetwork, searchSandboxNetwork } from "../lib/network";
-import { normalizePersonIdentityScopes, relationshipIdentity, relationshipProjection } from "../lib/network-memory";
+import { createRememberedPerson, normalizePersonIdentityScopes, relationshipIdentity, relationshipProjection } from "../lib/network-memory";
 import type { SandboxActor } from "../lib/types";
 import { addSandboxEvent, applyOperation, createAgent, deliverSandboxExecution, formSandboxIntent, recordSandboxNetworkSearch, startPlaygroundSession } from "../lib/runtime";
 
@@ -31,6 +31,39 @@ const actors: SandboxActor[] = [
 ];
 
 describe("sandbox network search", () => {
+  it("records whether relationship memory came from the operator, Agent, or Watchlist", () => {
+    const state = createAgent({ name: "Jenny", description: "Connect thoughtful builders.", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
+    const presenceId = state.presence!.id;
+    const operatorAdded = createRememberedPerson({
+      agentId: state.agent!.id,
+      presenceId,
+      channel: "x",
+      externalActorId: "operator-person",
+      displayName: "Operator Person",
+      source: "operator",
+    }, state.people, state.personIdentities, state.relationships);
+    const agentRemembered = createRememberedPerson({
+      agentId: state.agent!.id,
+      presenceId,
+      channel: "x",
+      externalActorId: "agent-person",
+      displayName: "Agent Person",
+      source: "current-context",
+    }, state.people, state.personIdentities, state.relationships);
+    const watchlistFound = createRememberedPerson({
+      agentId: state.agent!.id,
+      presenceId,
+      channel: "x",
+      externalActorId: "watchlist-person",
+      displayName: "Watchlist Person",
+      source: "watched",
+    }, state.people, state.personIdentities, state.relationships);
+
+    expect(operatorAdded.person.memorySource).toBe("operator");
+    expect(agentRemembered.person.memorySource).toBe("agent");
+    expect(watchlistFound.person.memorySource).toBe("watchlist");
+  });
+
   it("returns evidence-bearing candidates and preserves introduction consent", () => {
     const result = searchSandboxNetwork(actors, "session-1", "Former military veterans near Detroit who do security");
     expect(result.status).toBe("matches");

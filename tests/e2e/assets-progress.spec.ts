@@ -25,5 +25,8 @@ test("folder import shows file progress and completes with rendered assets", asy
   await expect(progress).toContainText("Import complete", { timeout: 30_000 });
   await page.screenshot({ path: test.info().outputPath("assets-progress-complete.png"), fullPage: false });
   await expect(page.locator(".asset-card")).toHaveCount(5);
+  await expect(page.locator(".asset-card img")).toHaveCount(4);
+  await expect(page.locator(".asset-card video")).toHaveCount(1);
+  await expect.poll(async () => page.locator(".asset-card img").evaluateAll((images) => images.every((image) => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0))).toBe(true);
   await expect(page.getByText("Used 0×", { exact: false }).first()).toBeVisible();
 });

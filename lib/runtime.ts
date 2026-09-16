@@ -1,3 +1,5 @@
+import { recordPlaybookMilestones } from "./playbook-milestones";
+import { assertAssignmentWindowOpen } from "./assignment-timeframe";
 import type { ActionRecord, ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, AgendaHorizon, AgendaItem, AgendaCompilation, AgendaWorkItem, AgendaWatchingItem, Asset, Assignment, AssignmentDelegationPolicy, AssignmentPlan, AssignmentPreflight, AssignmentQuantityMode, AssignmentReadinessCheck, AssignmentRun, AssignmentPursuitWindow, AssignmentPursuitAction, AssignmentPursuitResourceBudget, AttentionTest, AttentionTestMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, ExplorationBrief, ExplorationFinding, ExplorationSession, ExplorationSessionStatus, FileKind, FileProposal, GhostProfile, GhostRepresentation, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, OperatorDirective, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, ResourceUsageEvent, RuntimeScope, SandboxAssetInput, SelfDirectedAttentionPolicy, SocialAssetKind, SocialDecision, SocialDecisionConfidence, SocialDecisionKind, SocialIntent, SocialOrigin, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, PublicRequestType, PublicRequestDisposition, PresenceRequestPolicy, DelegationGrant, RelationshipPolicy, RelationshipLearningMode, RelationshipEngagementMode, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding, PublishingInitiative, PublishingInitiativeProgress, PublishingPlan, PublishingPlanDraft, PublishingPlanWorkEvent, PresenceCapability, PresenceCapabilityManifest, PublicationMetricSnapshot, PresenceAudienceSnapshot, CapabilityTrial } from "./types";
 import { AGENT_CAPABILITY_DEFINITIONS, CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
 import { buildScenarioFromPrompt, builtinScenarioDefinitions, repairScenarioStimuli, scenarioFromImport, stableHash, validateScenarioFidelity } from "./scenarios";
@@ -15,7 +17,7 @@ import type { RelationshipVisibility } from "./types";
 import { addKnowledgeItem, archiveKnowledgeCollection, archiveKnowledgeDocument, archiveKnowledgeItem, createKnowledgeCollection, createKnowledgeDocument, migrateKnowledgeState, saveKnowledgeDocument, setKnowledgeAccess, setMindFileKnowledgeBinding, setKnowledgeBinding, updateKnowledgeCollection, uploadKnowledgeVersion } from "./knowledge";
 import { applyAssetLibraryOperation, authorizeAssetSelection, liveAssetReuseReason, normalizeAssetLibraryState, normalizeAssetReuseCooldownMonths } from "./asset-library";
 import { evaluateExecutionReadiness } from "./execution-readiness";
-import { xCreditsExhausted } from "./x-credits";
+import { isXCreditsError, xCreditsExhausted } from "./x-credits";
 import { getDefaultCurationSources, normalizeCurationSources, seedDefaultEditorialReferences } from "./editorial-curation";
 import { assignmentRunIsActive, isTerminalDuplicateExecution, reconcileLiveAssignmentRuns, settleTerminalDuplicateAssignment } from "./live-assignment-run";
 export { assignmentRunIsActive } from "./live-assignment-run";
@@ -23,14 +25,19 @@ import { BUILTIN_CONVERSATION_STYLES, DEFAULT_CONVERSATION_STYLE_ID } from "./co
 import { AGENT_AVATAR_VARIANTS, defaultAvatarLook, defaultAvatarVariant } from "./avatars";
 import { autobiographicalExpressionSafetyReason, retrievePublicSafeAutobiographicalContext } from "./autobiographical-memory";
 import { growthEvidenceIsInPresenceScope, growthPublicationIsInPresenceScope, growthWindowStartAt, presenceGrowthBoundary } from "./growth-scope";
-import { applyGrowthHypothesisActions, compileSocialStrategyContext, ensureGrowthEvidenceRecords, legacyChannelStrategyGuidance, strategyUseFromDecision } from "./social-strategy";
+import { applyGrowthHypothesisActions, compileSocialStrategyContext, ensureDefaultSocialTemplates, ensureGrowthEvidenceRecords, legacyChannelStrategyGuidance, strategyUseFromDecision } from "./social-strategy";
 import { xPostIdFromUrl } from "./x-url";
 import { hasObservedOwnReplyForTarget } from "./duplicate-public-outcome";
+import { recordLearningCounterfactualInPlace } from "./learning-runtime";
+import { recordAgentInitiatedUpdate } from "./operator-initiated-communication";
+import { SandboxTemporalKernel } from "./sandbox-temporal";
+import type { TemporalEvent } from "./sandbox-temporal";
 
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 const channelName = (channel: ChannelId) => channel === "x" ? "X" : channel === "linkedin" ? "LinkedIn" : channel === "substack" ? "Substack" : channel;
 const providerName = (provider: import("./types").ModelProvider) => provider === "openai" ? "OpenAI" : provider === "openrouter" ? "OpenRouter" : provider === "ollama" ? "Ollama" : provider === "anthropic" ? "Anthropic" : provider === "gemini" ? "Gemini" : provider === "custom" ? "Custom" : provider;
+const localDateKey = (value: Date) => `${value.getFullYear()}-${value.getMonth() + 1}-${value.getDate()}`;
 
 // Normalization is a process-local read/transition boundary, not durable
 // state. Keep the marker short-lived so time-sensitive repairs (expiry,
@@ -181,7 +188,7 @@ const fileContent = (kind: FileKind, input: CreateAgentInput, presence?: Presenc
 };
 
 export function initialState(): OpenPresenceState {
-  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], operatorThreads: [], operatorConversations: [], operatorNudges: [], agentRequests: [], capabilityChangeEvents: [], events: [], socialDecisions: [], socialStrategyRetrievalRuns: [], growthHypotheses: [], growthEvidenceRecords: [], legacyChannelStrategyGuidance: legacyChannelStrategyGuidance(builtinChannelDefinitions()), autobiographicalEvents: [], autobiographicalReflections: [], resourceUsageEvents: [], attentionEpisodes: [], calendar: [], assignments: [], growthReviews: [], growthRevisions: [], growthEvidenceSnapshots: [], growthFileVersions: [], audienceSnapshots: [], publicationMetricSnapshots: [], watches: [], watchSignals: [], relationshipPolicies: [], relationshipStudies: [], relationshipInsightSets: [], presenceRequestPolicies: [], delegationGrants: [], publicRequests: [], explorations: [], discoveryPlans: [], explorationSessions: [], explorationFindings: [], actions: [], publishingPlans: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], assetProviderConnections: [], toolBindings: [], changeSets: [], standingIntents: [], operatorDirectives: [], socialIntents: [], executions: [], outcomes: [], attentionTests: [], capabilityTrials: [], publications: [], assetUsages: [], sourceEvidence: [], claimGrounding: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], assetResearchSessions: [], assetCollections: [], assetCollectionMemberships: [], assetMetadataEdits: [], assetProcessingJobs: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], conversationEpisodes: [], assignmentContributions: [], people: [], peopleNotes: [], personIdentities: [], relationships: [], relationshipFacts: [], relationshipOpenLoops: [], recommendationRecords: [], introductionRecords: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], knowledgeDocuments: [], knowledgeVersions: [], knowledgeSegments: [], presenceKnowledgeAccess: [], mindFileKnowledgeBindings: [], knowledgeRetrievalRuns: [], knowledgeCitations: [], knowledgeCollections: [], knowledgeItems: [], presenceKnowledgeBindings: [], conversationStyles: [], operationalRuns: [], scheduledWakes: [], dependencyHealth: [], recoveryIncidents: [], recoveryAttempts: [], browserBodies: [], editorialOpportunities: [], editorialFeedbackEvents: [], editorialReferences: [], sourceAssets: [], mediaPerceptions: [], verificationRecords: [], rightsAssessments: [], editorialDecisions: [], publicationPackages: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
+  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], operatorThreads: [], operatorConversations: [], operatorNudges: [], agentRequests: [], capabilityChangeEvents: [], events: [], socialDecisions: [], socialStrategyRetrievalRuns: [], growthHypotheses: [], growthEvidenceRecords: [], legacyChannelStrategyGuidance: legacyChannelStrategyGuidance(builtinChannelDefinitions()), autobiographicalEvents: [], autobiographicalReflections: [], resourceUsageEvents: [], attentionEpisodes: [], calendar: [], assignments: [], growthReviews: [], growthRevisions: [], growthEvidenceSnapshots: [], growthFileVersions: [], learningCheckpoints: [], learningCounterfactuals: [], audienceSnapshots: [], publicationMetricSnapshots: [], watches: [], watchSignals: [], relationshipPolicies: [], relationshipStudies: [], relationshipInsightSets: [], presenceRequestPolicies: [], delegationGrants: [], publicRequests: [], explorations: [], discoveryPlans: [], explorationSessions: [], explorationFindings: [], actions: [], publishingPlans: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], assetProviderConnections: [], toolBindings: [], changeSets: [], standingIntents: [], operatorDirectives: [], socialIntents: [], executions: [], outcomes: [], attentionTests: [], capabilityTrials: [], publications: [], assetUsages: [], sourceEvidence: [], claimGrounding: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], assetResearchSessions: [], assetCollections: [], assetCollectionMemberships: [], assetMetadataEdits: [], assetProcessingJobs: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], conversationEpisodes: [], assignmentContributions: [], people: [], peopleNotes: [], personIdentities: [], relationships: [], relationshipFacts: [], relationshipOpenLoops: [], recommendationRecords: [], introductionRecords: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], knowledgeDocuments: [], knowledgeVersions: [], knowledgeSegments: [], presenceKnowledgeAccess: [], mindFileKnowledgeBindings: [], knowledgeRetrievalRuns: [], knowledgeCitations: [], knowledgeCollections: [], knowledgeItems: [], presenceKnowledgeBindings: [], conversationStyles: [], operationalRuns: [], scheduledWakes: [], dependencyHealth: [], recoveryIncidents: [], recoveryAttempts: [], browserBodies: [], editorialOpportunities: [], editorialFeedbackEvents: [], editorialReferences: [], sourceAssets: [], mediaPerceptions: [], verificationRecords: [], rightsAssessments: [], editorialDecisions: [], publicationPackages: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
 }
 
 export const SELF_DIRECTED_ATTENTION_PRESETS: Record<
@@ -731,7 +738,7 @@ export function clearPersonBlockFromExecution(source: OpenPresenceState, executi
 }
 
 function makeFiles(input: CreateAgentInput, presence: Presence): AgentFile[] { return (Object.keys(fileMeta) as FileKind[]).map((kind) => ({ kind, ...fileMeta[kind], content: fileContent(kind, input, presence), revision: 1, updatedAt: now() })); }
-function event(type: LiveEvent["type"], title: string, detail: string, tone: LiveEvent["tone"] = "neutral", lineage?: Pick<LiveEvent, "presenceId" | "intentId" | "executionId" | "outcomeId" | "decisionId" | "sessionId" | "sourceObjectId" | "invocationId" | "runId" | "attentionEpisodeId">): LiveEvent { return { id: id("evt"), type, title, detail, time: now(), tone, ...lineage }; }
+function event(type: LiveEvent["type"], title: string, detail: string, tone: LiveEvent["tone"] = "neutral", lineage?: Pick<LiveEvent, "presenceId" | "intentId" | "executionId" | "outcomeId" | "decisionId" | "sessionId" | "sourceObjectId" | "sourceTemporalEventId" | "invocationId" | "runId" | "attentionEpisodeId">): LiveEvent { return { id: id("evt"), type, title, detail, time: now(), tone, ...lineage }; }
 
 export interface SocialDecisionInput {
   decision: SocialDecisionKind;
@@ -752,6 +759,7 @@ export interface SocialDecisionInput {
   attentionEpisodeId?: string;
   operatorReaction?: string;
   autobiographicalEventIds?: string[];
+  causalEventId?: string;
   socialStrategy?: { retrievalRun: import("./types").SocialStrategyRetrievalRun; use?: import("./types").SocialStrategyUse };
 }
 
@@ -762,8 +770,20 @@ function socialDecisionLabel(decision: SocialDecisionKind) {
 function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInput, socialIntentId?: string): SocialDecision | undefined {
   const presence = input.presenceId ? state.presences.find((p) => p.id === input.presenceId) ?? state.presence : state.presence;
   if (!state.agent || !presence) return undefined;
-  const strategyRun = input.socialStrategy?.retrievalRun ?? compileSocialStrategyContext(state, presence, { invocation: input.origin?.kind ?? "social_decision", objective: input.summary ?? input.decision, availableActions: input.acts?.map((act) => act.decision) ?? [input.decision] }).retrievalRun;
+  const assignmentTemplateId = input.origin?.kind === "assignment"
+    ? state.assignments.find((assignment) => assignment.id === input.origin?.refId)?.strategyTemplateId
+    : undefined;
+  const strategyRun = input.socialStrategy?.retrievalRun ?? compileSocialStrategyContext(state, presence, { invocation: input.origin?.kind ?? "social_decision", objective: input.summary ?? input.decision, availableActions: input.acts?.map((act) => act.decision) ?? [input.decision], strategyTemplateId: assignmentTemplateId }).retrievalRun;
+  const learningCounterfactual = recordLearningCounterfactualInPlace(state, presence, strategyRun, now());
+  if (learningCounterfactual) strategyRun.learningCounterfactual = {
+    checkpointId: learningCounterfactual.checkpoint.id,
+    checkpointHash: learningCounterfactual.checkpoint.hash,
+    situationId: learningCounterfactual.situationId,
+    claim: learningCounterfactual.learningClaim.status,
+  };
   const socialStrategy = input.socialStrategy?.use ?? strategyUseFromDecision(strategyRun, input.acts?.map((act) => ({ action: act.decision })) ?? [{ action: input.decision }]);
+  const causalEventId = input.causalEventId ?? input.focalMirrorObjectIds?.map((objectId) => state.mirrorObjects.find((object) => object.id === objectId)?.sourceTemporalEventId).find((value): value is string => Boolean(value));
+  if (socialStrategy && assignmentTemplateId && !socialStrategy.strategyTemplateId) socialStrategy.strategyTemplateId = assignmentTemplateId;
   if (strategyRun.id && !state.socialStrategyRetrievalRuns?.some((run) => run.id === strategyRun.id)) state.socialStrategyRetrievalRuns = [strategyRun, ...(state.socialStrategyRetrievalRuns ?? [])].slice(0, 500);
   return {
     id: id("decision"),
@@ -789,6 +809,7 @@ function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInp
     socialStrategy,
     autobiographicalEventIds: input.autobiographicalEventIds?.filter((eventId) => state.autobiographicalEvents.some((event) => event.id === eventId)),
     attentionEpisodeId: input.attentionEpisodeId,
+    causalEventId,
     createdAt: now(),
   };
 }
@@ -1240,10 +1261,10 @@ export function deferInboundJudgment(source: OpenPresenceState, presenceId: stri
   return recordPublicFooting(state, presenceId, { ...footing, inboundAttentionCooldowns: compactCooldowns });
 }
 
-export function markCalendarSlotEvaluated(source: OpenPresenceState, slotId: string) {
+export function markCalendarSlotEvaluated(source: OpenPresenceState, slotId: string, evaluatedAt = now()) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const slot = state.calendar.find((item) => item.id === slotId);
-  if (slot) slot.lastEvaluatedAt = now();
+  if (slot) slot.lastEvaluatedAt = evaluatedAt;
   return state;
 }
 
@@ -1336,11 +1357,13 @@ export function recordNativeMirror(source: OpenPresenceState, input: { connectio
     }
   }
   const mediaRefs = (input.post.media ?? []).flatMap((media) => {
-    const sourceUrl = media.url ?? media.previewImageUrl;
+    // Prefer a durable X poster for video attachments. Browser blob URLs are
+    // session-scoped and cannot be replayed by the server or a later visit.
+    const sourceUrl = media.previewImageUrl ?? media.url;
     if (!sourceUrl) return [];
     const type = media.type === "photo" ? "image" : media.type === "animated_gif" ? "gif" : "video";
     const asset = state.assets.find((item) => item.presenceId === input.presenceId && item.provenance.sourceUrl === sourceUrl)
-      ?? { id: id("asset"), agentId: state.agent?.id ?? "", presenceId: input.presenceId, type, mediaKind: type, status: "ready" as const, nature: "observed" as const, rights: { status: "unknown" as const }, provenance: { origin: "native-x", sourceUrl, publisher: "X", author: input.post.authorUsername, importedAt: receivedAt, sourceIdentityStatus: "unknown" as const }, description: media.altText ?? `X ${type} attachment`, mimeType: type === "image" ? "image/jpeg" : undefined, visibility: "public" as const, shareability: "presence-only" as const, environment: "live" as const, createdAt: receivedAt, updatedAt: receivedAt };
+      ?? { id: id("asset"), agentId: state.agent?.id ?? "", presenceId: input.presenceId, type, mediaKind: type, status: "ready" as const, retention: "ephemeral" as const, expiresAt: new Date(Date.parse(receivedAt) + 72 * 60 * 60 * 1000).toISOString(), reusePermission: "reference_only" as const, nature: "observed" as const, rights: { status: "unknown" as const }, provenance: { origin: "native-x", sourceUrl, publisher: "X", author: input.post.authorUsername, importedAt: receivedAt, sourceIdentityStatus: "unknown" as const }, description: media.altText ?? `X ${type} attachment`, mimeType: type === "image" ? "image/jpeg" : undefined, visibility: "public" as const, shareability: "presence-only" as const, environment: "live" as const, createdAt: receivedAt, updatedAt: receivedAt };
     if (!state.assets.some((item) => item.id === asset.id)) state.assets.unshift(asset);
     return [{ assetId: asset.id, kind: type as "image" | "video" | "gif", role: "attachment" as const }];
   });
@@ -1505,6 +1528,9 @@ export function externalUrlForMirrorObject(input: Pick<MirrorObject, "channelId"
   }
   return undefined;
 }
+
+// Compatibility alias for older route imports.
+export const externalUrlForMirror = externalUrlForMirrorObject;
 
 function attentionTelemetry(test: AttentionTest, input: Omit<AttentionTest["telemetry"][number], "id" | "at"> & { at?: string }) {
   if (test.telemetry.some((item) => item.transitionKey === input.transitionKey)) return;
@@ -1732,8 +1758,38 @@ export function derivePublicHistory(source: OpenPresenceState, presenceId?: stri
 
 export function recordRuntimeEvent(source: OpenPresenceState, presenceId: string, title: string, detail: string, tone: LiveEvent["tone"] = "neutral", lineage?: Pick<LiveEvent, "intentId" | "executionId" | "outcomeId" | "decisionId" | "sessionId" | "invocationId" | "runId" | "sourceObjectId" | "attentionEpisodeId">) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
-  state.events.unshift(event("system", title, detail, tone, { presenceId, ...lineage }));
-  return state;
+  const runtimeEvent = event("system", title, detail, tone, { presenceId, ...lineage });
+  state.events.unshift(runtimeEvent);
+  // A social plan that explicitly chose silence is still a judgment. Keep
+  // this invariant at the shared event boundary because Sandbox and live
+  // callers have several distinct no-op return paths.
+  if (title === "Social plan formed" && lineage?.sourceObjectId) {
+    try {
+      const parsed = JSON.parse(detail) as { action?: string; rationale?: string };
+      if (parsed.action === "no_op" && !state.socialDecisions.some((decision) => decision.decision === "no_op" && decision.focalMirrorObjectIds.includes(lineage.sourceObjectId!))) {
+        const decision = createSocialDecision(state, {
+          decision: "no_op",
+          summary: parsed.rationale,
+          focalMirrorObjectIds: [lineage.sourceObjectId],
+          origin: { kind: "inbound_social", refId: lineage.sourceObjectId },
+          influences: ["Mission", "Taste", "Current social context"],
+          confidence: "medium",
+          presenceId,
+        });
+        if (decision) state.socialDecisions.unshift(decision);
+      }
+    } catch { /* Runtime event detail is allowed to remain descriptive text. */ }
+  }
+  const communication = recordAgentInitiatedUpdate(state, presenceId, {
+    id: runtimeEvent.id,
+    title,
+    detail,
+    type: runtimeEvent.type,
+    tone,
+    importance: title === "Social plan formed" ? "routine" : undefined,
+    operatorActionRequired: tone === "warning",
+  });
+  return communication.recorded ? communication.state : state;
 }
 
 export function markNativeConnectionNeedsAttention(source: OpenPresenceState, presenceId: string, message: string) {
@@ -2122,17 +2178,17 @@ function applyGrowthInterpretation(state: OpenPresenceState, assignment: Assignm
   }
 }
 
-export function createGrowthReview(source: OpenPresenceState, assignment: Assignment, kind: import("./types").GrowthReviewKind, modelDecision?: import("./types").GrowthReviewDecision, evidenceSnapshot?: import("./types").GrowthEvidenceSnapshot) {
-  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+export function createGrowthReview(source: OpenPresenceState, assignment: Assignment, kind: import("./types").GrowthReviewKind, modelDecision?: import("./types").GrowthReviewDecision, evidenceSnapshot?: import("./types").GrowthEvidenceSnapshot, reviewAt?: Date) {
+  let state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presences.find((p) => p.id === assignment.presenceId) ?? state.presence;
-  const nowDate = new Date();
+  const nowDate = reviewAt ?? new Date();
   const periodDays = kind === "strategic" ? 28 : 7;
   const periodEnd = nowDate.toISOString();
   const periodStart = growthWindowStartAt(state, assignment.presenceId, periodDays, nowDate.getTime());
 
   const snapshot = evidenceSnapshot ?? deriveGrowthEvidenceSnapshot(state, assignment.presenceId);
   ensureGrowthEvidenceRecords(state, assignment.presenceId, periodEnd);
-  const recent = state.growthReviews.find((item) => item.assignmentId === assignment.id && item.kind === kind && Date.now() - new Date(item.createdAt).getTime() < 86_400_000);
+  const recent = state.growthReviews.find((item) => item.assignmentId === assignment.id && item.kind === kind && nowDate.getTime() - new Date(item.createdAt).getTime() < 86_400_000);
   const currentEvidenceIds = new Set(snapshot.sourceRefs);
   const hasNewEvidence = recent ? [...currentEvidenceIds].some((evidenceId) => !(recent.evidenceIds ?? []).includes(evidenceId)) : false;
   if (recent && !hasNewEvidence && !modelDecision) return state;
@@ -2141,7 +2197,13 @@ export function createGrowthReview(source: OpenPresenceState, assignment: Assign
   snapshots.unshift(snapshot);
   state.growthEvidenceSnapshots = snapshots.slice(0, 50);
 
-  const previousGrowthRevisionRef = presence?.activeGrowthRevisionRef;
+  // Growth revisions belong to the continuous responsibility that produced
+  // them. Do not link a new responsibility to a predecessor's plan merely
+  // because the Presence-wide pointer still references that older revision.
+  const previousGrowthRevisionRef = presence?.activeGrowthRevisionRef
+    && state.growthRevisions?.some((revision) => revision.id === presence.activeGrowthRevisionRef && revision.assignmentId === assignment.id)
+    ? presence.activeGrowthRevisionRef
+    : undefined;
   const audienceSnapshots = collapseAudienceSnapshots(state.audienceSnapshots.filter((s) => s.presenceId === assignment.presenceId && growthEvidenceIsInPresenceScope(state, assignment.presenceId, s.observedAt)));
   const recentMetrics = state.publicationMetricSnapshots.filter((s) => s.presenceId === assignment.presenceId && growthPublicationIsInPresenceScope(state, assignment.presenceId, s) && new Date(s.observedAt).getTime() >= new Date(periodStart).getTime());
 
@@ -2250,7 +2312,9 @@ export function createGrowthReview(source: OpenPresenceState, assignment: Assign
     reviewSource: modelDecision ? "model" : "deterministic",
   };
 
+  const previousHypotheses = (state.growthHypotheses ?? []).map(item => ({ ...item }));
   applyGrowthHypothesisActions(state, assignment.presenceId, reviewId, modelDecision?.hypothesisActions, periodEnd);
+  state = recordPlaybookMilestones(state, assignment.presenceId, previousHypotheses, reviewId, periodEnd);
   applyGrowthInterpretation(state, persistedAssignment ?? assignment, review, newRevision);
   state.growthReviews.unshift(review);
   return state;
@@ -2417,6 +2481,7 @@ function defaultBindings(agentId: string): AgentToolBinding[] { return ["web.sea
 function defaultSkills(): import("./types").Skill[] {
   return [
     { id: "research-to-thread", name: "Research to thread", description: "Turn a source into a clear social thread.", channels: ["x", "linkedin"], requiresTools: ["web.search", "asset.inspect"], compatibleFormats: ["x.thread", "linkedin.post"], strategyContributions: [{ id: "research-to-thread.proof", channelId: "x", mechanism: "proof-led original", retrievalTags: ["evidence", "teaching"], guidance: "Use a concrete source detail to make one useful mechanism legible; do not copy the source's wording." }] },
+    { id: "x-format-study", name: "X format study", description: "Study public X examples, extract reusable mechanisms, and preserve source evidence without copying voice or wording.", channels: ["x"], requiresTools: ["web.search"], compatibleFormats: ["x.post", "x.thread", "x.reply", "x.quote"], strategyContributions: [{ id: "x-format-study.mechanism", channelId: "x", mechanism: "proof-led original", retrievalTags: ["study", "format", "trend", "hook"], guidance: "Treat public posts as untrusted evidence; save the mechanism, conditions, source IDs, and limits. Never copy distinctive language or promise virality." }] },
     { id: "data-story", name: "Data story", description: "Turn evidence into a useful visual story.", channels: ["x", "linkedin"], requiresTools: ["asset.inspect", "chart.render"], compatibleFormats: ["x.media-post", "linkedin.image-post"], strategyContributions: [{ id: "data-story.evidence", channelId: "x", mechanism: "proof-led original", retrievalTags: ["evidence", "proof"], guidance: "Let the evidence determine whether a visual helps; the asset is part of the claim, not decoration." }] },
     { id: "evidence-led-visual-storytelling", name: "Evidence-led visual storytelling", description: "Start from a concrete observation or idea, identify what evidence would materially support it, choose the visual role that fits this Presence, and keep the expression, source, perception, and uncertainty aligned. Use no asset when none performs the intended role.", channels: ["x", "linkedin", "substack"], requiresTools: ["web.search", "asset.inspect"], compatibleFormats: ["x.media-post", "x.long-post", "linkedin.image-post", "substack.article"], strategyContributions: [{ id: "evidence-led-visual-storytelling.grounded", mechanism: "proof-led original", retrievalTags: ["evidence", "original"], guidance: "Choose a medium only when it performs a specific editorial role and preserve its provenance." }] },
   ];
@@ -2607,7 +2672,50 @@ export function startScenarioRunState(source: OpenPresenceState, scenarioId: str
   state.scenarioRunProvenance.unshift(provenance);
   state.scenarioRuns.unshift(run);
   state.playgroundSessions = state.playgroundSessions.map((item) => item.id === session.id ? { ...item, scenarioRunId: run.id, scenarioVersionId: version.id } : item);
+  state = scheduleScenarioStimuli(state, run.id);
   state.events.unshift(event("system", "Scenario Run started", `${scenario.title} is running in an isolated ${channelName(presence.channel)} Sandbox world.`, "positive", { presenceId: presence.id, sessionId: session.id }));
+  return state;
+}
+
+/**
+ * Adapt a frozen Scenario world into durable Sandbox temporal events. The
+ * event payload is deliberately limited to the untrusted world stimulus;
+ * evaluation criteria and Agent-private state never enter the event.
+ */
+export function scheduleScenarioStimuli(source: OpenPresenceState, runId: string) {
+  const state = cloneState(source);
+  const run = state.scenarioRuns.find((item) => item.id === runId);
+  if (!run) throw new Error("That Scenario Run no longer exists.");
+  const session = state.playgroundSessions.find((item) => item.id === run.playgroundSessionId);
+  const version = state.scenarioVersions.find((item) => item.id === run.scenarioVersionId);
+  if (!session || !version) throw new Error("That Scenario Run is missing its Sandbox session or frozen version.");
+  const originMs = Date.parse(session.virtualNow);
+  if (!Number.isFinite(originMs)) throw new Error("That Scenario Run has an invalid virtual clock.");
+
+  const kernel = temporalKernelForSession(session);
+  let previousOffsetMinutes = 0;
+  for (const stimulus of version.worldSpec.stimuli) {
+    const offsetMinutes = stimulus.offsetMinutes ?? previousOffsetMinutes;
+    if (!Number.isInteger(offsetMinutes) || offsetMinutes < previousOffsetMinutes) {
+      throw new Error(`Scenario stimulus ${stimulus.id} must use a non-negative, monotonic integer offsetMinutes.`);
+    }
+    previousOffsetMinutes = offsetMinutes;
+    const eventId = `scenario-stimulus:${run.id}:${stimulus.id}`;
+    if (kernel.events.some((item) => item.id === eventId)) continue;
+    kernel.scheduleEvent({
+      id: eventId,
+      type: "scenario_stimulus",
+      at: originMs + offsetMinutes * 60_000,
+      priority: stimulus.sequence,
+      payload: {
+        scenarioRunId: run.id,
+        scenarioStimulusId: stimulus.id,
+        stimulus: { ...stimulus, trust: "untrusted_world_content" as const },
+      },
+    });
+  }
+  session.temporalSnapshot = kernel.snapshot();
+  session.updatedAt = now();
   return state;
 }
 
@@ -3125,7 +3233,8 @@ export function startPlaygroundSession(source: OpenPresenceState, presenceId?: s
   if (!presence) throw new Error("Choose a Presence before starting Playground.");
   const environment = sandboxEnvironmentFor(state, presence);
   const timestamp = now();
-  const session: PlaygroundSession = { id: id("session"), environmentId: environment.id, presenceId: presence.id, channelId: presence.channel, source: sourceType, status: "active", virtualNow: timestamp, virtualTimeMode: "realtime", worldRevision: 1, createdAt: timestamp, updatedAt: timestamp, evaluatedSlotIds: [], judgedObjectIds: [] };
+  const temporal = new SandboxTemporalKernel({ startAt: Date.parse(timestamp) });
+  const session: PlaygroundSession = { id: id("session"), environmentId: environment.id, presenceId: presence.id, channelId: presence.channel, source: sourceType, status: "active", virtualNow: timestamp, virtualTimeMode: "realtime", worldRevision: 1, temporalSnapshot: temporal.snapshot(), createdAt: timestamp, updatedAt: timestamp, evaluatedSlotIds: [], judgedObjectIds: [] };
   state.playgroundSessions.unshift(session);
   state.sandboxEnvironments = state.sandboxEnvironments.map((item) => item.id === environment.id ? { ...item, status: "active", updatedAt: timestamp } : item);
   state.events.unshift(event("system", "Playground session started", `${channelName(presence.channel)} is simulated. ${presence.name} is using the real Agent runtime in an isolated world.`, "positive", { presenceId: presence.id }));
@@ -3190,7 +3299,7 @@ function sandboxAssetFromInput(state: OpenPresenceState, presence: Presence, ses
   return { id: id("asset"), agentId: state.agent?.id ?? "", presenceId: presence.id, sessionId: session.id, type: input.kind, mediaKind: input.kind === "chart" ? "image" : input.kind === "link" ? "other" : input.kind, semanticKind: input.kind === "chart" ? "chart" : undefined, dataUrl, checksum: `${input.name}:${input.mimeType ?? ""}:${dataUrl?.length ?? sourceUrl ?? ""}`, status: "ready", nature: sourceUrl ? "observed" : dataUrl ? "generated" : "unknown", rights: { status: "unknown" }, provenance: { origin: "sandbox", sourceUrl, sourcePageUrl: input.sourcePageUrl?.trim() || undefined, publisher: input.publisher?.trim() || undefined, retrievedAt: sourceUrl ? timestamp : undefined, acquisitionProvider: sourceUrl ? "sandbox-input" : undefined, importedAt: timestamp, sourceIdentityStatus: sourceUrl ? "unknown" : "verified" }, mimeType, sizeBytes: dataUrl ? Math.ceil((dataUrl.length * 3) / 4) : undefined, description: input.name, visibility, shareability, environment: "sandbox", createdAt: timestamp, updatedAt: timestamp };
 }
 
-export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: string; kind?: string; actionId?: string; actorId?: string; actorName?: string; actorHandle?: string; profile?: import("./types").SandboxActorProfile; content?: string; language?: string; assets?: SandboxAssetInput[]; targetExternalRef?: EntityRef; parentExternalRef?: EntityRef; source?: MirrorObject["source"]; trust?: MirrorObject["trust"]; scenarioStimulusId?: string }) {
+export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: string; kind?: string; actionId?: string; actorId?: string; actorName?: string; actorHandle?: string; profile?: import("./types").SandboxActorProfile; content?: string; language?: string; assets?: SandboxAssetInput[]; targetExternalRef?: EntityRef; parentExternalRef?: EntityRef; source?: MirrorObject["source"]; trust?: MirrorObject["trust"]; scenarioStimulusId?: string; temporalEventId?: string }) {
   const state = cloneState(source);
   const session = sandboxSessionFor(state, input.sessionId);
   const presence = state.presences.find((item) => item.id === session.presenceId) ?? state.presence;
@@ -3231,7 +3340,7 @@ export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: s
   if (unsupportedAssets.length) throw new Error(`The simulated ${channelName(session.channelId)} world does not support these asset kinds: ${unsupportedAssets.map((item) => item.kind).join(", ")}.`);
   const assetInputs = input.assets ?? [];
   const mirrorId = id("mirror");
-  const object = { id: mirrorId, bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: targetExternalRef, conversationExternalRef, objectType, language: observedLanguage, simulationActionId: actionId, author: { externalRef: { type: `${session.channelId}.user`, id: actorId }, displayName: actorName, handle: (actor?.handle ?? input.actorHandle?.trim()) || undefined }, content: { text: content, language: observedLanguage }, assetRefs: [] as { assetId: string; kind: SocialAssetKind; role?: "primary" | "attachment" | "link-preview" }[], occurredAt: observedAt, observedAt: now(), visibility, shareability, environment: "sandbox" as const, sessionId: session.id, sourceEventId: `sandbox-event:${objectId}`, source: input.source, trust: input.trust, scenarioStimulusId: input.scenarioStimulusId };
+  const object = { id: mirrorId, bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: targetExternalRef, conversationExternalRef, objectType, language: observedLanguage, simulationActionId: actionId, author: { externalRef: { type: `${session.channelId}.user`, id: actorId }, displayName: actorName, handle: (actor?.handle ?? input.actorHandle?.trim()) || undefined }, content: { text: content, language: observedLanguage }, assetRefs: [] as { assetId: string; kind: SocialAssetKind; role?: "primary" | "attachment" | "link-preview" }[], occurredAt: observedAt, observedAt: now(), visibility, shareability, environment: "sandbox" as const, sessionId: session.id, sourceEventId: `sandbox-event:${objectId}`, sourceTemporalEventId: input.temporalEventId, source: input.source, trust: input.trust, scenarioStimulusId: input.scenarioStimulusId };
   for (const assetInput of assetInputs) {
     const asset = sandboxAssetFromInput(state, presence, session, assetInput, visibility, shareability);
     state.assets.unshift(asset);
@@ -3242,20 +3351,92 @@ export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: s
   updateConversationEpisodeFromMirror(state, object, presence.id);
   state.mirrorEvents.unshift({ id: id("mirror-event"), bridgeId: object.bridgeId, presenceId: presence.id, sourceEventId: object.sourceEventId!, event: "created", externalRef, object, receivedAt: now(), environment: "sandbox", sessionId: session.id });
   const actionDescription = action?.label?.replace(/^Someone\s*/i, "").replaceAll("Jenny", presence.name).toLowerCase() ?? `created a ${objectType}`;
-  state.events.unshift({ ...event("decision", "Sandbox event observed", `${actorName} ${actionDescription} in Playground.`, "neutral", { presenceId: presence.id, sourceObjectId: object.id }), sessionId: session.id });
+  state.events.unshift({ ...event("decision", "Sandbox event observed", `${actorName} ${actionDescription} in Playground.`, "neutral", { presenceId: presence.id, sourceObjectId: object.id, sourceTemporalEventId: input.temporalEventId }), time: observedAt, sessionId: session.id });
   session.updatedAt = now();
   return state;
 }
 
-export function advanceSandboxTime(source: OpenPresenceState, sessionId: string, minutes: number) {
+function temporalKernelForSession(session: PlaygroundSession) {
+  const sessionNow = Date.parse(session.virtualNow);
+  if (session.temporalSnapshot) {
+    if (!Number.isFinite(sessionNow) || session.temporalSnapshot.now !== sessionNow) {
+      // Realtime sessions may be loaded from an older snapshot or refreshed
+      // by the browser clock before their kernel snapshot is rebuilt. Manual
+      // sessions remain fail-closed: a mismatch there indicates a tampered or
+      // partially persisted trajectory and must be reset explicitly.
+      if (session.virtualTimeMode !== "manual" && Number.isFinite(sessionNow)) return new SandboxTemporalKernel({ startAt: sessionNow });
+      throw new Error("Sandbox temporal state is inconsistent with the session clock. Reset the Playground before advancing time.");
+    }
+    return SandboxTemporalKernel.fromSnapshot(session.temporalSnapshot);
+  }
+  if (!Number.isFinite(sessionNow)) throw new Error("Sandbox session has an invalid virtual clock. Reset the Playground before advancing time.");
+  return new SandboxTemporalKernel({ startAt: sessionNow });
+}
+
+function scheduleCalendarTemporalEvents(state: OpenPresenceState, session: PlaygroundSession, kernel: SandboxTemporalKernel, fromMs: number, toMs: number) {
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) return;
+  for (const slot of state.calendar) {
+    if (!slot.enabled || slot.presence !== session.presenceId) continue;
+    // Iterate by local calendar day, not by the time-of-day at which the
+    // advance began. Starting at (for example) Wednesday 19:00 would
+    // otherwise construct Thursday 00:01 from a Thursday 19:00 cursor and
+    // incorrectly skip the due slot.
+    const cursor = new Date(fromMs);
+    cursor.setHours(0, 0, 0, 0);
+    for (; cursor.getTime() <= toMs; cursor.setDate(cursor.getDate() + 1)) {
+      const weekday = cursor.toLocaleDateString("en-US", { weekday: "long" });
+      if (weekday !== slot.day) continue;
+      const [hours, minutes] = slot.time.split(":").map(Number);
+      if (!Number.isFinite(hours) || !Number.isFinite(minutes)) continue;
+      const due = new Date(cursor);
+      due.setHours(hours, minutes, 0, 0);
+      const evaluationKey = `${slot.id}:${localDateKey(due)}`;
+      if (due.getTime() <= fromMs || due.getTime() > toMs || session.evaluatedSlotIds.includes(evaluationKey)) continue;
+      if (kernel.events.some((event) => event.id === `calendar:${evaluationKey}`)) continue;
+      kernel.scheduleEvent({
+        id: `calendar:${evaluationKey}`,
+        type: "calendar_attention",
+        at: due.getTime(),
+        payload: { slotId: slot.id, evaluationKey },
+      });
+    }
+  }
+}
+
+export function advanceSandboxTimeWithTemporalEvents(source: OpenPresenceState, sessionId: string, minutes: number): { state: OpenPresenceState; processed: TemporalEvent[] } {
   const state = cloneState(source);
   const session = sandboxSessionFor(state, sessionId);
-  const safeMinutes = Math.max(-24 * 60, Math.min(30 * 24 * 60, Math.round(minutes)));
-  session.virtualNow = new Date(new Date(session.virtualNow).getTime() + safeMinutes * 60_000).toISOString();
+  if (!Number.isInteger(minutes) || minutes < 0) throw new Error("Sandbox virtual time can only move forward; use reset to start a new rehearsal.");
+  const safeMinutes = Math.min(30 * 24 * 60, minutes);
+  const fromMs = Date.parse(session.virtualNow);
+  const kernel = temporalKernelForSession(session);
+  const toMs = fromMs + safeMinutes * 60_000;
+  scheduleCalendarTemporalEvents(state, session, kernel, fromMs, toMs);
+  const result = kernel.advanceBy(safeMinutes * 60_000, {
+    onEvent: (temporalEvent) => {
+      // Sandbox scenarios may explicitly inject a transport failure for a
+      // retryable operation. Keep the injection opt-in and world-local; live
+      // connectors never enter this adapter. The kernel owns the retry
+      // transition, backoff, fencing, and eventual exhaustion semantics.
+      if (temporalEvent.type !== "retry" || !temporalEvent.payload || typeof temporalEvent.payload !== "object") return;
+      const payload = temporalEvent.payload as { operationId?: unknown };
+      const retryRecord = kernel.retries.find((item) => item.eventId === temporalEvent.id);
+      const retryPayload = retryRecord?.payload as { sandboxFailure?: unknown } | undefined;
+      if (retryPayload?.sandboxFailure !== true || typeof payload.operationId !== "string") return;
+      const retry = kernel.recordRetryFailure(payload.operationId, { code: "SANDBOX_INJECTED_FAILURE", eventId: temporalEvent.id });
+      return retry ? [{ type: "record", kind: "sandbox_retry_failure", data: { operationId: payload.operationId, attempt: retry.attempt, status: retry.status } }] : undefined;
+    },
+  });
+  session.virtualNow = new Date(result.to).toISOString();
   session.virtualTimeMode = "manual";
+  session.temporalSnapshot = kernel.snapshot();
   session.updatedAt = now();
   state.events.unshift({ ...event("system", "Sandbox time moved", `${safeMinutes >= 0 ? "+" : ""}${safeMinutes} minutes · ${new Date(session.virtualNow).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })}`, "neutral", { presenceId: session.presenceId }), sessionId });
-  return state;
+  return { state, processed: result.processed };
+}
+
+export function advanceSandboxTime(source: OpenPresenceState, sessionId: string, minutes: number) {
+  return advanceSandboxTimeWithTemporalEvents(source, sessionId, minutes).state;
 }
 
 export function syncPlaygroundTime(source: OpenPresenceState, sessionId: string) {
@@ -3266,7 +3447,10 @@ export function syncPlaygroundTime(source: OpenPresenceState, sessionId: string)
   const virtualTime = new Date(session.virtualNow).getTime();
   if (Number.isFinite(virtualTime) && Math.abs(currentTime - virtualTime) < 60_000) return state;
   const timestamp = now();
+  const kernel = temporalKernelForSession(session);
+  kernel.advanceTo(timestamp);
   session.virtualNow = timestamp;
+  session.temporalSnapshot = kernel.snapshot();
   session.updatedAt = timestamp;
   return state;
 }
@@ -3319,7 +3503,8 @@ export function resetPlaygroundSession(source: OpenPresenceState, sessionId: str
   state.assignments = state.assignments.filter((item) => item.sessionId !== sessionId);
   state.actions = state.actions.filter((item) => item.sessionId !== sessionId);
   state.events = state.events.filter((item) => item.sessionId !== sessionId);
-  state.playgroundSessions = state.playgroundSessions.map((item) => item.id === sessionId ? { ...item, status: "active", virtualNow: timestamp, virtualTimeMode: "realtime" as const, worldRevision: (item.worldRevision ?? 1) + 1, updatedAt: timestamp, evaluatedSlotIds: [], judgedObjectIds: [] } : item);
+  const temporalSnapshot = new SandboxTemporalKernel({ startAt: Date.parse(timestamp) }).snapshot();
+  state.playgroundSessions = state.playgroundSessions.map((item) => item.id === sessionId ? { ...item, status: "active", virtualNow: timestamp, virtualTimeMode: "realtime" as const, worldRevision: (item.worldRevision ?? 1) + 1, temporalSnapshot, updatedAt: timestamp, evaluatedSlotIds: [], judgedObjectIds: [] } : item);
   state.sandboxEnvironments = state.sandboxEnvironments.map((item) => item.id === environmentId ? { ...item, status: "active", updatedAt: timestamp } : item);
   state.events.unshift({ ...event("system", "Fresh Sandbox account ready", "The simulated account has been refreshed for a new rehearsal.", "positive", { presenceId: session.presenceId }), sessionId });
   return state;
@@ -3466,7 +3651,7 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
   const publication = intent?.publicationId ? state.publications.find((item) => item.id === intent.publicationId) : undefined;
   if (publication?.assetIds?.length) {
     try {
-      authorizeAssetSelection(state, publication.assetIds, { presenceId: execution.presenceId, requireReady: true });
+      authorizeAssetSelection(state, publication.assetIds, { presenceId: execution.presenceId, requireReady: !publication.operatorOverride });
     } catch (error) {
       execution.status = "blocked";
       execution.failure = { code: "ASSET_AUTHORIZATION_FAILED", message: error instanceof Error ? error.message : "The selected Asset cannot be used by this Presence.", retryable: false };
@@ -4156,7 +4341,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
     return { ...definition, affordances: [...builtin.affordances.filter((item) => !definition.affordances.some((current) => current.id === item.id)), ...definition.affordances], supportedAssetKinds: [...new Set([...(builtin.supportedAssetKinds ?? []), ...(definition.supportedAssetKinds ?? [])])] };
   });
   const migratedLegacyGuidance = legacyChannelStrategyGuidance(channelDefinitions);
-  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], operatorThreads: normalizedOperatorThreads, operatorConversations: normalizedOperatorConversations, operatorNudges: state.operatorNudges ?? [], agentRequests: (state.agentRequests ?? []).filter((request) => request.kind !== "capability"), capabilityChangeEvents: state.capabilityChangeEvents ?? [], calendar, assignments: [] as Assignment[], assignmentRuns: state.assignmentRuns ?? [], growthReviews: state.growthReviews ?? [], growthRevisions: state.growthRevisions ?? [], growthEvidenceSnapshots: state.growthEvidenceSnapshots ?? [], growthFileVersions: state.growthFileVersions ?? [], growthHypotheses: state.growthHypotheses ?? [], growthEvidenceRecords: state.growthEvidenceRecords ?? [], socialStrategyRetrievalRuns: state.socialStrategyRetrievalRuns ?? [], legacyChannelStrategyGuidance: state.legacyChannelStrategyGuidance?.length ? state.legacyChannelStrategyGuidance : migratedLegacyGuidance, audienceSnapshots: state.audienceSnapshots ?? [], publicationMetricSnapshots: state.publicationMetricSnapshots ?? [], watches, watchSignals: state.watchSignals ?? [], relationshipPolicies: state.relationshipPolicies ?? [], relationshipStudies: state.relationshipStudies ?? [], relationshipInsightSets: state.relationshipInsightSets ?? [], presenceRequestPolicies: state.presenceRequestPolicies ?? [], delegationGrants: state.delegationGrants ?? [], publicRequests: state.publicRequests ?? [], explorations: state.explorations ?? [], discoveryPlans: state.discoveryPlans ?? [], explorationSessions: state.explorationSessions ?? [], explorationFindings: state.explorationFindings ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: toolBindings.map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], operatorDirectives: state.operatorDirectives ?? [], socialDecisions: state.socialDecisions ?? [], autobiographicalEvents: state.autobiographicalEvents ?? [], autobiographicalReflections: state.autobiographicalReflections ?? [], resourceUsageEvents: state.resourceUsageEvents ?? [], attentionEpisodes: state.attentionEpisodes ?? [], socialIntents: state.socialIntents ?? [], assetCollections: state.assetCollections ?? [], assetCollectionMemberships: state.assetCollectionMemberships ?? [], assetMetadataEdits: state.assetMetadataEdits ?? [], assetProcessingJobs: state.assetProcessingJobs ?? [], executions: (state.executions ?? []).map((execution) => {
+  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], operatorThreads: normalizedOperatorThreads, operatorConversations: normalizedOperatorConversations, operatorNudges: state.operatorNudges ?? [], agentRequests: (state.agentRequests ?? []).filter((request) => request.kind !== "capability"), capabilityChangeEvents: state.capabilityChangeEvents ?? [], calendar, assignments: [] as Assignment[], assignmentRuns: state.assignmentRuns ?? [], growthReviews: state.growthReviews ?? [], growthRevisions: state.growthRevisions ?? [], growthEvidenceSnapshots: state.growthEvidenceSnapshots ?? [], growthFileVersions: state.growthFileVersions ?? [], learningCheckpoints: state.learningCheckpoints ?? [], learningCounterfactuals: state.learningCounterfactuals ?? [], growthHypotheses: state.growthHypotheses ?? [], growthEvidenceRecords: state.growthEvidenceRecords ?? [], socialStrategyRetrievalRuns: state.socialStrategyRetrievalRuns ?? [], legacyChannelStrategyGuidance: state.legacyChannelStrategyGuidance?.length ? state.legacyChannelStrategyGuidance : migratedLegacyGuidance, audienceSnapshots: state.audienceSnapshots ?? [], publicationMetricSnapshots: state.publicationMetricSnapshots ?? [], watches, watchSignals: state.watchSignals ?? [], relationshipPolicies: state.relationshipPolicies ?? [], relationshipStudies: state.relationshipStudies ?? [], relationshipInsightSets: state.relationshipInsightSets ?? [], presenceRequestPolicies: state.presenceRequestPolicies ?? [], delegationGrants: state.delegationGrants ?? [], publicRequests: state.publicRequests ?? [], explorations: state.explorations ?? [], discoveryPlans: state.discoveryPlans ?? [], explorationSessions: state.explorationSessions ?? [], explorationFindings: state.explorationFindings ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: toolBindings.map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], operatorDirectives: state.operatorDirectives ?? [], socialDecisions: state.socialDecisions ?? [], autobiographicalEvents: state.autobiographicalEvents ?? [], autobiographicalReflections: state.autobiographicalReflections ?? [], resourceUsageEvents: state.resourceUsageEvents ?? [], attentionEpisodes: state.attentionEpisodes ?? [], socialIntents: state.socialIntents ?? [], assetCollections: state.assetCollections ?? [], assetCollectionMemberships: state.assetCollectionMemberships ?? [], assetMetadataEdits: state.assetMetadataEdits ?? [], assetProcessingJobs: state.assetProcessingJobs ?? [], executions: (state.executions ?? []).map((execution) => {
     const repaired = repairLegacyXVerificationStatus(execution);
     if (repaired !== execution) return repaired;
     if (execution.failure && isTerminalDuplicateExecution(execution)) {
@@ -4175,15 +4360,103 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
     rightsAssessments: state.rightsAssessments ?? [],
     editorialDecisions: state.editorialDecisions ?? [],
     publicationPackages: state.publicationPackages ?? [] };
+  // Hydrate starter formats for existing workspaces at the read boundary. This
+  // keeps createAgent's low-level fixture empty for focused unit tests while
+  // making the real Artifacts surface useful for older persisted workspaces.
+  ensureDefaultSocialTemplates(normalized, normalized.activePresenceId ?? undefined);
   normalized.assignmentPursuitWindows = state.assignmentPursuitWindows ?? [];
   normalized.peopleNotes = state.peopleNotes ?? [];
   normalized.assignments = canonicalizeAssignmentRecords(normalized, state.assignments ?? [], normalized.calendar);
+  // Chat-created responsibilities predate the explicit creator field. The
+  // durable Chat nudge link is authoritative enough to repair those records
+  // without guessing from their wording, so Tasks can distinguish
+  // Agent-planned work from work the operator entered directly.
+  const agentCreatedAssignmentIds = new Set((normalized.operatorNudges ?? []).map((nudge) => nudge.assignmentId).filter((id): id is string => Boolean(id)));
+  const templateIds = new Set((normalized.growthHypotheses ?? []).filter((hypothesis) => hypothesis.template).map((hypothesis) => hypothesis.id));
+  normalized.assignments = normalized.assignments.map((assignment) => {
+    const createdBy = agentCreatedAssignmentIds.has(assignment.id) && assignment.createdBy !== "agent" ? "agent" as const : assignment.createdBy;
+    const referencedTemplateId = assignment.strategyTemplateId ?? assignment.instruction.match(/growth-hypothesis:[A-Za-z0-9:_-]+/)?.[0];
+    const strategyTemplateId = referencedTemplateId && templateIds.has(referencedTemplateId) ? referencedTemplateId : assignment.strategyTemplateId;
+    return createdBy !== assignment.createdBy || strategyTemplateId !== assignment.strategyTemplateId ? { ...assignment, ...(createdBy ? { createdBy } : {}), ...(strategyTemplateId ? { strategyTemplateId } : {}) } : assignment;
+  });
+  // Older Chat-created records used the full instruction as their title.
+  // Repair that presentation at the read boundary while preserving the
+  // instruction as the durable execution contract.
+  normalized.assignments = normalized.assignments.map((assignment) => {
+    if (!assignmentPresentationNeedsRepair(assignment)) return assignment;
+    const presentation = assignment.title?.trim() === "Prepare a original post"
+      ? { title: "Prepare an original post", description: assignment.description }
+      : deriveAssignmentPresentation(
+        assignment.instruction,
+        assignment.deliverable.type,
+        assignment.planningOnly === true || isPlanningOnlyAssignmentInstruction(assignment.instruction),
+      );
+    return {
+      ...assignment,
+      title: presentation.title,
+      ...(presentation.description ? { description: assignment.description ?? presentation.description } : {}),
+    };
+  });
+  const activeAssignmentRunStatuses = new Set<AssignmentRun["status"]>(["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"]);
+  const planningOnlyAssignmentIds = new Set<string>();
+  normalized.assignments = normalized.assignments.map((assignment) => {
+    const planningOnly = assignment.planningOnly === true || isPlanningOnlyAssignmentInstruction(assignment.instruction);
+    if (!planningOnly) return assignment;
+    planningOnlyAssignmentIds.add(assignment.id);
+    const hasExecution = normalized.executions.some((execution) => execution.assignmentId === assignment.id);
+    const hasActiveRun = (normalized.assignmentRuns ?? []).some((run) => run.assignmentId === assignment.id && activeAssignmentRunStatuses.has(run.status));
+    let repaired = assignment.planningOnly === true ? assignment : { ...assignment, planningOnly: true };
+    if (!hasExecution && !hasActiveRun && ["active", "working", "awaiting_execution"].includes(assignment.status)) {
+      repaired = { ...repaired, status: "draft", nextDueAt: undefined, lastOutcome: undefined };
+    }
+    // Repair old receipts created before planning-only Tasks had a distinct
+    // contract. Recompute only while the persisted projection is stale so a
+    // normal read does not continually churn reviewedAt timestamps.
+    if (repaired.preflight && !repaired.preflight.semanticSummary.startsWith("This private planning Task is saved for operator review.")) {
+      repaired.preflight = preflightAssignment(normalized, repaired, repaired.executionPolicy.delegationPolicy);
+    }
+    return repaired;
+  });
+  if (planningOnlyAssignmentIds.size) {
+    normalized.operatorNudges = normalized.operatorNudges.map((nudge) => nudge.assignmentId && planningOnlyAssignmentIds.has(nudge.assignmentId)
+      && /cannot create or save the private task/i.test(nudge.resultSummary ?? "")
+      ? { ...nudge, resultSummary: "Private planning Task saved and ready for review. Nothing was published." }
+      : nudge);
+    normalized.operatorConversations = normalized.operatorConversations.map((conversation) => ({
+      ...conversation,
+      messages: conversation.messages.flatMap((message) => {
+        const nudge = message.nudgeId
+          ? normalized.operatorNudges.find((candidate) => candidate.id === message.nudgeId)
+          : normalized.operatorNudges.find((candidate) => candidate.messageId === message.replyToMessageId);
+        const planningOnly = nudge?.assignmentId && planningOnlyAssignmentIds.has(nudge.assignmentId);
+        if (!planningOnly) return [message];
+        if (message.role === "presence" && /cannot create or save the private task/i.test(message.content)) return [];
+        if (message.role === "presence" && /Status:\s*`active`, ready for review/i.test(message.content)) {
+          return [{
+            ...message,
+            content: message.content
+              .replace(/Task saved\./i, "Task saved for review.")
+              .replace(/Status:\s*`active`, ready for review/i, "Status: `draft`, ready for review"),
+          }];
+        }
+        if (message.role === "system") {
+          try {
+            const receipt = JSON.parse(message.content) as Record<string, unknown>;
+            if (receipt.tool === "assignment" && receipt.assignmentId && planningOnlyAssignmentIds.has(String(receipt.assignmentId))) {
+              const assignment = normalized.assignments.find((item) => item.id === String(receipt.assignmentId));
+              return [{ ...message, content: JSON.stringify({ ...receipt, status: assignment?.status ?? "draft", planningOnly: true, readyForReview: true, preflight: assignment?.preflight, delivered: false }) }];
+            }
+          } catch { /* Keep non-JSON system history unchanged. */ }
+        }
+        return [message];
+      }),
+    }));
+  }
   const assignmentIds = new Set(normalized.assignments.map((assignment) => assignment.id));
   // Older records could retain `active` after a model/provider failure even
   // though their durable AssignmentRun had already terminated. Repair that
   // contradiction at the runtime boundary so the operator sees one truthful
   // state and the scheduler does not treat it as unfinished work.
-  const activeAssignmentRunStatuses = new Set<AssignmentRun["status"]>(["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"]);
   normalized.assignments = normalized.assignments.map((assignment) => {
     const duplicateExecution = normalized.executions.find((execution) => execution.assignmentId === assignment.id && isTerminalDuplicateExecution(execution));
     if (duplicateExecution && !["completed", "completed_with_adaptation", "cancelled", "failed", "expired_incomplete"].includes(assignment.status)) {
@@ -4250,7 +4523,11 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   // correctly remained active while awaiting Social Mirror verification.
   normalized.assignmentRuns = (normalized.assignmentRuns ?? []).map((run) => {
     const assignment = normalized.assignments.find((item) => item.id === run.assignmentId && item.presenceId === run.presenceId);
-    if (assignment?.status === "cancelled" && assignmentRunIsActive(run)) {
+    // Leave a queued wake auditable when cancellation wins the race before
+    // dispatch. The internal dispatcher can acknowledge it without turning
+    // the queue row into a false completed/failed work result; once cognition
+    // has started, cancellation still settles the active run immediately.
+    if (assignment?.status === "cancelled" && assignmentRunIsActive(run) && run.status !== "queued") {
       return {
         ...run,
         status: "cancelled" as const,
@@ -4906,6 +5183,54 @@ export function isPrivateInspectionInstruction(instruction: string): boolean {
     && /\b(?:keep (?:the )?result private|private (?:baseline|check|report|inspection)|read.only)\b/i.test(instruction);
 }
 
+/**
+ * A planning-only responsibility is a durable review artifact, not work for
+ * the live or Sandbox worker. Keep this deterministic so a model cannot turn
+ * an explicit "save and review" request into an execution merely by choosing
+ * the ordinary Assignment tool.
+ */
+export function isPlanningOnlyAssignmentInstruction(instruction: string): boolean {
+  const normalized = instruction.toLowerCase().replace(/[’]/g, "'");
+  const forbidsPublicAction = /\b(?:do not|don't|never)\b[^.!?]*(?:publish|post|reply|quote|like|repost|follow|attach media|public action)/i.test(normalized)
+    || /\b(?:without|no)\s+(?:publishing|public action)/i.test(normalized);
+  const explicitlyReviewable = /\b(?:planning[- ]only|planning task only|ready for review|stop immediately after (?:the )?(?:task|assignment) is saved|after (?:the )?(?:task|assignment) is saved|private,? bounded .*\btask)\b/i.test(normalized);
+  return forbidsPublicAction && explicitlyReviewable;
+}
+
+/**
+ * Keep the durable instruction rich enough for cognition while giving the
+ * operator a concise, interpreted Task presentation. This is a deterministic
+ * fallback for Chat/tool responses that omit a title or description.
+ */
+export function deriveAssignmentPresentation(instruction: string, deliverableType: Assignment["deliverable"]["type"], planningOnly = false) {
+  const clean = instruction.trim().replace(/\s+/g, " ");
+  const needsInterpretation = clean.length > 180 || /saved template|draft post:|success criteria|stop criteria|source and evidence|public action|Toronto local/i.test(clean);
+  if (!needsInterpretation) return { title: clean, description: undefined as string | undefined };
+  const template = clean.match(/saved template\s+[“"]([^”"]+)[”"]/i)?.[1]?.trim().replace(/[.!?]+$/, "");
+  const focus = /success condition|failure cases|regression/i.test(clean)
+    ? "explicit success conditions, failure cases, and regression checks for reliable AI agents"
+    : clean.match(/\b(?:about|around|focused on|focus on)\s+(.+?)(?:[.;]|$)/i)?.[1]?.trim();
+  if (planningOnly) {
+    return {
+      title: template ? `Prepare a private draft from “${template}”` : "Prepare a private draft for review",
+      description: template
+        ? `Use the ${template} format to prepare a reviewable draft${focus ? ` about ${focus}` : ""}.`
+        : `Prepare a reviewable draft${focus ? ` about ${focus}` : ""}.`,
+    };
+  }
+  const action = deliverableType === "reply" ? "reply" : deliverableType === "decision_report" ? "private decision report" : deliverableType === "meaningful_engagement" ? "meaningful engagement" : "original post";
+  const subject = focus ? ` about ${focus}` : "";
+  return {
+    title: `Prepare ${action === "original post" ? "an" : "a"} ${action}${subject}`.replace(/\s+/g, " ").replace(/[.!?]+$/, ""),
+    description: `Pursue the requested outcome${subject}, while keeping the full instructions and constraints available when needed.`,
+  };
+}
+
+function assignmentPresentationNeedsRepair(assignment: Assignment) {
+  const title = assignment.title?.trim();
+  return !title || title === assignment.instruction.trim() || title === "Prepare a original post" || /^Prepare a private draft from “.+\.”$/.test(title) || title.length > 160 || /https?:\/\/|success criteria|stop criteria|source and evidence|public action/i.test(title);
+}
+
 function assignmentDeliverableType(instruction: string): Assignment["deliverable"]["type"] {
   if (isPrivateInspectionInstruction(instruction)) return "decision_report";
   // Prohibited actions describe constraints, never the requested deliverable.
@@ -4966,7 +5291,12 @@ export function preflightAssignment(source: OpenPresenceState, assignment: Assig
   const issues: string[] = [];
   const assumptions: string[] = [];
   const affordance = assignmentAffordance(assignment.deliverable.type);
-  const deliverable = assignmentDeliverableLabel(assignment.deliverable.type);
+  const count = assignment.deliverable.quantity ?? assignment.progress.required;
+  const deliverable = assignment.planningOnly
+    ? "private Task saved for operator review"
+    : count > 1 && assignment.deliverable.type !== "audience_growth"
+    ? `${["at_most", "maximum"].includes(assignment.deliverable.quantityMode ?? "") ? "up to " : ""}${count} ${assignment.deliverable.type === "original_publication" ? "posts" : assignment.deliverable.type === "quote" ? "quote posts" : assignment.deliverable.type.replaceAll("_", " ") + " results"}`
+    : assignmentDeliverableLabel(assignment.deliverable.type);
   const timing = assignment.schedule ? `${assignment.schedule.day} · ${assignment.schedule.time}–${assignment.schedule.executionWindow.split(/[–-]/).map((part) => part.trim())[1] ?? assignment.schedule.time} · closes at ${assignment.schedule.executionWindow.split(/[–-]/).map((part) => part.trim())[1] ?? assignment.schedule.time}` : undefined;
 
   if (!presence) {
@@ -4988,9 +5318,13 @@ export function preflightAssignment(source: OpenPresenceState, assignment: Assig
     const validTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(assignment.schedule.time) && /^([01]\d|2[0-3]):[0-5]\d[–-]([01]\d|2[0-3]):[0-5]\d$/.test(assignment.schedule.executionWindow);
     checks.push({ label: "Timing", status: validTime ? "pass" : "fail", detail: validTime ? timing! : "The scheduled time or execution window is invalid." });
     if (!validTime) issues.push("Choose a valid day, time, and execution window before activation.");
+  } else if (assignment.activation?.type === "continuous") {
+    checks.push({ label: "Timing", status: "pass", detail: "Ongoing goal. Progress is tracked over time." });
+  } else if (assignment.timeframe?.startsAt && assignment.timeframe.deadline) {
+    checks.push({ label: "Timing", status: "pass", detail: `Work starts ${assignment.timeframe.startsAt} and ends ${assignment.timeframe.deadline}.` });
   } else {
-    assumptions.push("Genny will work when the Assignment is activated or when its linked Attention Source makes it eligible.");
-    checks.push({ label: "Timing", status: "warning", detail: "No deadline or window was supplied; the Assignment remains manually startable." });
+    assumptions.push("Start this task when you are ready, or set a time in Edit task.");
+    checks.push({ label: "Timing", status: "warning", detail: "No start time is set." });
   }
 
   if (assignment.successEvidence?.kind === "metric_threshold") {
@@ -4999,6 +5333,8 @@ export function preflightAssignment(source: OpenPresenceState, assignment: Assig
     const available = metricCapability?.availability === "available";
     checks.push({ label: "Evidence source", status: available ? "pass" : "warning", detail: available ? `${metricCapability?.provider ?? "Connected channel"} can observe ${assignment.successEvidence.metric}.` : `Follower evidence is not currently available; the responsibility can continue, but progress will remain unknown until a channel reports it.` });
     if (!available) assumptions.push("Follower progress will be updated when the connected channel reports a fresh audience snapshot.");
+  } else if (assignment.planningOnly) {
+    checks.push({ label: "Public action", status: "pass", detail: "No public action will be taken until this Task is explicitly started." });
   } else if (presence && assignment.deliverable.type === "meaningful_engagement") {
     const manifest = derivePresenceCapabilityManifest(source, assignment.presenceId);
     const actions = ["reply", "quote", "repost", "like", "follow"];
@@ -5027,16 +5363,26 @@ export function preflightAssignment(source: OpenPresenceState, assignment: Assig
   }
 
   const status = issues.some((issue) => issue.includes("cannot perform") || issue.includes("Enable") || issue.includes("disabled")) ? "blocked" : issues.length ? "needs_input" : assumptions.length ? "ready_with_assumptions" : "ready";
+  const semanticSummary = assignment.planningOnly
+    ? "This private planning Task is saved for operator review. It will not run or publish until explicitly started."
+    : assignment.deliverable.type === "decision_report"
+      ? "This Assignment evaluates and reports; it does not require a public response."
+      : `This Assignment is ready to work toward ${deliverable}. If an attempt is rejected, it stays open until the outcome is verified.`;
+  const successEvidence = assignment.planningOnly
+    ? "The Task, draft, references, and stop criteria are saved for operator review; no public action is taken."
+    : assignment.successEvidence?.kind === "metric_threshold"
+      ? `${assignment.successEvidence.metric} ${assignment.successEvidence.comparator} ${assignment.successEvidence.value.toLocaleString()}.`
+      : assignmentSuccessEvidence(assignment.deliverable.type, presence, assignment.environment);
   const contract = materiallyUnclear ? undefined : {
     objective: instruction,
     deliverable,
-    successEvidence: assignment.successEvidence?.kind === "metric_threshold" ? `${assignment.successEvidence.metric} ${assignment.successEvidence.comparator} ${assignment.successEvidence.value.toLocaleString()}.` : assignmentSuccessEvidence(assignment.deliverable.type, presence, assignment.environment),
+    successEvidence,
     timing,
     agentDecides: ["angle and wording", "research and evidence", "format and assets", "sequencing and retries", "how to use the scheduled start time"],
     hardConstraints: assignment.editorialContext?.constraints ?? [],
     assumptions,
   };
-  return { status, delegationPolicy, semanticSummary: assignment.deliverable.type === "decision_report" ? "This Assignment evaluates and reports; it does not require a public response." : `This Assignment is ready to work toward ${deliverable}. If an attempt is rejected, it stays open until the outcome is verified.`, contract, checks, issues, reviewedAt: now(), reviewedRevision: assignment.revision ?? 0 };
+  return { status, delegationPolicy, semanticSummary, contract, checks, issues, reviewedAt: now(), reviewedRevision: assignment.revision ?? 0 };
 }
 
 function assignmentCreationSignature(assignment: Assignment) {
@@ -5048,6 +5394,8 @@ function assignmentCreationSignature(assignment: Assignment) {
     assignment.objective ?? "",
     assignment.executionPolicy.delegationPolicy ?? "keep_moving",
     schedule,
+    assignment.timeframe?.startsAt ?? "",
+    assignment.timeframe?.deadline ?? "",
     assignment.instruction.trim().toLocaleLowerCase().replace(/[.!?]+$/, "").replace(/\s+/g, " "),
   ].join("\u001f");
 }
@@ -5073,6 +5421,8 @@ export function compileAssignmentInstruction(source: OpenPresenceState, instruct
           : scheduledAssignmentRecurrence(schedule);
   const targetFollowers = growthTarget(clean);
   const type = assignmentDeliverableType(clean);
+  const planningOnly = isPlanningOnlyAssignmentInstruction(clean);
+  const presentation = deriveAssignmentPresentation(clean, type, planningOnly);
   const topicMatch = clean.match(/\b(?:about|around|focus(?:ed)?\s+on|cover(?:ing)?)\s+(.+?)(?:\.|;|$)/i);
   const topics = topicMatch?.[1]?.split(/,|\bor\b|\band\b/i).map((item) => item.trim()).filter(Boolean).slice(0, 12);
   const constraints = [
@@ -5082,7 +5432,7 @@ export function compileAssignmentInstruction(source: OpenPresenceState, instruct
   const timestamp = now();
   const seedId = clean.match(/https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^\s/]+\/status\/(\d+)/i)?.[1];
   const growthPlan: AssignmentPlan | undefined = targetFollowers ? { id: id("assignment-plan"), assignmentId: "pending", revision: 1, summary: "Build durable attention by publishing useful original ideas, participating where the Presence can add value, and developing relationships with people in the intended territory.", dailyTargets: ["Aim for 1–2 useful original publications when there is something worth saying.", "Inspect relevant conversations and continue promising relationships."], publishingApproach: ["Prefer concrete implementation lessons over broad commentary.", "Use the format that best serves the idea; do not publish filler to hit a quota."], discoveryDirections: topics?.length ? topics : presence.brief.primaryTerritory.slice(0, 6), relationshipFocus: [presence.brief.audience], hypotheses: ["Specific, useful observations should create stronger repeat interaction than generic commentary."], nextWeeklyReviewAt: new Date(Date.now() + 7 * 86_400_000).toISOString(), nextStrategicReviewAt: new Date(Date.now() + 28 * 86_400_000).toISOString(), source: "agent", createdAt: timestamp, updatedAt: timestamp } : undefined;
-  const assignment: Assignment = { id: id("assignment"), agentId: source.agent.id, presenceId: presence.id, sessionId, channelId: presence.channel, environment, title: clean, origin: schedule ? "schedule" : "manual", activation: targetFollowers ? { type: "continuous" } : schedule ? { type: "scheduled", recurrence } : { type: "manual" }, instruction: clean, deliverable: { type, quantity: targetFollowers ? undefined : quantity, quantityMode: targetFollowers ? undefined : quantityMode }, quantityPolicy: targetFollowers ? { quantity: "agent_planned", mode: "at_least", period: "assignment" } : { quantity, mode: quantityMode, period: recurrence.kind === "weekly" ? "week" : recurrence.kind === "daily" || recurrence.kind === "weekdays" ? "day" : "assignment" }, recurrence: targetFollowers ? { kind: "once", label: "Continuous responsibility" } : recurrence, schedule, editorialContext: { topics, constraints }, audienceObjective: targetFollowers ? clean.split(/\bwhile\b/i)[1]?.trim() || presence.brief.audience : undefined, objective, successEvidence: targetFollowers ? { kind: "metric_threshold", metric: "followers", comparator: ">=", value: targetFollowers, label: `${targetFollowers.toLocaleString()} followers` } : undefined, plan: growthPlan, planHistory: growthPlan ? [growthPlan] : [], executionPolicy: { usePresenceEnvelope: true, delegationPolicy }, status: "draft", progress: { required: targetFollowers ? 1 : quantity, verified: 0 }, rejectedCandidates: 0, systemFailures: 0, work: { phase: "candidate_review", attempts: 0, maxAttempts: targetFollowers ? 0 : Math.min(12, Math.max(4, quantity * 4)), storiesResearched: 0 }, attemptHistory: [], storyResearch: [], createdAt: timestamp, updatedAt: timestamp };
+  const assignment: Assignment = { id: id("assignment"), agentId: source.agent.id, presenceId: presence.id, sessionId, channelId: presence.channel, environment, title: presentation.title, description: presentation.description, origin: schedule ? "schedule" : "manual", activation: targetFollowers ? { type: "continuous" } : schedule ? { type: "scheduled", recurrence } : { type: "manual" }, instruction: clean, deliverable: { type, quantity: targetFollowers ? undefined : quantity, quantityMode: targetFollowers ? undefined : quantityMode }, quantityPolicy: targetFollowers ? { quantity: "agent_planned", mode: "at_least", period: "assignment" } : { quantity, mode: quantityMode, period: recurrence.kind === "weekly" ? "week" : recurrence.kind === "daily" || recurrence.kind === "weekdays" ? "day" : "assignment" }, recurrence: targetFollowers ? { kind: "once", label: "Continuous responsibility" } : recurrence, schedule, editorialContext: { topics, constraints }, audienceObjective: targetFollowers ? clean.split(/\bwhile\b/i)[1]?.trim() || presence.brief.audience : undefined, objective, successEvidence: targetFollowers ? { kind: "metric_threshold", metric: "followers", comparator: ">=", value: targetFollowers, label: `${targetFollowers.toLocaleString()} followers` } : undefined, plan: growthPlan, planHistory: growthPlan ? [growthPlan] : [], executionPolicy: { usePresenceEnvelope: true, delegationPolicy }, status: "draft", progress: { required: targetFollowers ? 1 : quantity, verified: 0 }, rejectedCandidates: 0, systemFailures: 0, work: { phase: "candidate_review", attempts: 0, maxAttempts: targetFollowers ? 0 : Math.min(12, Math.max(4, quantity * 4)), storiesResearched: 0 }, attemptHistory: [], storyResearch: [], createdAt: timestamp, updatedAt: timestamp, planningOnly };
   if (type === "meaningful_engagement") {
     assignment.activation = { type: "continuous" };
     assignment.deliverable = { type };
@@ -5982,7 +6332,10 @@ export function compileAgendaWork(state: OpenPresenceState, presenceId?: string,
   const lastTriaged = presence?.lastTriagedEvidenceWatermark ?? 0;
   const hasNewEvidence = watermark > lastTriaged;
 
-  const lastReview = (state.growthReviews ?? []).find((r) => r.presenceId === scopedPresenceId && growthEvidenceInScope(r.createdAt));
+  // Reviews belong to a specific continuous Growth responsibility. A prior
+  // responsibility for the same Presence must not suppress the current
+  // Agent's first evidence review or make stale strategy look current.
+  const lastReview = (state.growthReviews ?? []).find((r) => r.presenceId === scopedPresenceId && r.assignmentId === reviewAssignment?.id && growthEvidenceInScope(r.createdAt));
   const hoursSinceLastReview = lastReview ? (now.getTime() - new Date(lastReview.createdAt).getTime()) / (1000 * 60 * 60) : Infinity;
   const isEventDrivenEligible = hasNewEvidence && (hoursSinceLastReview >= 12 || !lastReview);
 
@@ -6248,7 +6601,8 @@ export function browserBridgeFor(state: OpenPresenceState, presenceId: string, a
 
 function browserFallbackWasLearned(presence: Presence, affordance: string) {
   const normalized = affordance.replace(/^[^.]+\./, "");
-  return (presence.browserAccess?.learnedFallbacks ?? []).some((item) => item.action === affordance || item.action === normalized);
+  // Billing is temporary provider state, not evidence that this action needs a browser forever.
+  return (presence.browserAccess?.learnedFallbacks ?? []).some((item) => !isXCreditsError(item.reason) && (item.action === affordance || item.action === normalized));
 }
 
 function rememberBrowserFallback(presence: Presence, affordance: string, reason: string) {
@@ -6430,10 +6784,17 @@ function migrateLegacyXBrowserBridge(bridge: Bridge): Bridge {
   return { ...bridge, capabilities: chromeBrowserBridgeCapabilities() };
 }
 
-function makePublication(state: OpenPresenceState, text: string, format: string, source: "agent_model" | "operator_manual" | "operational" = "operational", assetIds: string[] = [], presenceOverride?: Presence): Publication {
+function operatorAssetOverrideApplies(assetIds: string[], operatorAssetIds: string[]) {
+  return assetIds.length > 0 && assetIds.every((assetId) => operatorAssetIds.includes(assetId));
+}
+
+function makePublication(state: OpenPresenceState, text: string, format: string, source: "agent_model" | "operator_manual" | "operational" = "operational", assetIds: string[] = [], presenceOverride?: Presence, operatorAssetIds: string[] = []): Publication {
   const presence = presenceOverride ?? state.presence;
   const formattedText = formatPublicExpression(text, format);
   const publication: Publication = { id: id("publication"), format, payload: { text: formattedText }, assetIds: [...assetIds], links: [], publicExpression: presence ? createPublicExpressionCandidate({ state, presence, affordance: format, text: formattedText, source, mediaIds: assetIds }) : undefined, createdAt: now(), environment: presence?.environment ?? "live" };
+  if (operatorAssetOverrideApplies(assetIds, operatorAssetIds)) {
+    publication.operatorOverride = { reason: "The operator supplied this media for an explicit one-time publication; unresolved visual metadata does not revoke that choice.", at: publication.createdAt };
+  }
   state.publications.unshift(publication);
   return publication;
 }
@@ -6504,7 +6865,7 @@ export function isExplicitXPostRequest(content: string) {
     || /\b(?:publish|post|tweet|send|ship)\b[^.!?\n]{0,120}\b(?:now|right\s+now|immediately|right\s+away)\b/.test(normalized);
 }
 
-export function formChatPostIntent(source: OpenPresenceState, text: string, standingIntentId?: string, sourceKind: "agent" | "operator" = "agent", assetIds: string[] = [], decisionInput?: SocialDecisionInput, runId?: string, presenceOverride?: Presence) {
+export function formChatPostIntent(source: OpenPresenceState, text: string, standingIntentId?: string, sourceKind: "agent" | "operator" = "agent", assetIds: string[] = [], decisionInput?: SocialDecisionInput, runId?: string, presenceOverride?: Presence, operatorAssetIds: string[] = []) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = presenceOverride ? state.presences.find((item) => item.id === presenceOverride.id) ?? presenceOverride : state.presence;
   if (!state.agent || !presence || presence.status !== "live" || presence.channel !== "x" || !text.trim()) return state;
@@ -6516,8 +6877,9 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
   const autobiographicalContext = sourceKind === "agent" ? retrievePublicSafeAutobiographicalContext(state, presence, `${text}\n${decisionInput?.summary ?? ""}`, Date.now()) : undefined;
   const autobiographicalEventIds = decisionInput?.autobiographicalEventIds ?? autobiographicalContext?.eventIds;
   const effectiveDecisionInput = decisionInput ? { ...decisionInput, autobiographicalEventIds } : undefined;
-  const validAssetIds = authorizeAssetSelection(state, assetIds, { presenceId: presence.id });
-  const publication = makePublication(state, text.trim(), validAssetIds.length ? "x.media-post" : "x.post", sourceKind === "operator" ? "operator_manual" : "agent_model", validAssetIds, presence);
+  const operatorAssetOverride = operatorAssetOverrideApplies(assetIds, operatorAssetIds);
+  const validAssetIds = authorizeAssetSelection(state, assetIds, { presenceId: presence.id, requireReady: !operatorAssetOverride });
+  const publication = makePublication(state, text.trim(), validAssetIds.length ? "x.media-post" : "x.post", sourceKind === "operator" ? "operator_manual" : "agent_model", validAssetIds, presence, operatorAssetOverride ? operatorAssetIds : []);
   const origin: SocialOrigin = standingIntentId ? { kind: "standing_intent", refId: standingIntentId } : sourceKind === "operator" ? { kind: "operator" } : { kind: "other" };
   publication.origin = origin;
   publication.autobiographicalEventIds = autobiographicalEventIds;
@@ -6555,7 +6917,10 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
 
 export function formStandingPostIntent(source: OpenPresenceState, text: string, standingIntentId: string) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
-  const presence = state.presence;
+  const standing = state.standingIntents.find((item) => item.id === standingIntentId);
+  const presence = standing
+    ? state.presences.find((item) => item.id === standing.presenceId) ?? state.presence
+    : state.presence;
   if (!state.agent || !presence || presence.status !== "live" || !text.trim()) return state;
   const environment = presence.environment ?? "live";
   if (hasExistingPublicAction(state, { presenceId: presence.id, environment, affordance: `${presence.channel}.post`, text })) return state;
@@ -6598,6 +6963,7 @@ export function formAssignmentPostIntent(source: OpenPresenceState, text: string
   const assignmentContext = source.assignments.find((item) => item.id === assignmentId);
   const assignmentPresence = assignmentContext ? source.presences.find((item) => item.id === assignmentContext.presenceId) : undefined;
   if (!assignmentContext || !assignmentPresence) return normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  assertAssignmentWindowOpen(assignmentContext);
   const existingPresence = assignmentPresence;
   if (existingPresence && hasExistingPublicAction(source, { presenceId: existingPresence.id, environment: existingPresence.environment ?? "live", affordance: "x.post", text })) return normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   if (assignmentContext?.assetConstraint?.required && !assetIds.length) throw new Error("This Assignment requires an Asset from its Collection.");
@@ -6606,6 +6972,7 @@ export function formAssignmentPostIntent(source: OpenPresenceState, text: string
   const execution = intent ? state.executions.find((item) => item.socialIntentId === intent.id) : undefined;
   const assignment = state.assignments.find((item) => item.id === assignmentId);
   if (!intent || !execution || !assignment) return state;
+  if (assignment.timeframe?.deadline && Date.parse(assignment.timeframe.deadline) < Date.parse(intent.validity.expiresAt ?? "9999-12-31T00:00:00Z")) intent.validity.expiresAt = assignment.timeframe.deadline;
   if (assetIds.length && assignment.assetConstraint?.collectionId) authorizeAssetSelection(state, assetIds, { presenceId: assignment.presenceId, collectionId: assignment.assetConstraint.collectionId });
   const assignmentLeakageReason = assignmentPublicExpressionLeakageReason(assignment, text);
   if (assignmentLeakageReason) {
@@ -6640,7 +7007,7 @@ function missingDirectSocialContextRefs(state: OpenPresenceState, targetObject: 
     && (candidate.environment === targetObject.environment || (targetObject.environment === "live" && candidate.environment === undefined))));
 }
 
-export function formXReplyIntent(source: OpenPresenceState, text: string, parentId: string, operatorDirectiveId?: string, assignmentId?: string, assetIds: string[] = [], decisionInput?: SocialDecisionInput) {
+export function formXReplyIntent(source: OpenPresenceState, text: string, parentId: string, operatorDirectiveId?: string, assignmentId?: string, assetIds: string[] = [], decisionInput?: SocialDecisionInput, operatorAssetIds: string[] = []) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   // Assignment workers can finish after the operator has switched the active
   // Presence. Public actions must stay owned by the Assignment's Presence,
@@ -6675,8 +7042,9 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   const effectiveDecisionInput = decisionInput ? { ...decisionInput, autobiographicalEventIds } : undefined;
   const assignment = assignmentId ? state.assignments.find((item) => item.id === assignmentId) : undefined;
   if (assignment?.assetConstraint?.required && !assetIds.length) throw new Error("This Assignment requires an Asset from its Collection.");
-  const validAssetIds = authorizeAssetSelection(state, assetIds, { presenceId: presence.id, collectionId: assignment?.assetConstraint?.collectionId });
-  const publication = makePublication(state, text.trim(), validAssetIds.length ? "x.media-post" : "x.reply", operatorDirectiveId ? "operator_manual" : "agent_model", validAssetIds);
+  const operatorAssetOverride = operatorAssetOverrideApplies(assetIds, operatorAssetIds);
+  const validAssetIds = authorizeAssetSelection(state, assetIds, { presenceId: presence.id, collectionId: assignment?.assetConstraint?.collectionId, requireReady: !operatorAssetOverride });
+  const publication = makePublication(state, text.trim(), validAssetIds.length ? "x.media-post" : "x.reply", operatorDirectiveId ? "operator_manual" : "agent_model", validAssetIds, undefined, operatorAssetOverride ? operatorAssetIds : []);
   const conversationEpisodeId = parentObject ? ensureConversationEpisode(state, parentObject, presence.id)?.id : undefined;
   const origin: SocialOrigin = decisionInput?.origin ?? (assignmentId
     ? { kind: "assignment", refId: assignmentId }
@@ -6782,7 +7150,9 @@ export function formXDeleteIntent(source: OpenPresenceState, input: { target: En
   return state;
 }
 
-export function formXActionIntent(source: OpenPresenceState, input: { affordance: "x.like" | "x.repost" | "x.quote" | "x.follow"; target: EntityRef; text?: string; assignmentId?: string; assetIds?: string[]; decision?: SocialDecisionInput; source?: "agent" | "operator"; attentionTestId?: string; capabilityTrialId?: string; origin?: SocialOrigin; runId?: string; invocationId?: string; attentionEpisodeId?: string }) {
+export function formXActionIntent(source: OpenPresenceState, input: { affordance: "x.like" | "x.repost" | "x.quote" | "x.follow"; target: EntityRef; text?: string; assignmentId?: string; assetIds?: string[]; operatorAssetIds?: string[]; decision?: SocialDecisionInput; source?: "agent" | "operator"; attentionTestId?: string; capabilityTrialId?: string; origin?: SocialOrigin; runId?: string; invocationId?: string; attentionEpisodeId?: string }) {
+  const timedAssignment = source.assignments.find((item) => item.id === input.assignmentId);
+  if (timedAssignment) assertAssignmentWindowOpen(timedAssignment);
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const assignmentPresence = input.assignmentId
     ? state.assignments.find((item) => item.id === input.assignmentId)?.presenceId
@@ -6825,14 +7195,16 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
   const origin: SocialOrigin = input.origin ?? input.decision?.origin ?? (input.assignmentId ? { kind: "assignment", refId: input.assignmentId } : { kind: "inbound_social", refId: input.target.id });
   const assignment = input.assignmentId ? state.assignments.find((item) => item.id === input.assignmentId) : undefined;
   if (assignment?.assetConstraint?.required && !(input.assetIds ?? []).length) throw new Error("This Assignment requires an Asset from its Collection.");
-  const validAssetIds = authorizeAssetSelection(state, input.assetIds ?? [], { presenceId: presence.id, collectionId: assignment?.assetConstraint?.collectionId });
-  const publication = requiresExpression ? makePublication(state, input.text!.trim(), validAssetIds.length ? "x.media-post" : input.affordance, "agent_model", validAssetIds) : undefined;
+  const operatorAssetOverride = operatorAssetOverrideApplies(input.assetIds ?? [], input.operatorAssetIds ?? []);
+  const validAssetIds = authorizeAssetSelection(state, input.assetIds ?? [], { presenceId: presence.id, collectionId: assignment?.assetConstraint?.collectionId, requireReady: !operatorAssetOverride });
+  const publication = requiresExpression ? makePublication(state, input.text!.trim(), validAssetIds.length ? "x.media-post" : input.affordance, "agent_model", validAssetIds, undefined, operatorAssetOverride ? input.operatorAssetIds : []) : undefined;
   if (publication) { publication.origin = origin; publication.assignmentId = input.assignmentId; publication.invocationId = input.invocationId ?? input.decision?.invocationId; publication.autobiographicalEventIds = autobiographicalEventIds; }
   const trial = input.capabilityTrialId ? state.capabilityTrials.find((item) => item.id === input.capabilityTrialId && item.presenceId === presence.id && item.capability === capability) : undefined;
   const runId = input.runId ?? input.decision?.runId;
   const invocationId = input.invocationId ?? input.decision?.invocationId;
   const attentionEpisodeId = input.attentionEpisodeId ?? input.decision?.attentionEpisodeId;
   const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: input.affordance, target: input.target, publicationId: publication?.id, priority: capability === "follow" ? 35 : 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, assignmentId: input.assignmentId, environment: "live", source: input.source ?? "agent", attentionTestId: input.attentionTestId, capabilityTrialId: trial?.id, runId, invocationId, attentionEpisodeId, autobiographicalEventIds };
+  if (timedAssignment?.timeframe?.deadline && Date.parse(timedAssignment.timeframe.deadline) < Date.parse(expiresAt)) socialIntent.validity.expiresAt = timedAssignment.timeframe.deadline;
   if (publication?.publicExpression) publication.publicExpression.socialIntentId = socialIntent.id;
   state.socialIntents.unshift(socialIntent);
   const socialDecision = effectiveDecision ? createSocialDecision(state, { ...effectiveDecision, focalMirrorObjectIds: effectiveDecision.focalMirrorObjectIds ?? [] , origin: effectiveDecision.origin ?? origin, runId: runId ?? effectiveDecision.runId, invocationId: invocationId ?? effectiveDecision.invocationId }, socialIntent.id) : undefined;
@@ -6903,7 +7275,7 @@ export function completeNativeExecution(source: OpenPresenceState, executionId: 
   }
   if (execution.publication?.assetIds?.length) {
     try {
-      authorizeAssetSelection(state, execution.publication.assetIds, { presenceId: execution.presenceId, requireReady: true });
+      authorizeAssetSelection(state, execution.publication.assetIds, { presenceId: execution.presenceId, requireReady: !execution.publication.operatorOverride });
     } catch (error) {
       execution.status = "blocked";
       execution.failure = { code: "ASSET_AUTHORIZATION_FAILED", message: error instanceof Error ? error.message : "The selected Asset cannot be used by this Presence.", retryable: false };
@@ -7291,7 +7663,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     const presence = state.presences.find((item) => item.id === (operation.presenceId ?? state.activePresenceId)) ?? state.presence;
     const assignment = presence ? growthAssignmentFor(state, presence.id, operation.assignmentId) : undefined;
     if (!assignment) return state;
-    const reviewed = createGrowthReview(state, assignment, operation.kind ?? "weekly", operation.modelDecision);
+    const reviewed = createGrowthReview(state, assignment, operation.kind ?? "weekly", operation.modelDecision, undefined, operation.reviewAt ? new Date(operation.reviewAt) : undefined);
     reviewed.events.unshift(event("learning", "Growth review completed", reviewed.growthReviews[0]?.summary ?? "Genny reviewed the available Growth evidence.", "positive", { presenceId: assignment.presenceId }));
     return reviewed;
   }
@@ -7426,14 +7798,32 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     const assignment = compileAssignmentInstruction(state, operation.instruction, operation.presenceId, operation.environment ?? "sandbox", operation.sessionId, operation.schedule, operation.delegationPolicy, operation.objective);
     if (operation.assetConstraint?.collectionId && !state.assetCollections?.some((collection) => collection.id === operation.assetConstraint?.collectionId && collection.agentId === state.agent?.id && collection.status === "active")) throw new Error("That Asset Collection does not belong to the active Agent.");
     assignment.assetConstraint = operation.assetConstraint;
-    assignment.createdBy = "operator";
+    assignment.createdBy = operation.createdBy ?? "operator";
+    if (operation.strategyTemplateId) {
+      const template = (state.growthHypotheses ?? []).find((item) => item.id === operation.strategyTemplateId && item.agentId === state.agent?.id && item.originatingPresenceId === assignment.presenceId && item.template && !["retired", "disfavored"].includes(item.status));
+      if (!template) throw new Error("That strategy template is unavailable to this Presence.");
+      assignment.strategyTemplateId = template.id;
+    }
+    if (operation.title?.trim() && !assignmentPresentationNeedsRepair({ ...assignment, title: operation.title.trim() })) assignment.title = operation.title.trim();
+    if (operation.description) assignment.description = operation.description.trim();
+    if (operation.timeframe) {
+      const start = Date.parse(operation.timeframe.startsAt);
+      const end = Date.parse(operation.timeframe.deadline);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) throw new Error("Choose an end time after the start time.");
+      if (assignment.activation?.type === "continuous") throw new Error("An ongoing goal cannot have a one-time work window.");
+      assignment.timeframe = { startsAt: new Date(start).toISOString(), deadline: new Date(end).toISOString() };
+      if (!assignment.planningOnly) assignment.nextDueAt = assignment.timeframe.startsAt;
+    }
+    assignment.preflight = preflightAssignment(state, assignment, assignment.executionPolicy.delegationPolicy);
     const signature = assignmentCreationSignature(assignment);
     const duplicate = state.assignments.find((existing) => assignmentCanBlockDuplicateCreation(existing) && assignmentCreationSignature(existing) === signature);
     if (duplicate) return state;
     assignment.revision = 0;
     state.assignments.unshift(assignment);
     ensureCapabilityRequests(state, assignment.presenceId);
-    state.events.unshift(event("system", "Assignment created", `${assignment.preflight?.status === "ready" || assignment.preflight?.status === "ready_with_assumptions" ? "Ready to work" : "Needs information"} · ${assignment.progress.required} ${assignment.deliverable.type === "original_publication" ? "original publications" : assignment.deliverable.type} · ${assignment.recurrence?.label ?? "One time"}.`, assignment.preflight?.status === "blocked" || assignment.preflight?.status === "needs_input" ? "warning" : "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
+    state.events.unshift(event("system", "Assignment created", assignment.planningOnly
+      ? "Private planning Task saved for operator review. No public action will be taken until it is explicitly started."
+      : `${assignment.preflight?.status === "ready" || assignment.preflight?.status === "ready_with_assumptions" ? "Ready to work" : "Needs information"} · ${assignment.progress.required} ${assignment.deliverable.type === "original_publication" ? "original publications" : assignment.deliverable.type} · ${assignment.recurrence?.label ?? "One time"}.`, assignment.preflight?.status === "blocked" || assignment.preflight?.status === "needs_input" ? "warning" : "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
     return state;
   }
   if (operation.type === "updateAssignment") {
@@ -7441,18 +7831,38 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     if (!assignment || ["completed", "completed_with_adaptation", "cancelled"].includes(assignment.status)) return state;
     const activeRun = (state.assignmentRuns ?? []).some((run) => run.assignmentId === assignment.id && ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status));
     if (activeRun || ["working", "awaiting_execution"].includes(assignment.status)) return state;
+    if (operation.timeframe && ["expired_incomplete", "failed"].includes(assignment.status)
+      && state.executions.some((execution) => execution.assignmentId === assignment.id && ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"].includes(execution.status))) {
+      throw new Error("This task still has an unresolved delivery. Check its outcome before starting another attempt.");
+    }
+    if (operation.timeframe) {
+      const start = Date.parse(operation.timeframe.startsAt), end = Date.parse(operation.timeframe.deadline);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end <= Date.now()) throw new Error("Choose a future end time after the start time.");
+      if (assignment.activation?.type === "continuous") throw new Error("Edit an ongoing goal in Growth instead of giving it a one-time window.");
+    }
     const compiled = compileAssignmentInstruction(state, operation.instruction, assignment.presenceId, assignment.environment, assignment.sessionId, operation.schedule === undefined ? assignment.schedule : operation.schedule ?? undefined, assignment.executionPolicy.delegationPolicy ?? "keep_moving", operation.objective ?? assignment.objective);
     const timestamp = now();
     const previousInstruction = assignment.instruction;
     assignment.instruction = compiled.instruction;
-    assignment.title = compiled.title;
+    assignment.title = operation.title?.trim() && !assignmentPresentationNeedsRepair({ ...compiled, title: operation.title.trim() }) ? operation.title.trim() : compiled.title;
+    assignment.description = operation.description?.trim() || compiled.description;
     assignment.activation = compiled.activation;
     assignment.deliverable = compiled.deliverable;
     assignment.progress = { ...assignment.progress, required: compiled.progress.required };
     assignment.quantityPolicy = compiled.quantityPolicy;
     assignment.recurrence = compiled.recurrence;
     assignment.schedule = compiled.schedule;
-    assignment.timeframe = compiled.timeframe;
+    assignment.timeframe = compiled.timeframe ?? assignment.timeframe;
+    if (operation.timeframe) {
+      assignment.timeframe = { startsAt: new Date(operation.timeframe.startsAt).toISOString(), deadline: new Date(operation.timeframe.deadline).toISOString() };
+      assignment.nextDueAt = assignment.timeframe.startsAt;
+      if (["expired_incomplete", "failed"].includes(assignment.status)) {
+        assignment.status = "draft";
+        assignment.work = { ...(assignment.work ?? { storiesResearched: 0, maxAttempts: 4 }), phase: "candidate_review", attempts: 0, blockedReason: undefined };
+        // Past runs and verified outcomes remain the audit record. Saving a
+        // new window prepares a task; explicit activation resumes it.
+      }
+    }
     assignment.editorialContext = compiled.editorialContext;
     assignment.audienceObjective = compiled.audienceObjective;
     assignment.objective = compiled.objective;
@@ -7605,6 +8015,29 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     state.events.unshift(event("system", "Assignment paused", `${assignment.title ?? assignment.instruction} is paused. No new work will be started until you resume it.`, "quiet", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
     return state;
   }
+  if (operation.type === "planIntervention") {
+    const assignment = state.assignments.find((item) => item.id === operation.assignmentId);
+    if (!assignment || ["completed", "completed_with_adaptation", "cancelled"].includes(assignment.status)) return state;
+    const timestamp = now();
+    if (operation.action === "cancel") {
+      return applyOperation(state, { type: "cancelAssignment", id: assignment.id });
+    }
+    if (operation.action === "pause") return applyOperation(state, { type: "pauseAssignment", id: assignment.id });
+    if (operation.action === "resume") return applyOperation(state, { type: "resumeAssignment", id: assignment.id });
+    if (operation.action === "postpone" && operation.schedule) {
+      assignment.schedule = operation.schedule;
+      assignment.nextDueAt = operation.schedule.date ? new Date(`${operation.schedule.date}T${operation.schedule.time}:00`).toISOString() : assignment.nextDueAt;
+    }
+    if (operation.action === "constrain" || operation.action === "replan") {
+      const note = operation.instruction?.trim() || operation.note.trim();
+      if (note && !assignment.instruction.includes(note)) assignment.instruction = `${assignment.instruction.trim()}\n\nSupervisory constraint: ${note}`;
+      assignment.preflight = preflightAssignment(state, assignment, assignment.executionPolicy.delegationPolicy);
+    }
+    assignment.revision = (assignment.revision ?? 0) + 1;
+    assignment.updatedAt = timestamp;
+    state.events.unshift(event("decision", "Agent plan changed", `${assignment.title ?? assignment.instruction} was updated from supervisory feedback: ${operation.note.trim()}`, "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId, sourceObjectId: assignment.id }));
+    return state;
+  }
   if (operation.type === "resumeAssignment") {
     const assignment = state.assignments.find((item) => item.id === operation.id);
     if (!assignment || assignment.status !== "paused") return state;
@@ -7622,13 +8055,20 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
   if (operation.type === "activateAssignment") {
     const assignment = state.assignments.find((item) => item.id === operation.id);
     if (!assignment || ["completed", "cancelled"].includes(assignment.status)) return state;
+    const wasPlanningOnly = assignment.planningOnly === true;
+    // Activation is the explicit operator confirmation that turns a saved
+    // planning artifact into executable responsibility.
+    if (wasPlanningOnly) assignment.planningOnly = false;
     assignment.preflight = preflightAssignment(state, assignment, operation.delegationPolicy ?? assignment.executionPolicy.delegationPolicy);
     if (!["ready", "ready_with_assumptions"].includes(assignment.preflight.status)) {
+      if (wasPlanningOnly) assignment.planningOnly = true;
       state.events.unshift(event("decision", "Assignment needs input", assignment.preflight.issues.join(" ") || "The completion contract is not ready to activate.", "warning", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
       return state;
     }
     assignment.executionPolicy.delegationPolicy = operation.delegationPolicy ?? assignment.executionPolicy.delegationPolicy ?? "keep_moving";
-    assignment.status = assignment.status === "blocked" ? "active" : "active";
+    assertAssignmentWindowOpen(assignment.timeframe?.startsAt && Date.parse(assignment.timeframe.startsAt) > Date.now() ? { timeframe: { deadline: assignment.timeframe.deadline } } : assignment);
+    assignment.status = "active";
+    if (!assignment.schedule) assignment.nextDueAt = assignment.timeframe?.startsAt ?? now();
     assignment.revision = (assignment.revision ?? 0) + 1;
     assignment.updatedAt = now();
     ensureCapabilityRequests(state, assignment.presenceId);

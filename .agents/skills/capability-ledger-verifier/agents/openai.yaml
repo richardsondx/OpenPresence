@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capability Ledger Verifier"
+  short_description: "Track what OpenPresence has actually proven"
+  default_prompt: "Use $capability-ledger-verifier to update the behavioral capability ledger with concrete evidence and remaining gaps."

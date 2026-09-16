@@ -34,6 +34,36 @@ function normalizeLegacyRuntimeIncidents(presenceId?: string) {
   for (const incident of listRecoveryIncidents(presenceId)) {
     if (incident.state === "resolved") continue;
 
+    // A saved native write after the most recent billing failure proves this
+    // boundary recovered. Reads, browser delivery, queued retries, and old
+    // successes do not. Reconcile only after that evidence is persisted.
+    const nativeBilling = incident.rootCauseKey === "native_x.credits_exhausted"
+      || incident.rootCauseKey.endsWith(".credits_exhausted") && incident.dependencyId.includes("native_x")
+      || incident.rootCauseKey === "runtime.credits_exhausted" && /\bX\b/.test(incident.safeSummary);
+    if (nativeBilling && runtimeState.executions.some((execution) =>
+      execution.presenceId === incident.presenceId && execution.environment === "live"
+      && execution.connector === "native" && execution.affordance.startsWith("x.")
+      && execution.status === "succeeded" && Boolean(execution.externalRef)
+      && Boolean(execution.executedAt && execution.executedAt > incident.lastObservedAt))) {
+      incident.state = "resolved";
+      incident.resolvedAt = now;
+      incident.updatedAt = now;
+      incident.operatorActionRequired = false;
+      delete incident.nextAttemptAt;
+      upsertRecoveryIncident(incident);
+      const health = getDependencyHealth(incident.rootCauseKey.startsWith("runtime.") ? "runtime" : "native_x", incident.presenceId);
+      if (health?.currentIncidentId === incident.id) {
+        health.state = "healthy";
+        health.consecutiveFailures = 0;
+        health.lastHealthyAt = now;
+        health.updatedAt = now;
+        delete health.currentIncidentId;
+        delete health.circuitUntil;
+        upsertDependencyHealth(health);
+      }
+      continue;
+    }
+
     // The database was verified before this process began serving requests.
     // Retire only incidents that predate that verified open; a corruption
     // discovered after startup must remain a hard operator boundary.
@@ -180,7 +210,13 @@ function normalizeLegacyRuntimeIncidents(presenceId?: string) {
 
     if (incident.rootCauseKey !== "runtime.transient_error" || !incident.currentRecoveryStep?.startsWith("recover_stale_run_")) continue;
     const affectedRuns = incident.affectedRunIds.map((runId) => getOperationalRun(runId)).filter((run): run is NonNullable<typeof run> => Boolean(run));
-    const legacyRuns = affectedRuns.filter((run) => run.stage.startsWith("stale_recovery_") && ["recovering", "needs_operator", "blocked"].includes(run.state));
+    const legacyRuns = affectedRuns.filter((run) =>
+      (run.stage.startsWith("stale_recovery_") && ["recovering", "needs_operator", "blocked"].includes(run.state))
+      // The old watchdog may already have fenced the run before this
+      // normalization pass executes. Keep that terminal marker eligible so
+      // the incident cannot remain as a ghost Needs You alert forever.
+      || (run.state === "cancelled" && run.stage === "superseded_by_recovery_fix")
+    );
     for (const run of legacyRuns) {
       run.state = "cancelled";
       run.stage = "superseded_by_recovery_fix";
