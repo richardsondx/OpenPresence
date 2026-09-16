@@ -86,6 +86,8 @@ describe("Workstream A deterministic replay contract", () => {
       const first = addSandboxEvent(firstState, { sessionId: firstState.playgroundSessions[0]!.id, actorName: "Maya", content: "same input" });
       const second = addSandboxEvent(secondState, { sessionId: secondState.playgroundSessions[0]!.id, actorName: "Maya", content: "same input" });
       expect(first.playgroundSessions[0]!.virtualNow).toBe(second.playgroundSessions[0]!.virtualNow);
+      expect(first.assignments.find((item) => item.origin === "publishing_initiative")?.id).toBe(second.assignments.find((item) => item.origin === "publishing_initiative")?.id);
+      expect(first.assignments.find((item) => item.origin === "publishing_initiative")?.createdAt).toBe(second.assignments.find((item) => item.origin === "publishing_initiative")?.createdAt);
       expect(first.sandboxActors[0]!.id).toBe(second.sandboxActors[0]!.id);
       expect(first.mirrorObjects[0]!.externalRef.id).toBe(second.mirrorObjects[0]!.externalRef.id);
     } finally {
