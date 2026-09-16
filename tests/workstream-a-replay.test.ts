@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { captureSandboxWorld, restoreSandboxWorld, sandboxWorldDigest } from "../lib/sandbox-replay";
 import { SandboxTemporalKernel } from "../lib/sandbox-temporal";
 import { addSandboxEvent, createAgent, startPlaygroundSession } from "../lib/runtime";
@@ -61,12 +61,18 @@ describe("Workstream A deterministic replay contract", () => {
   });
 
   it("uses a seed for reproducible Sandbox clock and actor identities", () => {
-    const firstState = startPlaygroundSession(createAgent({ name: "Replay Agent", description: "Replay proofs", audience: "builders", mode: "agent", handle: "@replay_agent", accent: "#aa7744" }), undefined, "fresh", "same-seed");
-    const secondState = startPlaygroundSession(createAgent({ name: "Replay Agent", description: "Replay proofs", audience: "builders", mode: "agent", handle: "@replay_agent", accent: "#aa7744" }), undefined, "fresh", "same-seed");
-    const first = addSandboxEvent(firstState, { sessionId: firstState.playgroundSessions[0]!.id, actorName: "Maya", content: "same input" });
-    const second = addSandboxEvent(secondState, { sessionId: secondState.playgroundSessions[0]!.id, actorName: "Maya", content: "same input" });
-    expect(first.playgroundSessions[0]!.virtualNow).toBe(second.playgroundSessions[0]!.virtualNow);
-    expect(first.sandboxActors[0]!.id).toBe(second.sandboxActors[0]!.id);
-    expect(first.mirrorObjects[0]!.externalRef.id).toBe(second.mirrorObjects[0]!.externalRef.id);
+    try {
+      vi.setSystemTime(new Date("2031-04-01T12:00:00.000Z"));
+      const firstState = startPlaygroundSession(createAgent({ name: "Replay Agent", description: "Replay proofs", audience: "builders", mode: "agent", handle: "@replay_agent", accent: "#aa7744" }), undefined, "fresh", "same-seed");
+      vi.setSystemTime(new Date("2031-04-01T12:00:17.000Z"));
+      const secondState = startPlaygroundSession(createAgent({ name: "Replay Agent", description: "Replay proofs", audience: "builders", mode: "agent", handle: "@replay_agent", accent: "#aa7744" }), undefined, "fresh", "same-seed");
+      const first = addSandboxEvent(firstState, { sessionId: firstState.playgroundSessions[0]!.id, actorName: "Maya", content: "same input" });
+      const second = addSandboxEvent(secondState, { sessionId: secondState.playgroundSessions[0]!.id, actorName: "Maya", content: "same input" });
+      expect(first.playgroundSessions[0]!.virtualNow).toBe(second.playgroundSessions[0]!.virtualNow);
+      expect(first.sandboxActors[0]!.id).toBe(second.sandboxActors[0]!.id);
+      expect(first.mirrorObjects[0]!.externalRef.id).toBe(second.mirrorObjects[0]!.externalRef.id);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
