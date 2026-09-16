@@ -7867,6 +7867,9 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     return state;
   }
   if (operation.type === "createAssignment") {
+    const playgroundSession = operation.sessionId ? state.playgroundSessions.find((session) => session.id === operation.sessionId) : undefined;
+    if (operation.sessionId && (!playgroundSession || playgroundSession.presenceId !== operation.presenceId)) throw new Error("The Assignment and Playground session must share the same Presence.");
+    if (playgroundSession && operation.environment === "live") throw new Error("A Playground session can only own Sandbox Assignments.");
     const assignment = compileAssignmentInstruction(state, operation.instruction, operation.presenceId, operation.environment ?? "sandbox", operation.sessionId, operation.schedule, operation.delegationPolicy, operation.objective);
     if (operation.assetConstraint?.collectionId && !state.assetCollections?.some((collection) => collection.id === operation.assetConstraint?.collectionId && collection.agentId === state.agent?.id && collection.status === "active")) throw new Error("That Asset Collection does not belong to the active Agent.");
     assignment.assetConstraint = operation.assetConstraint;
