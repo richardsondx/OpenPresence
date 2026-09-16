@@ -158,4 +158,28 @@ describe("Autonomous native execution delivery", () => {
     expect(delivered.executions[0]?.failure?.code).toBe("DUPLICATE_PUBLIC_OUTCOME");
     expect(publish).not.toHaveBeenCalled();
   });
+
+  it("rechecks Presence authority before crossing the native connector boundary", async () => {
+    const targetId = `native-paused-${Date.now()}-${Math.random()}`;
+    let state = createAgent({ name: "Paused Delivery", description: "Test", audience: "Testers", mode: "agent", handle: "@paused_delivery", accent: "#777777" });
+    const presence = { ...state.presence!, environment: "live" as const, connectionMode: "native" as const, status: "live" as const, execution: { ...state.presence!.execution, like: "auto" as const } };
+    const connection: NativeChannelConnection = { id: `native-paused-${Date.now()}`, presenceId: presence.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "paused-account", username: "paused_delivery", name: "Paused Delivery" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    state.presence = presence;
+    state.presences = [presence];
+    state.nativeConnections = [connection];
+    state.mirrorObjects = [{ id: `mirror-${targetId}`, bridgeId: connection.id, presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: targetId }, objectType: "post", content: { text: "Target", language: "en" }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "live" } as never];
+    state = formXActionIntent(state, { affordance: "x.like", target: { type: "x.post", id: targetId } });
+    const execution = state.executions[0]!;
+    const paused = { ...presence, status: "paused" as const };
+    state.presence = paused;
+    state.presences = [paused];
+    vi.spyOn(x, "readNativeXCredentials").mockReturnValue({ apiKey: "key", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" });
+    const like = vi.spyOn(x, "likeXPost").mockResolvedValue({ type: "x.like", id: targetId });
+    process.env.OPENPRESENCE_TEST_MODE = "0";
+
+    const delivered = await deliverNativeExecutions(state, new Set([execution.id]));
+
+    expect(delivered.executions[0]).toMatchObject({ status: "cancelled", failure: { code: "PRESENCE_PAUSED" } });
+    expect(like).not.toHaveBeenCalled();
+  });
 });

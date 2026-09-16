@@ -1667,11 +1667,6 @@ export function validateSocialStrategySelection(decision: AgentSocialDecision, c
   if (!decision.acts || !context?.retrievalRun.consideredPatterns.length || decision.action === "no_op") return;
   const patterns = context.retrievalRun.consideredPatterns;
   const acts: NonNullable<AgentSocialDecision["acts"]> = decision.acts ?? [{ action: decision.action, text: decision.text }];
-  // Compatibility envelope: providers that return the supported multi-act
-  // shape but omit strategy fields are still valid social judgments. Enforce
-  // attribution when the provider participates in the strategy contract, not
-  // by turning an otherwise usable public decision into a retry loop.
-  if (!acts.some((act) => act.strategyId || act.noStrategyReason)) return;
   for (const act of acts) {
     const pattern = patterns.find(item => item.id === act.strategyId);
     if (act.strategyId && !pattern || !pattern && !act.noStrategyReason?.trim()) {

@@ -77,6 +77,22 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
     // boundary so a restarted worker cannot replay an action already verified
     // by an earlier invocation of the same attention episode.
     const durable = readStateSnapshotForContext({ presenceId: execution.presenceId });
+    const durablePresence = durable.presences.find((item) => item.id === execution.presenceId) ?? durable.presence;
+    const currentPresence = next.presences.find((item) => item.id === execution.presenceId) ?? next.presence;
+    const currentMode = currentPresence?.execution[execution.affordance];
+    if (durablePresence?.status === "paused" || currentPresence?.status === "paused" || currentMode === "off") {
+      const paused = next.executions.find((item) => item.id === execution.id);
+      if (paused) {
+        paused.status = "cancelled";
+        const revoked = currentMode === "off" && currentPresence?.status !== "paused";
+        paused.failure = { code: revoked ? "EXECUTION_REVOKED" : "PRESENCE_PAUSED", message: revoked ? "The Presence execution permission was revoked before delivery. No external action was attempted." : "The Presence was paused before delivery. No external action was attempted.", retryable: false };
+        paused.reviewReason = revoked ? "The Presence execution permission was revoked before delivery." : "The Presence was paused before delivery.";
+        paused.updatedAt = new Date().toISOString();
+        const action = next.actions.find((item) => item.executionId === paused.id);
+        if (action) { action.status = "skipped"; action.reason = "The Presence was paused before delivery; no external action was attempted."; }
+      }
+      continue;
+    }
     if (targetIsBlockedByPerson(durable, execution.presenceId, execution.target) && !execution.operatorDirectiveId) {
       const blocked = cancelExecutionForBlockedTarget(durable, execution.id);
       Object.assign(next, blocked);

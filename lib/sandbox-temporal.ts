@@ -168,6 +168,8 @@ export interface SandboxTemporalSnapshot {
   nextRetryNumber: number;
   nextTrajectoryNumber: number;
   nextCheckpointNumber?: number;
+  /** Fractional virtual milliseconds carried between accelerated ticks. */
+  accelerationRemainderMs?: number;
   bounds: SandboxTemporalBounds;
   /** Persisted immutable branch points; omitted by nested checkpoint snapshots. */
   checkpoints?: TemporalCheckpoint[];
@@ -342,6 +344,7 @@ export class SandboxTemporalKernel {
   private retryNumberValue = 0;
   private trajectoryNumberValue = 0;
   private checkpointNumberValue = 0;
+  private accelerationRemainderMsValue = 0;
 
   constructor(options: SandboxTemporalOptions = {}) {
     this.nowValue = timeMs(options.startAt, 0);
@@ -359,6 +362,7 @@ export class SandboxTemporalKernel {
     kernel.nowValue = snapshot.now;
     kernel.pausedValue = snapshot.paused;
     kernel.accelerationValue = clone(snapshot.acceleration);
+    kernel.accelerationRemainderMsValue = snapshot.accelerationRemainderMs ?? 0;
     kernel.eventsValue = clone(snapshot.events);
     kernel.outcomesValue = clone(snapshot.outcomes);
     kernel.deferredOutcomeValues = new Map(Object.entries(snapshot.deferredOutcomeValues ?? {}));
@@ -410,6 +414,7 @@ export class SandboxTemporalKernel {
       nextRetryNumber: this.retryNumberValue,
       nextTrajectoryNumber: this.trajectoryNumberValue,
       nextCheckpointNumber: this.checkpointNumberValue,
+      accelerationRemainderMs: this.accelerationRemainderMsValue,
       bounds: clone(this.boundsValue),
     };
   }
@@ -450,7 +455,9 @@ export class SandboxTemporalKernel {
   /** Apply real elapsed time through the explicit acceleration factor. */
   tick(realElapsedMs: number, options: AdvanceOptions = {}): AdvanceResult {
     nonNegativeInteger(realElapsedMs, "realElapsedMs");
-    const virtualElapsedMs = this.pausedValue ? 0 : realElapsedMs * this.accelerationValue.factor;
+    const exactVirtualElapsedMs = this.pausedValue ? 0 : realElapsedMs * this.accelerationValue.factor + this.accelerationRemainderMsValue;
+    const virtualElapsedMs = Math.floor(exactVirtualElapsedMs);
+    this.accelerationRemainderMsValue = this.pausedValue ? 0 : exactVirtualElapsedMs - virtualElapsedMs;
     if (!Number.isSafeInteger(virtualElapsedMs)) throw new TemporalValidationError("Accelerated duration exceeds safe integer milliseconds.");
     this.accelerationValue = { ...this.accelerationValue, realElapsedMs, virtualElapsedMs, updatedAt: this.nowValue };
     return this.advanceBy(virtualElapsedMs, options);
@@ -672,8 +679,7 @@ export class SandboxTemporalKernel {
   fork(checkpointId?: string): SandboxTemporalKernel {
     const source = checkpointId ? this.checkpointsValue.get(checkpointId)?.snapshot : this.snapshot();
     if (!source) throw new TemporalValidationError(`Unknown checkpoint: ${checkpointId}.`);
-    const child = SandboxTemporalKernel.fromSnapshot(source);
-    child.handlers = new Map(this.handlers);
+    const child = SandboxTemporalKernel.fromSnapshot(source, Object.fromEntries(this.handlers.entries()));
     child.addTrajectory("fork_created", { checkpointId, parentNow: this.nowValue });
     return child;
   }
@@ -803,6 +809,7 @@ export class SandboxTemporalKernel {
   }
 
   private scheduleNextOccurrence(event: TemporalEvent): void {
+    if (event.status !== "fired") return;
     const recurrence = event.recurrence;
     if (!recurrence) return;
     const nextOccurrence = event.occurrence + 1;

@@ -187,6 +187,10 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
         .filter((execution) => execution.presenceId === presence?.id && execution.status === "succeeded" && execution.publication?.origin?.kind === "publishing_initiative" && execution.publication.origin.planId === plan?.id && execution.publication.origin.planRevision === plan?.revision)
         .map((execution) => execution.id));
       next.publishingPlans = plan ? [plan] : [];
+      // Schedule is an Agent-owned projection, but the calendar itself is
+      // still the source of the supervisory view. The history projection
+      // above intentionally clears it, so restore it explicitly here.
+      next.calendar = state.calendar;
       next.mirrorObjects = state.mirrorObjects.filter((object) => object.presenceId === presence?.id && object.originExecutionId !== undefined && planExecutionIds.has(object.originExecutionId));
       next.assignments = state.assignments;
       next.assignmentRuns = state.assignmentRuns;
