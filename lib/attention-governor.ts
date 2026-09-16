@@ -92,7 +92,9 @@ function eventCountsFor(state: OpenPresenceState, presenceId: string, now: Date)
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence ?? undefined;
   const resetAt = presence?.selfDirectedAttention?.usageResetAt;
   const start = Math.max(dayStart(now), resetAt ? new Date(resetAt).getTime() : Number.NEGATIVE_INFINITY);
-  const events = state.resourceUsageEvents.filter((event) => event.presenceId === presenceId && new Date(event.createdAt).getTime() >= start);
+  // A reset establishes a new epoch. An event recorded at the exact reset
+  // boundary belongs to the preserved prior epoch, not the freshly reset one.
+  const events = state.resourceUsageEvents.filter((event) => event.presenceId === presenceId && new Date(event.createdAt).getTime() > start);
   return {
     // Exploration is self-initiated attention too. Keeping it in the
     // background bucket let a Presence spend its entire daily model envelope
