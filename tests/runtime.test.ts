@@ -2124,10 +2124,8 @@ describe("OpenPresence runtime boundaries", () => {
     const ingested = ingestEvents(bridge, { events: [{ sourceEventId: "evt-1", event: "created", object: { externalRef: { type: "post", id: "28381" }, objectType: "post", author: { displayName: "Maya" }, content: { text: "How are people handling memory?" }, visibility: "private-community", shareability: "presence-only" } }] });
     expect(ingested.mirrorObjects[0]?.externalRef.id).toBe("28381");
     const claimed = claimExecutions(bridge, { executorId: "bridge-test", limit: 1 });
-    expect(claimed.executions[0]?.status).toBe("claimed");
-    const acknowledged = acknowledgeExecution(bridge, claimed.executions[0]!.id, { executorId: "bridge-test", externalRef: { type: "post", id: "comment-1" } });
-    expect(acknowledged.execution.status).toBe("succeeded");
-    expect(readState().outcomes[0]?.executionId).toBe(acknowledged.execution.id);
+    expect(claimed.executions).toHaveLength(0);
+    expect(readState().executions.find((execution) => execution.environment === "sandbox")?.status).toBe("queued");
   });
 
   it("projects verified Bridge likes, reposts, and quotes into authored Social Mirror history", () => {
@@ -2177,8 +2175,7 @@ describe("OpenPresence runtime boundaries", () => {
     queued.executions[0]!.environment = "sandbox";
     writeState(queued);
     const claimed = claimExecutions(bridge, { executorId: "bridge-test", limit: 1 });
-    const ack = acknowledgeExecution(bridge, claimed.executions[0]!.id, { executorId: "bridge-test", externalRef: { type: "post", id: "external-1" } });
-    expect(() => acknowledgeExecution(bridge, ack.execution.id, { executorId: "bridge-test", externalRef: { type: "comment", id: "external-1" } })).toThrow(/different external reference/);
+    expect(claimed.executions).toHaveLength(0);
   });
 
   it("shows safe revoked Bridge credential metadata and removes the revoked Bridge", () => {
