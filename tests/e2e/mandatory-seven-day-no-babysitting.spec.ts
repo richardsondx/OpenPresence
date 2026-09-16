@@ -316,6 +316,40 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
       const fromVirtualNow = text(previous.session.virtualNow);
       const cli = await runCli(baseUrl, command);
       current = await readSnapshot(request, sessionId!);
+      if (step.label === "day-6-world-degraded-pattern") {
+        const correctionId = "mandatory-seven-day-user-correction";
+        const correction = await request.post("/api/state", {
+          data: {
+            type: "sendPresenceNudge",
+            presenceId,
+            content: "That visual style is not right for us. Never use it again.",
+            clientRequestId: correctionId,
+          },
+        });
+        expect(correction.ok(), "The natural user correction was not accepted.").toBeTruthy();
+        current = await readSnapshot(request, sessionId!);
+        const correctionStateResponse = await request.get("/api/state");
+        expect(correctionStateResponse.ok()).toBeTruthy();
+        const correctionState = record(await correctionStateResponse.json());
+        const conversation = records(correctionState.operatorConversations);
+        const messages = conversation.flatMap((item) => records(item.messages));
+        expect(messages.some((message) => text(message.clientRequestId) === correctionId), "The user correction was not persisted.").toBe(true);
+        const agentAssignment = current.assignments.find((item) => text(item.createdBy) === "agent");
+        expect(agentAssignment, "The correction requires an Agent-owned planned item to supervise.").toBeTruthy();
+        const intervention = await request.post("/api/state", {
+          data: {
+            type: "planIntervention",
+            assignmentId: text(agentAssignment?.id),
+            action: "constrain",
+            note: "Never use that visual style again.",
+            instruction: "Never use that visual style again.",
+          },
+        });
+        expect(intervention.ok(), "The scoped supervisory intervention was not accepted.").toBeTruthy();
+        current = await readSnapshot(request, sessionId!);
+        expect(current.events.some((event) => text(event.title) === "Agent plan changed" && text(event.sourceObjectId) === text(agentAssignment?.id))).toBe(true);
+        expect(current.assignments.find((item) => text(item.id) === text(agentAssignment?.id))?.instruction).toContain("Never use that visual style again.");
+      }
       const work = newRecords(previous.assignments, current.assignments).filter((item) => text(item.createdBy) === "agent" || text(item.origin) === "publishing_initiative");
       const intents = newRecords(previous.intents, current.intents);
       const executions = newRecords(previous.executions, current.executions);
@@ -405,6 +439,8 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     expect(current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("withdrawn")), `The breaking event was not persisted in the Sandbox world. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
     expect(current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("unrelated product photo")), `The irrelevant media stimulus was not persisted. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
     expect(current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("baseline, denominator")), `The relevant media stimulus was not persisted. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
+    expect(current.executions.every((execution) => text(execution.environment) === "sandbox"), `A live execution escaped the Sandbox. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
+    expect(current.events.some((event) => text(event.title) === "Agent plan changed"), `The natural user correction did not mutate the Agent plan. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
     expect(autonomousWakeCount, `The continuous responsibility did not receive one autonomous wake per simulated day. Evidence: ${JSON.stringify(evidence)}`).toBeGreaterThanOrEqual(7);
     expect(unexplainedIdleDays, `The Agent went idle without work or an explicit blocker. Evidence: ${JSON.stringify(evidence)}`).toEqual([]);
     expect(

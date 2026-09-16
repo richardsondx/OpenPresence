@@ -36,7 +36,8 @@ function setupRuntimeAnchor() {
     },
   });
   const sessionState = startPlaygroundSession(state, state.presence!.id, "fresh");
-  expect(sessionState.assignments).toHaveLength(0);
+  expect(sessionState.assignments).toHaveLength(1);
+  expect(sessionState.assignments[0]).toMatchObject({ createdBy: "agent", origin: "publishing_initiative", status: "active" });
   expect(sessionState.playgroundSessions).toHaveLength(1);
   expect(sessionState.playgroundSessions[0]!.temporalSnapshot?.now).toBe(Date.parse(sessionState.playgroundSessions[0]!.virtualNow));
 }

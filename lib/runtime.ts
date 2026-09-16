@@ -944,7 +944,7 @@ function publishingAssignmentFor(state: OpenPresenceState, presence: Presence) {
 }
 
 /** Materialize the Presence-facing Publishing Initiative as the one canonical responsibility record. */
-export function syncPublishingInitiativeAssignment(source: OpenPresenceState, presenceId?: string) {
+export function syncPublishingInitiativeAssignment(source: OpenPresenceState, presenceId?: string, sessionId?: string) {
   const state = cloneState(source);
   const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
   if (!presence || !state.agent) return state;
@@ -976,6 +976,7 @@ export function syncPublishingInitiativeAssignment(source: OpenPresenceState, pr
   assignment.title = isPace ? "Original publishing pace" : "Maintain original presence";
   assignment.createdBy = "agent";
   assignment.origin = "publishing_initiative";
+  if (sessionId && assignment.environment === "sandbox") assignment.sessionId = sessionId;
   assignment.activation = { type: "continuous" };
   assignment.instruction = isPace ? `Aim for ${quantity ?? 1} original posts per ${initiative.target?.period ?? "day"}.` : "Maintain a useful original presence when there is something worth publishing.";
   assignment.deliverable = { type: isPace ? "original_publication" : "maintain_original_presence", quantity, quantityMode: mode };
@@ -3252,6 +3253,13 @@ export function startPlaygroundSession(source: OpenPresenceState, presenceId?: s
   state.sandboxEnvironments = state.sandboxEnvironments.map((item) => item.id === environment.id ? { ...item, status: "active", updatedAt: timestamp } : item);
   state.events.unshift(event("system", "Playground session started", `${channelName(presence.channel)} is simulated. ${presence.name} is using the real Agent runtime in an isolated world.`, "positive", { presenceId: presence.id }));
   state.events[0]!.sessionId = session.id;
+  // A Sandbox rehearsal of an autonomously enabled Presence must expose the
+  // same durable Agent-owned responsibility that the live loop would own.
+  // This is not a user-created Task and does not require activation; it is
+  // the plan projection used by the autonomous worker and supervisor.
+  if (presence.selfDirectedAttention?.enabled === true && presence.publishingInitiative.mode !== "off") {
+    return syncPublishingInitiativeAssignment(state, presence.id, session.id);
+  }
   return state;
 }
 
