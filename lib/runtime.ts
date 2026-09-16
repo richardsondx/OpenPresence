@@ -950,6 +950,7 @@ export function syncPublishingInitiativeAssignment(source: OpenPresenceState, pr
   if (!presence || !state.agent) return state;
   const initiative = presence.publishingInitiative;
   const existing = publishingAssignmentFor(state, presence);
+  const sandboxSession = sessionId ? state.playgroundSessions.find((item) => item.id === sessionId && item.presenceId === presence.id) : undefined;
   if (initiative.mode === "off") {
     if (existing) {
       existing.status = existing.status === "completed" ? existing.status : "paused";
@@ -963,9 +964,12 @@ export function syncPublishingInitiativeAssignment(source: OpenPresenceState, pr
   const isPace = initiative.mode === "pace";
   const quantity = isPace ? initiative.target?.count : undefined;
   const mode: AssignmentQuantityMode = "target";
-  const timestamp = now();
+  const timestamp = sandboxSession?.virtualNow ?? now();
+  const replayAssignmentId = sandboxSession?.seed
+    ? `assignment_${sandboxReplayToken(sandboxSession.seed, "publishing-initiative", 0)}`
+    : undefined;
   const assignment = existing ?? {
-    id: id("assignment"), agentId: state.agent.id, presenceId: presence.id, channelId: presence.channel,
+    id: replayAssignmentId ?? id("assignment"), agentId: state.agent.id, presenceId: presence.id, channelId: presence.channel,
     environment: presence.environment ?? "live", instruction: isPace ? `Aim for ${quantity ?? 1} original posts per ${initiative.target?.period ?? "day"}.` : "Maintain a useful original presence when there is something worth publishing.",
     deliverable: { type: isPace ? "original_publication" : "maintain_original_presence", quantity, quantityMode: mode },
     recurrence: isPace ? { kind: initiative.target?.period === "week" ? "weekly" as const : "daily" as const, label: `Every ${initiative.target?.period ?? "day"}` } : { kind: "daily" as const, label: "Ongoing" },

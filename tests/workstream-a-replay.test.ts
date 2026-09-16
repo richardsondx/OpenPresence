@@ -68,12 +68,13 @@ describe("Workstream A deterministic replay contract", () => {
     const assignment = state.assignments.find((item) => item.sessionId === session.id);
     expect(assignment).toBeDefined();
     const checkpoint = captureSandboxWorld(state, session.id);
-    expect(checkpoint.collections.assignments).toHaveLength(1);
+    expect(checkpoint.collections.assignments).toHaveLength(2);
+    expect(checkpoint.collections.assignments).toEqual(expect.arrayContaining([expect.objectContaining({ instruction: "Keep testing the durable replay path." })]));
 
     const other = startPlaygroundSession(state, state.presence!.id, "fresh", "other-world");
     const restored = restoreSandboxWorld(other, checkpoint);
-    expect(restored.assignments.filter((item) => item.sessionId === session.id)).toHaveLength(1);
-    expect(restored.assignments.filter((item) => item.sessionId === other.playgroundSessions[0]!.id)).toHaveLength(0);
+    expect(restored.assignments.filter((item) => item.sessionId === session.id)).toHaveLength(2);
+    expect(restored.assignments.filter((item) => item.sessionId === other.playgroundSessions[0]!.id)).toHaveLength(1);
   });
 
   it("uses a seed for reproducible Sandbox clock and actor identities", () => {

@@ -67,6 +67,16 @@ causal reconstruction evidence remain incomplete.
 
 ## Update protocol
 
+Latest integrated Sandbox evidence (2026-09-16): the real CLI-launched
+mandatory trajectory began with zero user Assignments, materialized one
+session-scoped Agent-owned Sandbox responsibility, ran for 10,080 virtual
+minutes, recorded seven autonomous wakes, four measured executions, a natural
+user correction, a scoped `planIntervention`, and no live-environment
+execution. This strengthens SBX-001, SBX-005, SBX-008, SBX-009, EVAL-001,
+UX-001, and UX-005 but does not upgrade them because independent replay,
+hidden-truth, isolation, and complete causal reconstruction evidence remain
+incomplete.
+
 After every meaningful implementation or verification cycle, update affected
 rows with the command/scenario and durable evidence path. Mark `REGRESSED`
 explicitly when previously supported behavior fails. The next development slice
