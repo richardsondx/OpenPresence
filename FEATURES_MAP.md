@@ -378,7 +378,7 @@ Schedule expresses future responsibility. A Standing Intent persists an instruct
 
 **User POV**
 
-Schedule leads with “What Genny expects to work on later.” The user writes the outcome, sees the generated completion contract and readiness, can choose List/Week, view Publishing plan vs Assignments, activate/run/replan/cancel, and inspect what is waiting.
+Schedule is an Agent-owned projection: it shows what Genny decided to pursue and why. The normal user path is Chat → Agent decision → Assignment → schedule/execution → measurement. The user can observe an item and intervene conversationally with “Tell Jenny something about this”; Genny owns the resulting plan. Traditional Add task, Edit Assignment, and Start task controls are not part of the primary UX. `planningOnly` is retained only as a compatibility state for legacy persisted user-created work and must not become a new workflow.
 
 **QA expectations**
 
@@ -386,7 +386,8 @@ Schedule leads with “What Genny expects to work on later.” The user writes t
 - `READY`, `READY WITH ASSUMPTIONS`, `NEEDS INPUT`, and `BLOCKED` are real persisted readiness states.
 - `Run now` evaluates Standing Intent; it does not publish prewritten text automatically.
 - Assignment stages and terminal outcomes remain inspectable; expired, blocked, delivery-failed, candidate-rejected, and completed are not collapsed.
-- Calendar edits update linked Standing Intent/Assignment state and survive reload.
+- Scoped supervisory guidance updates the linked Assignment/plan state and survives reload; direct field-edit forms are not required for intervention.
+- Capability-level tests must prove legacy `planningOnly` records remain safe while new Agent-owned Assignments are executable without explicit user activation.
 
 ### 14. Expression, Assets, Perception, and editorial curation
 
