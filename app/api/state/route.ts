@@ -4681,6 +4681,9 @@ async function applySandboxTemporalEvents(source: OpenPresenceState, sessionId: 
   const initialSession = next.playgroundSessions.find((item) => item.id === sessionId);
   if (!initialSession) return next;
   const finalVirtualNow = initialSession.virtualNow;
+  const finalTemporalSnapshot = initialSession.temporalSnapshot ? JSON.parse(JSON.stringify(initialSession.temporalSnapshot)) as NonNullable<typeof initialSession.temporalSnapshot> : undefined;
+  let eventTrajectory = finalTemporalSnapshot?.trajectory ?? [];
+  let nextTrajectoryNumber = finalTemporalSnapshot?.nextTrajectoryNumber ?? eventTrajectory.length;
   try {
     for (const event of processed) {
       if (event.type === "scenario_stimulus") {
@@ -4720,18 +4723,35 @@ async function applySandboxTemporalEvents(source: OpenPresenceState, sessionId: 
       const eventVirtualNow = new Date(event.at).toISOString();
       session.virtualNow = eventVirtualNow;
       session.virtualTimeMode = "manual";
+      // Keep the compatibility clock and temporal snapshot aligned while an
+      // event-local cognition pass runs before the bulk-advance endpoint.
+      if (finalTemporalSnapshot) {
+        session.temporalSnapshot = {
+          ...finalTemporalSnapshot,
+          now: event.at,
+          acceleration: { ...finalTemporalSnapshot.acceleration, updatedAt: event.at },
+          trajectory: eventTrajectory,
+          nextTrajectoryNumber,
+        };
+      }
       session.evaluatedSlotIds.push(payload.evaluationKey);
       next = markCalendarSlotEvaluated(next, slot.id, eventVirtualNow);
       const localSession = next.playgroundSessions.find((item) => item.id === sessionId);
       if (!localSession) continue;
       next.events.unshift({ id: `sandbox-calendar:${randomUUID()}`, type: "decision", title: "Calendar attention started", detail: `${next.presences.find((item) => item.id === localSession.presenceId)?.name ?? "The Presence"} is evaluating “${slot.instruction}” in the simulated world at ${eventVirtualNow}.`, time: eventVirtualNow, tone: "positive", presenceId: localSession.presenceId, sessionId: localSession.id, sourceTemporalEventId: event.id });
       next = await runSandboxAgentCycle(next, sessionId, slot.instruction);
+      const processedSession = next.playgroundSessions.find((item) => item.id === sessionId);
+      if (processedSession?.temporalSnapshot) {
+        eventTrajectory = processedSession.temporalSnapshot.trajectory;
+        nextTrajectoryNumber = processedSession.temporalSnapshot.nextTrajectoryNumber;
+      }
     }
   } finally {
     const session = next.playgroundSessions.find((item) => item.id === sessionId);
     if (session) {
       session.virtualNow = finalVirtualNow;
       session.virtualTimeMode = "manual";
+      if (finalTemporalSnapshot) session.temporalSnapshot = { ...finalTemporalSnapshot, trajectory: eventTrajectory, nextTrajectoryNumber };
     }
   }
   return next;

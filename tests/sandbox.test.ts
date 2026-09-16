@@ -152,6 +152,7 @@ describe("Sandbox and Playground boundaries", () => {
     expect(next.playgroundSessions.find((item: { id: string }) => item.id === session.id)?.virtualNow).toBe(new Date(Date.parse(session.virtualNow) + 2 * 24 * 60 * 60 * 1000).toISOString());
     expect(reply?.occurredAt).toBe(firstAt.toISOString());
     expect(next.calendar.find((item: { id: string }) => item.id === "calendar-local-time-1")?.lastEvaluatedAt).toBe(firstAt.toISOString());
+    expect(next.events.filter((item: { sessionId?: string; title?: string }) => item.sessionId === session.id && item.title === "Calendar attention started")).toHaveLength(2);
   });
 
   it("keeps Sandbox, native X, and Bridge as one mutually exclusive route", () => {
