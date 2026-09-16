@@ -717,9 +717,20 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
           receipt = JSON.stringify({ tool: step.kind, assignmentId: step.assignmentId, action: step.action, status: updated.status, revision: updated.revision, schedule: updated.schedule, instruction: updated.instruction });
         } else if (step.kind === "assignment") {
           const existingIds = new Set(next.assignments.map((item) => item.id));
-          next = applyOperation(next, { type: "createAssignment", presenceId: run.presenceId, environment: presence.environment === "sandbox" ? "sandbox" : "live", instruction: step.instruction, title: step.title, description: step.description, timeframe: step.timeframe, createdBy: "agent", strategyTemplateId: step.strategyTemplateId });
-          const created = next.assignments.find((item) => !existingIds.has(item.id));
+          const autonomousResponsibility = shouldMaterializeAutonomousResponsibility(operatorMessage.content)
+            ? next.assignments.find((item) => item.presenceId === run.presenceId && item.origin === "publishing_initiative" && !["cancelled", "failed"].includes(item.status))
+            : undefined;
+          if (!autonomousResponsibility) {
+            next = applyOperation(next, { type: "createAssignment", presenceId: run.presenceId, environment: presence.environment === "sandbox" ? "sandbox" : "live", instruction: step.instruction, title: step.title, description: step.description, timeframe: step.timeframe, createdBy: "agent", strategyTemplateId: step.strategyTemplateId });
+          }
+          const created = autonomousResponsibility ?? next.assignments.find((item) => !existingIds.has(item.id));
           if (!created) throw new Error("An equivalent responsibility already exists; no duplicate was created.");
+          if (autonomousResponsibility) {
+            created.instruction = step.instruction;
+            if (step.title?.trim()) created.title = step.title.trim();
+            if (step.description?.trim()) created.description = step.description.trim();
+            created.updatedAt = new Date().toISOString();
+          }
           if (shouldMaterializeAutonomousResponsibility(operatorMessage.content)) {
             // The model may describe an ongoing responsibility without using
             // the exact structured fields. Normalize that narrow ownership
