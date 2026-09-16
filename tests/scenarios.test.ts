@@ -5,6 +5,17 @@ import { addSandboxEvent, advanceSandboxTimeWithTemporalEvents, completeScenario
 const input = { name: "Alex", description: "Explain useful agent ideas.", mode: "agent" as const, handle: "@richardson", accent: "#D68754" };
 
 describe("Scenario rehearsal boundaries", () => {
+  it("propagates a developer-provided seed into the real Scenario Run Sandbox", () => {
+    let state = createAgent(input);
+    state = createScenarioFromPrompt(state, "Rehearse a short discussion about useful agent ideas.");
+    const scenario = state.scenarios.find((item) => item.ownerScope === "presence")!;
+    const version = state.scenarioVersions.find((item) => item.id === scenario.currentVersionId)!;
+    state = updateScenarioEvents(state, scenario.id, version.worldSpec.stimuli.map((stimulus, index) => ({ ...stimulus, offsetMinutes: index + 1 })));
+    state = startScenarioRunState(state, scenario.id, state.presence!.id, undefined, "scenario-seed");
+    const session = state.playgroundSessions.find((item) => item.source === "scenario");
+    expect(session).toMatchObject({ seed: "scenario-seed", source: "scenario" });
+  });
+
   it("schedules frozen stimuli as durable temporal events at causal virtual times", () => {
     let state = createAgent(input);
     state = createScenarioFromPrompt(state, "Rehearse a short discussion about useful agent ideas.");

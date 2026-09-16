@@ -4989,7 +4989,7 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("updateScenarioRequirements"), scenarioId: z.string().min(1), requirements: z.custom<import("@/lib/types").ScenarioStimulusRequirements>() }),
   z.object({ type: z.literal("renameScenario"), scenarioId: z.string().min(1), title: z.string().trim().min(1).max(120) }),
   z.object({ type: z.literal("deleteScenario"), scenarioId: z.string().min(1) }),
-  z.object({ type: z.literal("startScenarioRun"), scenarioId: z.string().min(1), presenceId: z.string().min(1).optional() }),
+  z.object({ type: z.literal("startScenarioRun"), scenarioId: z.string().min(1), presenceId: z.string().min(1).optional(), seed: z.string().trim().min(1).max(200).optional() }),
   z.object({ type: z.literal("resumeScenarioRun"), runId: z.string().min(1) }),
   z.object({ type: z.literal("stopScenarioRun"), runId: z.string().min(1) }),
   z.object({ type: z.literal("rerunScenario"), runId: z.string().min(1) }),
@@ -5626,7 +5626,7 @@ export async function POST(request: Request) {
       return stateResponse(request, next);
     }
     if (parsed.type === "startScenarioRun") {
-      const started = startScenarioRunState(current, parsed.scenarioId, parsed.presenceId);
+      const started = startScenarioRunState(current, parsed.scenarioId, parsed.presenceId, undefined, parsed.seed);
       const run = started.scenarioRuns[0];
       if (!run) throw new Error("The Scenario Run could not be started.");
       const next = await executeScenarioRun(started, run.id);

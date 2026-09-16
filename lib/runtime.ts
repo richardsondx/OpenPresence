@@ -2664,7 +2664,7 @@ export function deleteScenario(source: OpenPresenceState, scenarioId: string) {
   return state;
 }
 
-export function startScenarioRunState(source: OpenPresenceState, scenarioId: string, presenceId?: string, versionId?: string) {
+export function startScenarioRunState(source: OpenPresenceState, scenarioId: string, presenceId?: string, versionId?: string, seed?: string) {
   let state = cloneState(source);
   const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
   if (!presence || !state.agent) throw new Error("Choose an Agent and Presence before starting a Scenario Run.");
@@ -2675,7 +2675,7 @@ export function startScenarioRunState(source: OpenPresenceState, scenarioId: str
   if (version.generationStatus === "failed") throw new Error("This Scenario has no reliable world events yet. Generate or edit the missing events before rehearsing.");
   const fidelity = version.fidelity ?? validateScenarioFidelity(version);
   if (fidelity.status === "needs_revision") throw new Error("This Scenario is not ready. Generate or edit the missing world events before rehearsing.");
-  state = startPlaygroundSession(state, presence.id, "scenario");
+  state = startPlaygroundSession(state, presence.id, "scenario", seed);
   const session = state.playgroundSessions[0]!;
   const provenance = scenarioProvenance(state, scenario, version, presence, session);
   const run: ScenarioRun = { id: id("scenario-run"), scenarioId: scenario.id, scenarioVersionId: version.id, agentId, presenceId: presence.id, playgroundSessionId: session.id, status: "active", nextStimulusIndex: 0, startedAt: session.createdAt, provenanceId: provenance.id };

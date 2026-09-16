@@ -146,6 +146,24 @@ describe("Playground CLI", () => {
     expect(JSON.parse(result.stdout).session.seed).toBe("sbx-a-003");
   });
 
+  it("passes a replay seed through the real Scenario Run command", async () => {
+    let received: unknown;
+    const scenario = { id: "scenario-1", ownerScope: "global", supportedChannels: ["x"] };
+    const server = await startApi((request, response) => {
+      if (request.method === "GET") return json(response, { ...fixtureState, scenarios: [scenario], scenarioVersions: [{ id: "version-1", scenarioId: "scenario-1" }], scenarioRuns: [] });
+      let body = "";
+      request.on("data", (chunk) => { body += chunk.toString(); });
+      request.on("end", () => {
+        received = JSON.parse(body);
+        json(response, { ...fixtureState, scenarios: [scenario], scenarioVersions: [{ id: "version-1", scenarioId: "scenario-1" }], scenarioRuns: [] });
+      });
+    });
+    const result = await runCli(server.url, ["scenario", "run", "scenario-1", "--seed", "scenario-seed"]);
+    await server.close();
+    expect(result.code).toBe(0);
+    expect(received).toMatchObject({ type: "startScenarioRun", scenarioId: "scenario-1", seed: "scenario-seed" });
+  });
+
   it("does not select an older tied-timestamp session during seeded start", async () => {
     const sameTime = "2026-01-01T00:00:00.000Z";
     const server = await startApi((request, response) => {

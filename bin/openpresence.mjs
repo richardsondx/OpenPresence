@@ -571,7 +571,7 @@ async function executePlayground(baseUrl, command, options, positionals) {
     if (["run", "start", "resume", "rerun", "evaluate", "inspect"].includes(subcommand)) {
       const id = idOption(options, positionals.slice(1), subcommand === "inspect" ? "a Scenario Run id" : "a Scenario or Run id");
       if (subcommand === "run" || subcommand === "start") {
-        const next = await postOperation(baseUrl, { type: "startScenarioRun", scenarioId: id, presenceId: presence.id });
+        const next = await postOperation(baseUrl, { type: "startScenarioRun", scenarioId: id, presenceId: presence.id, ...(typeof options.seed === "string" ? { seed: options.seed } : {}) });
         const run = next.scenarioRuns?.[0];
         return { ok: true, command: "scenario run", run, scenario: next.scenarios?.find((item) => item.id === run?.scenarioId), version: next.scenarioVersions?.find((version) => version.id === run?.scenarioVersionId), evaluation: next.scenarioEvaluations?.find((evaluation) => evaluation.runId === run?.id) };
       }
