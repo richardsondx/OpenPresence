@@ -13,6 +13,7 @@ type CliResult = {
 
 type Snapshot = {
   session: JsonRecord;
+  mirrorObjects: JsonRecord[];
   assignments: JsonRecord[];
   intents: JsonRecord[];
   executions: JsonRecord[];
@@ -53,6 +54,20 @@ const scenarioSteps = [
       "post",
       "--content",
       "The best agent teams spend less time adding automation and more time proving which decisions actually changed the outcome.",
+    ],
+  },
+  {
+    label: "day-2-world-breaking-event",
+    args: [
+      "inject",
+      "--actor",
+      "Breaking News",
+      "--handle",
+      "@breaking_news",
+      "--action",
+      "post",
+      "--content",
+      "Breaking: the benchmark release was withdrawn after a serious reproducibility issue. Re-check any plan that depends on it.",
     ],
   },
   { label: "day-2", args: ["advance", "--minutes", "1440"] },
@@ -179,6 +194,7 @@ async function readSnapshot(request: import("@playwright/test").APIRequestContex
   const session = records(state.playgroundSessions).find((item) => text(item.id) === sessionId) ?? {};
   return {
     session,
+    mirrorObjects: records(state.mirrorObjects).filter((item) => text(item.sessionId) === sessionId),
     assignments: records(state.assignments).filter((item) => text(item.sessionId) === sessionId || text(item.presenceId) === text(session.presenceId)),
     intents: records(state.socialIntents).filter((item) => text(item.sessionId) === sessionId),
     executions: records(state.executions).filter((item) => text(item.sessionId) === sessionId),
@@ -284,11 +300,13 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     expect(record(baseline.presence).connectionMode).toBe("sandbox");
     expect(record(baseline.presence).environment).toBe("sandbox");
 
-    const start = await runCli(baseUrl, ["start", "--presence", presenceId!, "--source", "fresh"]);
+    const seed = "mandatory-seven-day-seed";
+    const start = await runCli(baseUrl, ["start", "--presence", presenceId!, "--source", "fresh", "--seed", seed]);
     const startSession = record(start.json?.session);
     const sessionId = text(startSession.id);
     expect(start.code, `Could not start the Sandbox session: ${start.stderr || start.stdout}`).toBe(0);
     expect(sessionId).toBeTruthy();
+    expect(startSession.seed).toBe(seed);
 
     const trajectory: TrajectoryStep[] = [];
     let previous = await readSnapshot(request, sessionId!);
@@ -360,8 +378,8 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     const evidence = {
       schema: "openpresence.eval.trajectory.v1",
       scenario: "mandatory-seven-day-no-babysitting",
-      seed: null,
-      seedNote: "The existing Playground CLI does not expose a deterministic seed; session and environment IDs are retained instead.",
+      seed,
+      seedNote: "The session was launched through the real Playground CLI with a deterministic replay seed.",
       environment: "sandbox",
       sessionId,
       environmentId: text(current.session.environmentId),
@@ -371,7 +389,7 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
       requiredVirtualDurationMinutes: dayMinutes,
       baseline: { goal: text(record(created.agent).description), userAssignmentCount: baselineAssignments.length, presence: { connectionMode: text(record(baseline.presence).connectionMode), environment: text(record(baseline.presence).environment) } },
       totals: { agentAssignments: agentAssignments.length, autonomousIntents: autonomousIntents.length, autonomousExecutions: autonomousExecutions.length, outcomes: current.outcomes.length, measurements: measurementCount, blockers: blockers.length, autonomousWakeCount },
-      assertions: { sevenDaysAdvanced: (elapsedMinutes ?? 0) >= dayMinutes, dailyAutonomousWakes: autonomousWakeCount >= 7, selfGeneratedWork: agentAssignments.length > 0 || autonomousIntents.length > 0, followThrough: autonomousExecutions.length > 0, measurement: measurementCount > 0, explicitBlocker: blockers.length > 0, unexplainedIdleDays },
+      assertions: { sevenDaysAdvanced: (elapsedMinutes ?? 0) >= dayMinutes, dailyAutonomousWakes: autonomousWakeCount >= 7, noUserAssignment: baselineAssignments.length === 0, seededLaunch: text(startSession.seed) === seed, relevantMediaObserved: current.events.some((event) => /evaluation-chart|media/i.test(`${text(event.title) ?? ""} ${text(event.detail) ?? ""}`)), irrelevantMediaObserved: current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("unrelated product photo")), breakingEventObserved: current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("withdrawn")), selfGeneratedWork: agentAssignments.length > 0 || autonomousIntents.length > 0, followThrough: autonomousExecutions.length > 0, measurement: measurementCount > 0, explicitBlocker: blockers.length > 0, unexplainedIdleDays },
       dailyTrajectory,
       trajectory,
       timeline: timelineCli.json?.timeline ?? [],
@@ -383,6 +401,10 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
 
     expect(timelineCli.code, `Timeline control failed. Evidence: ${JSON.stringify(evidence)}`).toBe(0);
     expect(elapsedMinutes, `The Sandbox did not advance seven virtual days. Evidence: ${JSON.stringify(evidence)}`).toBeGreaterThanOrEqual(dayMinutes);
+    expect(text(startSession.seed)).toBe(seed);
+    expect(current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("withdrawn")), `The breaking event was not persisted in the Sandbox world. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
+    expect(current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("unrelated product photo")), `The irrelevant media stimulus was not persisted. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
+    expect(current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("baseline, denominator")), `The relevant media stimulus was not persisted. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
     expect(autonomousWakeCount, `The continuous responsibility did not receive one autonomous wake per simulated day. Evidence: ${JSON.stringify(evidence)}`).toBeGreaterThanOrEqual(7);
     expect(unexplainedIdleDays, `The Agent went idle without work or an explicit blocker. Evidence: ${JSON.stringify(evidence)}`).toEqual([]);
     expect(
