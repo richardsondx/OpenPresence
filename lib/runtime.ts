@@ -4461,7 +4461,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
       : deriveAssignmentPresentation(
         assignment.instruction,
         assignment.deliverable.type,
-        assignment.planningOnly === true || isPlanningOnlyAssignmentInstruction(assignment.instruction),
+        assignment.planningOnly === true,
       );
     return {
       ...assignment,
@@ -4472,7 +4472,9 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   const activeAssignmentRunStatuses = new Set<AssignmentRun["status"]>(["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"]);
   const planningOnlyAssignmentIds = new Set<string>();
   normalized.assignments = normalized.assignments.map((assignment) => {
-    const planningOnly = assignment.planningOnly === true || isPlanningOnlyAssignmentInstruction(assignment.instruction);
+    // Only an explicit persisted flag is legacy planning-only data. Never
+    // infer it from new instruction wording during normalization.
+    const planningOnly = assignment.planningOnly === true;
     if (!planningOnly) return assignment;
     planningOnlyAssignmentIds.add(assignment.id);
     const hasExecution = normalized.executions.some((execution) => execution.assignmentId === assignment.id);
@@ -5493,7 +5495,11 @@ export function compileAssignmentInstruction(source: OpenPresenceState, instruct
           : scheduledAssignmentRecurrence(schedule);
   const targetFollowers = growthTarget(clean);
   const type = assignmentDeliverableType(clean);
-  const planningOnly = isPlanningOnlyAssignmentInstruction(clean);
+  // New work is executable responsibility, regardless of wording in the
+  // instruction. `planningOnly` is a migration-only compatibility flag for
+  // legacy persisted operator Tasks; it must not recreate the old
+  // create-review-activate workflow for Chat or Agent-owned work.
+  const planningOnly = false;
   const presentation = deriveAssignmentPresentation(clean, type, planningOnly);
   const topicMatch = clean.match(/\b(?:about|around|focus(?:ed)?\s+on|cover(?:ing)?)\s+(.+?)(?:\.|;|$)/i);
   const topics = topicMatch?.[1]?.split(/,|\bor\b|\band\b/i).map((item) => item.trim()).filter(Boolean).slice(0, 12);

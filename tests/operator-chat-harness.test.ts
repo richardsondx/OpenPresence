@@ -490,7 +490,7 @@ describe("private operator Chat harness", () => {
     expect(getOperationalRun(queued.run.id)?.state).toBe("succeeded");
   });
 
-  it("saves an explicit planning-only Chat Task for review without starting work", async () => {
+  it("keeps a private Chat responsibility executable without reviving the legacy planning-only workflow", async () => {
     const original = fixture("Create the private Task now and leave it ready for review. Do not publish anything.");
     original.state.presence!.environment = "live";
     original.state.presences.find((item) => item.id === original.presenceId)!.environment = "live";
@@ -512,13 +512,13 @@ describe("private operator Chat harness", () => {
 
     const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
     const assignment = saved.assignments[0];
-    expect(assignment).toMatchObject({ status: "draft", planningOnly: true, title: "Private planning Task", description: expect.any(String), timeframe: { startsAt: expect.any(String), deadline: expect.any(String) } });
-    expect(assignment.nextDueAt).toBeUndefined();
+    expect(assignment).toMatchObject({ status: "active", planningOnly: false, title: "Private planning Task", description: expect.any(String), timeframe: { startsAt: expect.any(String), deadline: expect.any(String), }, createdBy: "agent" });
+    expect(assignment.nextDueAt).toBe(startsAt);
     expect(saved.assignmentRuns?.filter((run) => run.assignmentId === assignment.id)).toHaveLength(0);
     expect(saved.executions).toHaveLength(0);
     const messages = (saved.operatorConversations ?? []).flatMap((item) => item.messages).filter((item) => item.replyToMessageId === original.message.id);
     const receipt = messages.find((item) => item.role === "system");
-    expect(receipt ? JSON.parse(receipt.content) : undefined).toMatchObject({ assignmentId: assignment.id, status: "draft", planningOnly: true, readyForReview: true, delivered: false });
+    expect(receipt ? JSON.parse(receipt.content) : undefined).toMatchObject({ assignmentId: assignment.id, status: "active", planningOnly: false, delivered: false });
     expect(messages.filter((item) => item.role === "presence")).toHaveLength(1);
     expect(messages.at(-1)?.content).toContain("saved and ready for review");
   });

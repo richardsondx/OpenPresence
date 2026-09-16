@@ -27,8 +27,8 @@ describe("canonical Assignment domain", () => {
       environment: "live",
     });
     const assignment = next.assignments[0]!;
-    expect(assignment.title).toBe("Prepare a private draft from “Action sequence from a broad claim”");
-    expect(assignment.description).toContain("reviewable draft");
+    expect(assignment.title).toBe("Prepare an original post about explicit success conditions, failure cases, and regression checks for reliable AI agents");
+    expect(assignment.description).toContain("full instructions and constraints");
     expect(assignment.instruction).toBe(instruction);
   });
 
@@ -36,7 +36,7 @@ describe("canonical Assignment domain", () => {
     const state = createAgent(input);
     const instruction = "Create a private, bounded one-time Task. Do not publish or perform any public action. Use the saved template “Action sequence from a broad claim.” Draft post: AI agents become unreliable when their success condition is left implicit. Stop immediately after the Task is saved. This is a planning task only and remains ready for review.";
     const assignment = compileAssignmentInstruction(state, instruction, state.presence!.id, "live");
-    const normalized = normalizeState({ ...state, assignments: [{ ...assignment, title: instruction }] });
+    const normalized = normalizeState({ ...state, assignments: [{ ...assignment, planningOnly: true, title: instruction }] });
     expect(normalized.assignments[0]?.title).toBe("Prepare a private draft from “Action sequence from a broad claim”");
     expect(normalized.assignments[0]?.instruction).toBe(instruction);
   });

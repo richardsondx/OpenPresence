@@ -2,7 +2,7 @@ import { saveSocialTemplate, socialPlaybookForPresence, updateSocialTemplate } f
 import { assignmentHasPendingDelivery, assignmentWindowState, expireAssignmentWindows } from "@/lib/assignment-timeframe";
 import { inspectionReportSummary } from "@/lib/chat-activity-presentation";
 import { assignmentInspectionEvidence, persistAssignmentReport } from "@/lib/assignment-private-report";
-import { isPlanningOnlyAssignmentInstruction, isPrivateInspectionInstruction } from "@/lib/runtime";
+import { isPrivateInspectionInstruction } from "@/lib/runtime";
 import { recentChatItems } from "@/lib/operator-chat-history";
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
@@ -2480,6 +2480,7 @@ function createRequiredAssignmentFromOperatorNudge(source: OpenPresenceState, pr
     next = applyOperation(next, {
       type: "createAssignment",
       presenceId,
+      createdBy: "agent",
       // A direct chat command inherits the Presence execution environment.
       // The harness boots Genny awake in a Sandbox, so labeling this as live
       // would send it through the live worker and produce a false delivery
@@ -2499,10 +2500,7 @@ function createRequiredAssignmentFromOperatorNudge(source: OpenPresenceState, pr
   }
   if (!assignment) throw new Error("The new Assignment could not be activated.");
   if (assignment.status === "draft") {
-    if (assignment.planningOnly || isPlanningOnlyAssignmentInstruction(assignment.instruction)) {
-      assignment.planningOnly = true;
-      assignment.nextDueAt = undefined;
-    } else {
+    if (!assignment.planningOnly) {
       next = applyOperation(next, { type: "activateAssignment", id: assignment.id });
       assignment = next.assignments.find((item) => item.id === assignment?.id);
     }
