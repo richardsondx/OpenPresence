@@ -169,6 +169,37 @@ describe("runtime learning boundary", () => {
     expect(next.learningCounterfactuals?.[0]?.result.learningClaim.status).toBe("not_demonstrated");
   });
 
+  it("requires independent causal decisions and retires stale evidence", () => {
+    const state = createAgent({ name: "Learning hygiene", description: "Teach builders useful agent ideas.", audience: "AI builders", mode: "agent", handle: "@learning_hygiene", accent: "#7c3aed" });
+    const presence = state.presence!;
+    const stale = { id: "stale", agentId: state.agent!.id, presenceId: presence.id, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Old outcome", sourceRefs: [], verified: true, causalDecisionIds: ["same-decision"], createdAt: "2024-01-01T00:00:00.000Z" };
+    const duplicateA = { ...stale, id: "duplicate-a", createdAt: new Date().toISOString() };
+    const duplicateB = { ...duplicateA, id: "duplicate-b" };
+    state.growthEvidenceRecords = [duplicateA, duplicateB, stale];
+    state.socialDecisions = [{ id: "same-decision", agentId: state.agent!.id, presenceId: presence.id, environment: "sandbox", focalMirrorObjectIds: [], decision: "original_post", summary: "One trial", influences: [], createdAt: new Date().toISOString() } as never];
+    state.growthHypotheses = [{ id: "hygiene", agentId: state.agent!.id, originatingPresenceId: presence.id, scope: "presence", statement: "Proof-led posts help", status: "supported", confidence: "high", patternIds: [], decisionTargets: [{ strategyId: "social.x.v1.proof-led-original", effect: 2 }], supportingEvidenceIds: [duplicateA.id, duplicateB.id, stale.id], contradictingEvidenceIds: [], derivedFrom: [], reviewHistory: [], createdAt: duplicateA.createdAt, updatedAt: duplicateA.createdAt }];
+    expect(learningAdjustmentForPattern(state, presence, "social.x.v1.proof-led-original")).toBe(0);
+  });
+
+  it("applies Agent-scoped learning across Presences owned by that Agent", () => {
+    const state = createAgent({ name: "Shared learning", description: "Teach builders useful agent ideas.", audience: "AI builders", mode: "agent", handle: "@shared_learning", accent: "#7c3aed" });
+    const first = state.presence!;
+    const second = { ...first, id: "presence-second", handle: "@shared_learning_two" };
+    state.presences = [first, second];
+    const evidence = ["a", "b"].map((id, index) => ({ id, agentId: state.agent!.id, presenceId: second.id, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Verified outcome", sourceRefs: [], verified: true, causalDecisionIds: [`decision-${index}`], createdAt: new Date().toISOString() }));
+    state.growthEvidenceRecords = evidence;
+    state.socialDecisions = evidence.map((item, index) => ({ id: `decision-${index}`, agentId: state.agent!.id, presenceId: second.id, environment: "sandbox" as const, focalMirrorObjectIds: [], decision: "original_post" as const, summary: "Proof", influences: [], socialStrategy: { retrievalRunId: `run-${index}`, consideredPatternIds: [], selectedByAct: [{ act: "original_post", patternId: "social.x.v1.proof-led-original" }] }, createdAt: item.createdAt }));
+    state.growthHypotheses = [{ id: "agent-wide", agentId: state.agent!.id, originatingPresenceId: first.id, scope: "agent", statement: "Proof-led posts help", status: "supported", confidence: "high", patternIds: [], decisionTargets: [{ strategyId: "social.x.v1.proof-led-original", effect: 1 }], supportingEvidenceIds: evidence.map((item) => item.id), contradictingEvidenceIds: [], derivedFrom: [], reviewHistory: [], createdAt: evidence[0]!.createdAt, updatedAt: evidence[1]!.createdAt }];
+    expect(learningAdjustmentForPattern(state, first, "social.x.v1.proof-led-original")).toBe(1.6);
+  });
+
+  it("feeds durable negative preference evidence into later strategy context", () => {
+    const state = createAgent({ name: "Preference memory", description: "Teach builders useful agent ideas.", audience: "AI builders", mode: "agent", handle: "@preference_memory", accent: "#7c3aed" });
+    state.preferenceEvidence = [{ id: "preference-1", agentId: state.agent!.id, presenceId: state.presence!.id, sessionId: "session-1", source: "operator_explicit", subjectRef: { type: "decision", id: "decision-1" }, reaction: "does_not_fit", reasons: ["too_generic"], note: "Never use generic stock visuals.", scopeHint: "agent", environment: "sandbox", createdAt: new Date().toISOString() }];
+    const context = compileSocialStrategyContext(state, state.presence!, { invocation: "later decision", objective: "write an original post", availableActions: ["original_post"] });
+    expect(context.prompt).toContain("Never use generic stock visuals.");
+  });
+
   it("does not treat descriptive pattern links or non-supported hypotheses as causal retrieval input", () => {
     const state = createAgent({ name: "Adversarial learning fixture", description: "Teach builders useful agent ideas.", audience: "AI builders", mode: "agent", handle: "@adversarial_learning", accent: "#7c3aed" });
     const presence = state.presence!;

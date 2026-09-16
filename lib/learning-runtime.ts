@@ -16,6 +16,23 @@ import type {
 } from "./types";
 
 const confidenceValue: Record<GrowthHypothesis["confidence"], number> = { low: 0.25, medium: 0.5, high: 0.8 };
+const LEARNING_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
+
+function evidenceIsCurrent(record: GrowthEvidenceRecord, nowMs = Date.now()) {
+  const observedAt = Date.parse(record.createdAt);
+  return Number.isFinite(observedAt) && nowMs - observedAt <= LEARNING_MAX_AGE_MS;
+}
+
+function hypothesisAppliesToPresence(state: OpenPresenceState, hypothesis: GrowthHypothesis, presence: Presence) {
+  if (hypothesis.agentId !== state.agent?.id) return false;
+  if (hypothesis.scope === "presence") return hypothesis.originatingPresenceId === presence.id;
+  if (hypothesis.scope === "channel") return hypothesis.channelId === presence.channel;
+  return true;
+}
+
+function independentOutcomeCount(records: GrowthEvidenceRecord[]) {
+  return new Set(records.flatMap((record) => record.causalDecisionIds ?? [])).size;
+}
 
 function evidenceForHypothesis(state: OpenPresenceState, hypothesis: GrowthHypothesis) {
   const records = new Map((state.growthEvidenceRecords ?? []).map((record) => [record.id, record]));
@@ -28,7 +45,10 @@ function outcomeSupportsTarget(state: OpenPresenceState, record: GrowthEvidenceR
   if (record.kind !== "WORLD_OUTCOME" || !record.verified || !record.causalDecisionIds?.length) return false;
   const targets = hypothesis.decisionTargets ?? [];
   return record.causalDecisionIds.some((decisionId) => {
-    const decision = state.socialDecisions.find((item) => item.id === decisionId && item.presenceId === hypothesis.originatingPresenceId);
+    const decision = state.socialDecisions.find((item) => item.id === decisionId
+      && item.agentId === hypothesis.agentId
+      && (hypothesis.scope !== "presence" || item.presenceId === hypothesis.originatingPresenceId)
+      && (hypothesis.scope !== "channel" || state.presences.find((candidate) => candidate.id === item.presenceId)?.channel === hypothesis.channelId));
     return Boolean(decision?.socialStrategy?.selectedByAct.some((selection) => targets.some((target) =>
       (target.strategyId && selection.patternId === target.strategyId)
       || (target.action && selection.act === target.action)
@@ -47,12 +67,11 @@ export function learningStateForPresence(state: OpenPresenceState, presence: Pre
   const hypotheses: LearningHypothesis[] = [];
   const evidence: Array<{ id: string; hypothesisId: string; polarity: "supporting" | "contradicting"; strength: number; observedAt?: string; source?: string }> = [];
   for (const hypothesis of state.growthHypotheses ?? []) {
-    if (hypothesis.originatingPresenceId !== presence.id || hypothesis.status !== "supported" || !hypothesis.decisionTargets?.length) continue;
-    if (hypothesis.scope === "channel" && hypothesis.channelId !== presence.channel) continue;
+    if (!hypothesisAppliesToPresence(state, hypothesis, presence) || hypothesis.status !== "supported" || !hypothesis.decisionTargets?.length) continue;
     const { supporting, contradicting } = evidenceForHypothesis(state, hypothesis);
-    const worldSupporting = supporting.filter((record) => outcomeSupportsTarget(state, record, hypothesis));
-    const worldContradicting = contradicting.filter((record) => outcomeSupportsTarget(state, record, hypothesis));
-    if (worldSupporting.length + worldContradicting.length < 2) continue;
+    const worldSupporting = supporting.filter((record) => evidenceIsCurrent(record) && outcomeSupportsTarget(state, record, hypothesis));
+    const worldContradicting = contradicting.filter((record) => evidenceIsCurrent(record) && outcomeSupportsTarget(state, record, hypothesis));
+    if (independentOutcomeCount([...worldSupporting, ...worldContradicting]) < 2) continue;
     const learningHypothesis: LearningHypothesis = {
       id: hypothesis.id,
       statement: hypothesis.statement,
@@ -120,12 +139,13 @@ export function recordLearningCounterfactualInPlace(state: OpenPresenceState, pr
 export function learningAdjustmentForPattern(state: OpenPresenceState, presence: Presence, patternId: string) {
   let adjustment = 0;
   for (const hypothesis of state.growthHypotheses ?? []) {
-    if (hypothesis.originatingPresenceId !== presence.id || hypothesis.status !== "supported" || !hypothesis.decisionTargets?.length) continue;
-    if (hypothesis.scope === "channel" && hypothesis.channelId !== presence.channel) continue;
+    if (!hypothesisAppliesToPresence(state, hypothesis, presence) || hypothesis.status !== "supported" || !hypothesis.decisionTargets?.length) continue;
     const { supporting, contradicting } = evidenceForHypothesis(state, hypothesis);
-    const supportCount = supporting.filter((record) => outcomeSupportsTarget(state, record, hypothesis)).length;
-    const contradictCount = contradicting.filter((record) => outcomeSupportsTarget(state, record, hypothesis)).length;
-    if (supportCount + contradictCount < 2) continue;
+    const currentSupporting = supporting.filter((record) => evidenceIsCurrent(record) && outcomeSupportsTarget(state, record, hypothesis));
+    const currentContradicting = contradicting.filter((record) => evidenceIsCurrent(record) && outcomeSupportsTarget(state, record, hypothesis));
+    if (independentOutcomeCount([...currentSupporting, ...currentContradicting]) < 2) continue;
+    const supportCount = currentSupporting.length;
+    const contradictCount = currentContradicting.length;
     adjustment += hypothesis.decisionTargets.filter((target) => target.strategyId === patternId).reduce((sum, target) => sum + target.effect, 0) * (supportCount - contradictCount) * confidenceValue[hypothesis.confidence];
   }
   return Math.max(-3, Math.min(3, Math.round(adjustment * 100) / 100));

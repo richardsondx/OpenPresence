@@ -671,6 +671,16 @@ function visualAssetContext(state: OpenPresenceState, presenceId: string) {
   return `Authorized reusable visuals (ranked by observed reuse and verified performance; evidence is descriptive, not causal):\n${lines.map(({ asset, usageCount, bestSignal, label }) => `- ${asset.id} · ${label.slice(0, 220)} · used ${usageCount} live time${usageCount === 1 ? "" : "s"}${bestSignal ? ` · best observed engagement signal ${bestSignal}` : ""}`).join("\n")}\nChoose media only when it materially improves this post and matches the template's visual guidance. Prefer a relevant previously useful asset over a new discovery; do not attach ads, generic decoration, or uninspected temporary discoveries.`;
 }
 
+function durablePreferenceContext(state: OpenPresenceState, presence: Presence) {
+  const preferences = (state.preferenceEvidence ?? []).filter((item) => item.agentId === state.agent?.id
+    && (item.scopeHint === "agent" || item.presenceId === presence.id)
+    && item.reaction === "does_not_fit"
+    && Date.now() - Date.parse(item.createdAt) <= 365 * 24 * 60 * 60 * 1000)
+    .slice(0, 8);
+  if (!preferences.length) return "No durable negative preference has been recorded for this Presence.";
+  return `Durable operator constraints from prior feedback (honor these when relevant):\n${preferences.map((item) => `- ${[...(item.reasons ?? []), item.note].filter(Boolean).join(", ") || "This style or decision did not fit"}`).join("\n")}`;
+}
+
 export function compileSocialStrategyContext(state: OpenPresenceState, presence: Presence, situation: SocialStrategySituation): CompiledSocialStrategyContext {
   const selectedPlaybook = bundledSocialStrategyPlaybooks().find((candidate) => candidate.channelId === presence.channel);
   const recent = recentStrategyShape(state, presence.id);
@@ -715,11 +725,12 @@ export function compileSocialStrategyContext(state: OpenPresenceState, presence:
   const patternText = candidates.length
     ? candidates.map((pattern) => `- ${pattern.id} · ${pattern.mechanism} · audience role: ${pattern.audienceRole}\n  useful when: ${pattern.usefulConditions.join("; ")}\n  weak when: ${pattern.weakConditions.join("; ")}\n  risks: ${pattern.risks.join("; ")}`).join("\n")
     : `- ${noPatternReason}`;
-  const growthText = hypotheses.length ? hypotheses.map((hypothesis) => `- ${hypothesis.id} · ${hypothesis.scope} · ${hypothesis.status} · ${hypothesis.statement}`).join("\n") : "- No applicable structured Growth hypothesis.";
   const performanceText = strategyPerformanceContext(state, presence.id);
   const templateText = templates.length ? templates.map((h) => `- ${h.id} · ${h.template!.title} · ${h.template!.body} · ${h.status}/${h.confidence}${h.template!.sourceCount ? ` · abstracted from ${h.template!.sourceCount} observed source posts` : ""}${h.template!.audienceFit ? `\n  audience fit: ${h.template!.audienceFit}` : ""}${h.template!.visualGuidance ? `\n  visual guidance: ${h.template!.visualGuidance}` : ""}`).join("\n") : "- No reusable template applies.";
   const skillText = skills.length ? skills.flatMap((skill) => (skill.strategyContributions ?? []).map((contribution) => `- ${skill.id}/${contribution.id}: ${contribution.guidance}`)).join("\n") : "- No specialized strategy Skill applies.";
   const visualText = visualAssetContext(state, presence.id);
+  const preferenceText = durablePreferenceContext(state, presence);
+  const growthText = `${hypotheses.length ? hypotheses.map((hypothesis) => `- ${hypothesis.id} · ${hypothesis.scope} · ${hypothesis.status} · ${hypothesis.statement}`).join("\n") : "- No applicable structured Growth hypothesis."}\n\n${preferenceText}`;
   const growthProfile = deriveGrowthProfile(state, presence.id);
   const growthProfileText = growthProfile ? `GROWTH PROFILE (derived from the selected Presence brief, active Growth plan, reusable formats, and typed evidence):\n- audience: ${growthProfile.audience}\n- primary territory: ${growthProfile.primaryTerritory.join(", ") || "not specified"}\n- adjacent territory: ${growthProfile.adjacentTerritory.join(", ") || "not specified"}\n- qualified outcome: ${growthProfile.qualifiedOutcome}\n- relationship focus: ${growthProfile.relationshipFocus.join(", ") || "not specified"}\n- active approach: ${growthProfile.activeApproach.join("; ")}\n- reusable formats: ${growthProfile.reusableFormats.join(", ") || "none saved yet"}\n- media approach: ${growthProfile.mediaApproach}\n- exclusions: ${growthProfile.exclusions.join("; ")}\n- evidence confidence: ${growthProfile.confidence}` : "No derived Growth profile is available; keep audience claims conservative.";
   const recentText = Object.entries(recent).filter(([, count]) => count > 0).map(([mechanism, count]) => `${mechanism} ${count} of last ${Math.max(1, Object.values(recent).reduce((sum, value) => sum + value, 0))}`).join(", ") || "no selected strategy shape recorded";
