@@ -55,6 +55,8 @@ export interface TemporalEvent {
   causeEventId?: string;
   /** Stable registry key required when a handler must survive snapshot replay. */
   handlerId?: string;
+  /** Stable replay key; executable handlers are supplied by the rehydrator. */
+  handlerKey?: string;
 }
 
 export interface TemporalOutcome {
@@ -127,6 +129,7 @@ export interface TemporalEventInput {
   causeEventId?: string;
   handler?: TemporalEventHandler;
   handlerId?: string;
+  handlerKey?: string;
 }
 
 export interface TemporalOutcomeInput {
@@ -374,6 +377,7 @@ export class SandboxTemporalKernel {
       if (event.handlerId && !kernel.handlers.has(event.id) && kernel.handlers.has(event.handlerId)) kernel.handlers.set(event.id, kernel.handlers.get(event.handlerId)!);
       if (event.status === "pending" && event.handlerId && !kernel.handlers.has(event.id)) throw new TemporalValidationError(`Snapshot requires replay handler ${event.handlerId}.`);
     }
+    kernel.checkpointNumberValue = Math.max(0, ...(snapshot.checkpoints ?? []).map((checkpoint) => Number(checkpoint.id.match(/^checkpoint-(\d+)$/)?.[1] ?? 0)));
     return kernel;
   }
 
@@ -480,6 +484,7 @@ export class SandboxTemporalKernel {
       ...(input.fence === undefined ? {} : { fence: clone(input.fence) }),
       ...(input.causeEventId === undefined ? {} : { causeEventId: input.causeEventId }),
       ...(input.handlerId === undefined && !input.handler ? {} : { handlerId: input.handlerId ?? id }),
+      ...(input.handlerKey === undefined ? {} : { handlerKey: input.handlerKey }),
     };
     this.assertEventBudget();
     this.eventsValue.push(event);
@@ -642,7 +647,8 @@ export class SandboxTemporalKernel {
 
   checkpoint(label?: string): TemporalCheckpoint {
     if (this.checkpointsValue.size >= this.boundsValue.maxCheckpoints) throw new TemporalBoundsError("Checkpoint bound exceeded.");
-    const id = `checkpoint-${++this.checkpointNumberValue}`;
+    do { this.checkpointNumberValue += 1; } while (this.checkpointsValue.has(`checkpoint-${this.checkpointNumberValue}`));
+    const id = `checkpoint-${this.checkpointNumberValue}`;
     const checkpoint: TemporalCheckpoint = { id, ...(label === undefined ? {} : { label }), createdAt: this.nowValue, snapshot: this.snapshotWithoutCheckpoints() };
     this.checkpointsValue.set(id, clone(checkpoint));
     this.addTrajectory("checkpoint_created", { checkpointId: id, label });
@@ -677,6 +683,10 @@ export class SandboxTemporalKernel {
   recordExecution(data?: unknown, at = this.nowValue): TemporalTrajectoryRecord { return this.recordTrajectory("execution", data, at); }
   recordPermissionDecision(data?: unknown, at = this.nowValue): TemporalTrajectoryRecord { return this.recordTrajectory("permission_decision", data, at); }
   recordPlanMutation(data?: unknown, at = this.nowValue): TemporalTrajectoryRecord { return this.recordTrajectory("plan_mutation", data, at); }
+  recordResult(data?: unknown, at = this.nowValue): TemporalTrajectoryRecord { return this.recordTrajectory("result", data, at); }
+  recordOutcome(data?: unknown, at = this.nowValue): TemporalTrajectoryRecord { return this.recordTrajectory("outcome", data, at); }
+  recordLearning(data?: unknown, at = this.nowValue): TemporalTrajectoryRecord { return this.recordTrajectory("learning", data, at); }
+  recordReplan(data?: unknown, at = this.nowValue): TemporalTrajectoryRecord { return this.recordTrajectory("replan", data, at); }
 
   advanceBy(deltaMs: number, options: AdvanceOptions = {}): AdvanceResult {
     nonNegativeInteger(deltaMs, "deltaMs");
@@ -726,7 +736,7 @@ export class SandboxTemporalKernel {
       this.addTrajectory("event_fired", { type: event.type, occurrence: event.occurrence }, event.id);
       if (event.type === "outcome") this.recordScheduledOutcome(event);
       if (event.type === "retry") this.markRetryAttempt(event);
-      const handler = this.handlers.get(event.id) ?? this.handlers.get(event.handlerId ?? "") ?? this.handlers.get(event.rootId);
+      const handler = this.handlers.get(event.id) ?? this.handlers.get(event.rootId) ?? this.handlers.get(event.handlerId ?? "") ?? (event.handlerKey ? this.handlers.get(event.handlerKey) : undefined);
       const effects = [handler, onEvent].filter(Boolean).flatMap((callback) => callback!(clone(event), { now: this.nowValue, event: clone(event), currentFence: (key) => this.currentFence(key) }) ?? []);
       for (const effect of effects) this.applyEffect(effect);
       this.scheduleNextOccurrence(event);
@@ -804,7 +814,7 @@ export class SandboxTemporalKernel {
     };
     this.assertEventBudget();
     this.eventsValue.push(next);
-    const handler = this.handlers.get(event.id) ?? this.handlers.get(event.rootId);
+    const handler = this.handlers.get(event.id) ?? this.handlers.get(event.rootId) ?? (event.handlerKey ? this.handlers.get(event.handlerKey) : undefined);
     if (handler) this.handlers.set(next.id, handler);
     this.addTrajectory("event_scheduled", { type: next.type, at: next.at, occurrence: next.occurrence, recurringFrom: event.id }, next.id);
   }

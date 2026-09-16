@@ -3352,6 +3352,7 @@ export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: s
   state.mirrorEvents.unshift({ id: id("mirror-event"), bridgeId: object.bridgeId, presenceId: presence.id, sourceEventId: object.sourceEventId!, event: "created", externalRef, object, receivedAt: now(), environment: "sandbox", sessionId: session.id });
   const actionDescription = action?.label?.replace(/^Someone\s*/i, "").replaceAll("Jenny", presence.name).toLowerCase() ?? `created a ${objectType}`;
   state.events.unshift({ ...event("decision", "Sandbox event observed", `${actorName} ${actionDescription} in Playground.`, "neutral", { presenceId: presence.id, sourceObjectId: object.id, sourceTemporalEventId: input.temporalEventId }), time: observedAt, sessionId: session.id });
+  recordSandboxTrajectoryInPlace(state, session.id, "observation", { mirrorObjectId: object.id, sourceEventId: object.sourceEventId, temporalEventId: input.temporalEventId, environment: "sandbox" }, observedAt);
   session.updatedAt = now();
   return state;
 }
@@ -3371,6 +3372,31 @@ function temporalKernelForSession(session: PlaygroundSession) {
   }
   if (!Number.isFinite(sessionNow)) throw new Error("Sandbox session has an invalid virtual clock. Reset the Playground before advancing time.");
   return new SandboxTemporalKernel({ startAt: sessionNow });
+}
+
+/** Join the persisted Sandbox temporal evidence to domain-record IDs. */
+function recordSandboxTrajectoryInPlace(state: OpenPresenceState, sessionId: string, kind: string, data: Record<string, unknown>, at?: string) {
+  const session = state.playgroundSessions.find((item) => item.id === sessionId);
+  if (!session) return;
+  let kernel: SandboxTemporalKernel;
+  try {
+    kernel = temporalKernelForSession(session);
+  } catch (error) {
+    const snapshot = session.temporalSnapshot;
+    const sessionNow = Date.parse(session.virtualNow);
+    if (!snapshot || !Number.isFinite(sessionNow) || !/temporal state is inconsistent/i.test(error instanceof Error ? error.message : String(error))) return;
+    const repairedNow = Math.max(sessionNow, snapshot.now);
+    kernel = SandboxTemporalKernel.fromSnapshot({ ...snapshot, now: repairedNow, acceleration: { ...snapshot.acceleration, updatedAt: repairedNow } });
+  }
+  const requestedAt = at ? Date.parse(at) : kernel.now;
+  // Domain persistence timestamps use wall time while Sandbox cognition uses
+  // the session clock. A delayed wall-clock write must not invalidate an
+  // otherwise valid virtual trajectory; retain causal ordering at the current
+  // Sandbox time when the supplied timestamp is outside that clock.
+  const traceAt = Number.isFinite(requestedAt) && requestedAt >= kernel.now ? requestedAt : kernel.now;
+  kernel.recordTrajectory(kind, data, traceAt);
+  session.temporalSnapshot = kernel.snapshot();
+  session.updatedAt = now();
 }
 
 function scheduleCalendarTemporalEvents(state: OpenPresenceState, session: PlaygroundSession, kernel: SandboxTemporalKernel, fromMs: number, toMs: number) {
@@ -3637,6 +3663,10 @@ export function formSandboxIntent(source: OpenPresenceState, input: { sessionId:
   if (mentionGroundingReason) execution.failure = { code: "UNSUPPORTED_LEADING_MENTION", message: mentionGroundingReason, retryable: false };
   if (sourceEchoReason) execution.failure = { code: "SOURCE_EXPRESSION_ECHO", message: sourceEchoReason, retryable: false };
   state.events.unshift({ ...event("decision", publicExpressionLeakageReasonValue || assignmentLeakageReason || mentionGroundingReason || sourceEchoReason ? "Public text boundary blocked" : leakageReason ? "Identity disclosure needs review" : mediaReviewRequired ? "Media action needs review" : "Social Intent formed", reviewReason ?? `${presence.name} chose ${input.affordance} for the simulated ${channelName(session.channelId)} world.`, publicExpressionLeakageReasonValue || assignmentLeakageReason || mentionGroundingReason || sourceEchoReason || leakageReason || mediaReviewRequired ? "warning" : "positive", { presenceId: presence.id, intentId: intent.id, executionId: execution.id, sourceObjectId: targetObject?.id }), sessionId: session.id });
+  recordSandboxTrajectoryInPlace(state, session.id, "decision", { mirrorObjectId: targetObject?.id, intentId: intent.id, executionId: execution.id, affordance: input.affordance, status }, timestamp);
+  recordSandboxTrajectoryInPlace(state, session.id, "intent", { intentId: intent.id, executionId: execution.id, environment: intent.environment, sessionId: session.id }, timestamp);
+  recordSandboxTrajectoryInPlace(state, session.id, "permission_decision", { executionId: execution.id, mode: executionMode, status, reason: reviewReason ?? "The Presence execution envelope allowed Sandbox rehearsal." }, timestamp);
+  if (input.assignmentId) recordSandboxTrajectoryInPlace(state, session.id, "plan_mutation", { assignmentId: input.assignmentId, intentId: intent.id, executionId: execution.id, mutation: "social_intent_formed" }, timestamp);
   return state;
 }
 
@@ -3740,6 +3770,9 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
   execution.status = "succeeded"; execution.attempts += 1; execution.externalRef = externalRef; execution.executedAt = now(); execution.updatedAt = now();
   const outcome: Outcome = { id: id("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: presence.id, status: "succeeded", observedAt: now(), metrics: {}, evidence: [externalRef], environment: "sandbox", sessionId: session.id, conversationEpisodeId: execution.conversationEpisodeId };
   state.outcomes.unshift(outcome);
+  recordSandboxTrajectoryInPlace(state, session.id, "execution", { executionId: execution.id, intentId: execution.socialIntentId, connector: execution.connector, environment: execution.environment, status: execution.status }, execution.executedAt);
+  recordSandboxTrajectoryInPlace(state, session.id, "result", { executionId: execution.id, externalRef, status: execution.status }, execution.executedAt);
+  recordSandboxTrajectoryInPlace(state, session.id, "outcome", { outcomeId: outcome.id, executionId: execution.id, intentId: outcome.socialIntentId, status: outcome.status, evidence: outcome.evidence }, outcome.observedAt);
   if (execution.assignmentId && execution.conversationEpisodeId && ["reply", "comment", "quote", "repost", "message", "like", "reaction"].includes(execution.affordance)) {
     const existingContribution = state.assignmentContributions.find((item) => item.assignmentId === execution.assignmentId && item.conversationEpisodeId === execution.conversationEpisodeId && item.deliverableKind === execution.affordance);
     if (existingContribution) {
@@ -3765,6 +3798,8 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
       assignment.lastOutcome = { class: assignmentIsSatisfied(assignment) ? "assignment_completed" : "incomplete", message: assignmentIsSatisfied(assignment) ? "Verified publication satisfied the requested deliverable." : "Verified publication recorded; more work remains.", at: now() };
       assignment.attemptHistory = [...(assignment.attemptHistory ?? []), { id: id("assignment-attempt"), attempt: assignment.work.attempts, phase: assignment.work.phase, outcome: assignment.lastOutcome.class, message: assignment.lastOutcome.message, at: assignment.lastOutcome.at }].slice(-24);
       state.events.unshift({ ...event("execution", assignmentIsSatisfied(assignment) ? "Assignment complete" : "Assignment progress updated", `${assignment.progress.verified} / ${assignment.progress.required} verified publications.`, "positive", { presenceId: presence.id, executionId: execution.id }), sessionId: session.id });
+      recordSandboxTrajectoryInPlace(state, session.id, "learning", { assignmentId: assignment.id, outcomeId: outcome.id, verified: assignment.progress.verified, required: assignment.progress.required, lesson: "Sandbox outcome verified in the simulated world." }, now());
+      if (!assignmentIsSatisfied(assignment)) recordSandboxTrajectoryInPlace(state, session.id, "replan", { assignmentId: assignment.id, outcomeId: outcome.id, reason: "The verified outcome did not yet satisfy the Assignment; more work remains." }, now());
     }
   }
   if (repliedToId) {

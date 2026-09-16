@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { writeState } from "../lib/db";
+import { claimExecutions, createBridgeWithKey } from "../lib/bridge";
+import * as x from "../lib/x";
+import { deliverNativeExecutions } from "../lib/native-execution-delivery";
 import { POST as statePost } from "../app/api/state/route";
 import { addSandboxEvent, advanceSandboxTime, advanceSandboxTimeWithTemporalEvents, applyOperation, beginOriginalPostRehearsal, completeOriginalPostRehearsal, confirmAutoMode, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, recordPreferenceEvidence, resetPlaygroundSession, startPlaygroundSession, syncPlaygroundTime } from "../lib/runtime";
 import type { OpenPresenceState } from "../lib/types";
@@ -157,6 +160,48 @@ describe("Sandbox and Playground boundaries", () => {
     expect(state.presence?.connectionMode).toBe("native");
     expect(state.executions[0]?.environment).toBe("sandbox");
     expect(state.executions[0]?.connector).toBe("simulated");
+  });
+
+  it("keeps the persisted Sandbox trajectory causally reconstructable", () => {
+    let state = applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    state = startPlaygroundSession(state);
+    const session = state.playgroundSessions[0]!;
+    state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "Maya Chen", content: "A concrete thing worth answering." });
+    const target = state.mirrorObjects.find((item) => item.sessionId === session.id)!;
+    state = formSandboxIntent(state, { sessionId: session.id, affordance: "reply", text: "The useful detail is in the tradeoff.", target: target.externalRef });
+    const execution = state.executions[0]!;
+    state = deliverSandboxExecution(state, execution.id);
+
+    const kinds = state.playgroundSessions.find((item) => item.id === session.id)!.temporalSnapshot!.trajectory.map((item) => item.kind);
+    expect(kinds).toEqual(expect.arrayContaining(["observation", "decision", "intent", "permission_decision", "execution", "result", "outcome"]));
+    const trajectory = state.playgroundSessions.find((item) => item.id === session.id)!.temporalSnapshot!.trajectory;
+    expect(trajectory.find((item) => item.kind === "observation")?.data).toMatchObject({ mirrorObjectId: target.id, environment: "sandbox" });
+    expect(trajectory.find((item) => item.kind === "outcome")?.data).toMatchObject({ executionId: execution.id, status: "succeeded" });
+  });
+
+  it("does not let a real Bridge claim or native writer consume Sandbox work", async () => {
+    let state = createAgent(input);
+    const presenceId = state.presence!.id;
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId, name: "Sandbox isolation probe", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    state = bridgeResult.state;
+    state = startPlaygroundSession(state, presenceId);
+    const session = state.playgroundSessions[0]!;
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    state = formSandboxIntent(state, { sessionId: session.id, affordance: "reply", text: "This stays simulated." });
+    const sandboxExecution = state.executions[0]!;
+    // Deliberately corrupt only transport metadata to exercise the production
+    // boundary, not the normal Sandbox constructor path.
+    sandboxExecution.bridgeId = bridgeResult.bridge!.id;
+    sandboxExecution.connector = "native";
+    writeState(state);
+    const claimed = claimExecutions(bridgeResult.bridge!, { executorId: "isolation-probe", limit: 10 });
+    expect(claimed.executions).toHaveLength(0);
+    expect(claimed.state.executions.find((item) => item.id === sandboxExecution.id)?.status).toBe("queued");
+
+    const publish = vi.spyOn(x, "publishSealedXPost");
+    const nativeAttempt = await deliverNativeExecutions(state, new Set([sandboxExecution.id]));
+    expect(publish).not.toHaveBeenCalled();
+    expect(nativeAttempt.executions.find((item) => item.id === sandboxExecution.id)?.status).toBe("queued");
   });
 
   it("normalizes inbound social activity through the Social Mirror", () => {

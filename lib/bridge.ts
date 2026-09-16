@@ -495,7 +495,10 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
   const candidates: Execution[] = [];
   let expiredQueuedWork = false;
   const queuedExecutions = state.executions
-    .filter((execution) => execution.bridgeId === bridge.id && execution.status === "queued")
+    // A Bridge is a live delivery body. Sandbox executions use a simulated
+    // connector and must never be visible to this claim surface, even when a
+    // stale record happens to carry the same bridgeId.
+    .filter((execution) => execution.bridgeId === bridge.id && execution.status === "queued" && execution.environment === "live" && execution.connector !== "simulated")
     .sort((left, right) => {
       const cmp = (left.createdAt || "").localeCompare(right.createdAt || "");
       if (cmp !== 0) return cmp;

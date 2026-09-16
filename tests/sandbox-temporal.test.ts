@@ -177,4 +177,33 @@ describe("sandbox temporal kernel", () => {
       "observation", "decision", "intent", "execution", "permission_decision", "plan_mutation",
     ]);
   });
+
+  it("does not report virtual elapsed time while paused", () => {
+    const kernel = new SandboxTemporalKernel({ startAt: 1000 });
+    kernel.pause();
+    const result = kernel.tick(5000);
+    expect(result.from).toBe(1000);
+    expect(result.to).toBe(1000);
+    expect(kernel.acceleration.virtualElapsedMs).toBe(0);
+  });
+
+  it("normalizes manual acceleration metadata and resumes checkpoint numbering", () => {
+    const kernel = new SandboxTemporalKernel({ startAt: 1000 });
+    kernel.setAcceleration(2, "manual");
+    expect(kernel.acceleration).toMatchObject({ factor: 2, mode: "accelerated" });
+    const first = kernel.checkpoint("one");
+    const rehydrated = SandboxTemporalKernel.fromSnapshot(JSON.parse(JSON.stringify(kernel.snapshot())));
+    const second = rehydrated.checkpoint("two");
+    expect(first.id).toBe("checkpoint-1");
+    expect(second.id).toBe("checkpoint-2");
+  });
+
+  it("replays persisted handler effects when a stable handler registry is supplied", () => {
+    const handler = (event: { payload?: unknown }) => [{ type: "record" as const, kind: "handler_effect", data: event.payload }];
+    const original = new SandboxTemporalKernel({ startAt: 0 });
+    original.scheduleEvent({ id: "replay-event", type: "replay", offsetMs: 10, payload: { value: 7 }, handlerKey: "replay.handler", handler });
+    const rehydrated = SandboxTemporalKernel.fromSnapshot(JSON.parse(JSON.stringify(original.snapshot())), { "replay.handler": handler });
+    rehydrated.advanceBy(10);
+    expect(rehydrated.trajectory).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "handler_effect", data: { value: 7 } })]));
+  });
 });
