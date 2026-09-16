@@ -45,6 +45,21 @@ function sandboxReplayToken(seed: string | undefined, kind: string, ordinal: num
   for (const character of `${seed}\u0000${kind}\u0000${ordinal}`) value = Math.imul(value ^ character.charCodeAt(0), 16777619);
   return (value >>> 0).toString(36).padStart(7, "0");
 }
+
+function sandboxReplayId(existingIds: string[], seed: string | undefined, kind: string, ordinal: number, prefix: string, sessionId?: string) {
+  const token = sandboxReplayToken(seed, kind, ordinal);
+  if (!token) return id(prefix);
+  const base = `${prefix}_${token}`;
+  if (!existingIds.includes(base)) return base;
+  // A seed is a replay input, not a namespace. Namespace only collisions that
+  // occur when multiple sessions with the same seed coexist in one world.
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const collisionToken = sandboxReplayToken(`${seed}\u0000${sessionId ?? "collision"}`, `${kind}:collision:${attempt}`, ordinal);
+    const candidate = `${prefix}_${collisionToken}`;
+    if (!existingIds.includes(candidate)) return candidate;
+  }
+  return `${base}_${id("collision").replace(/^collision_/, "")}`;
+}
 const channelName = (channel: ChannelId) => channel === "x" ? "X" : channel === "linkedin" ? "LinkedIn" : channel === "substack" ? "Substack" : channel;
 const providerName = (provider: import("./types").ModelProvider) => provider === "openai" ? "OpenAI" : provider === "openrouter" ? "OpenRouter" : provider === "ollama" ? "Ollama" : provider === "anthropic" ? "Anthropic" : provider === "gemini" ? "Gemini" : provider === "custom" ? "Custom" : provider;
 const localDateKey = (value: Date) => `${value.getFullYear()}-${value.getMonth() + 1}-${value.getDate()}`;
@@ -937,10 +952,11 @@ export function canonicalAssignmentQuantityMode(mode?: AssignmentQuantityMode): 
   return mode === "at_least" || mode === "at_most" || mode === "exact" || mode === "target" ? mode : "target";
 }
 
-function publishingAssignmentFor(state: OpenPresenceState, presence: Presence) {
+function publishingAssignmentFor(state: OpenPresenceState, presence: Presence, sessionId?: string) {
   const linkedId = presence.publishingInitiative.assignmentId;
-  return state.assignments.find((assignment) => assignment.id === linkedId && assignment.presenceId === presence.id && assignment.origin === "publishing_initiative")
-    ?? state.assignments.find((assignment) => assignment.presenceId === presence.id && assignment.origin === "publishing_initiative");
+  const candidates = state.assignments.filter((assignment) => assignment.presenceId === presence.id && assignment.origin === "publishing_initiative");
+  if (sessionId) return candidates.find((assignment) => assignment.environment === "sandbox" && assignment.sessionId === sessionId);
+  return candidates.find((assignment) => assignment.id === linkedId) ?? candidates.find((assignment) => assignment.environment !== "sandbox");
 }
 
 /** Materialize the Presence-facing Publishing Initiative as the one canonical responsibility record. */
@@ -948,9 +964,9 @@ export function syncPublishingInitiativeAssignment(source: OpenPresenceState, pr
   const state = cloneState(source);
   const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
   if (!presence || !state.agent) return state;
-  const initiative = presence.publishingInitiative;
-  const existing = publishingAssignmentFor(state, presence);
   const sandboxSession = sessionId ? state.playgroundSessions.find((item) => item.id === sessionId && item.presenceId === presence.id) : undefined;
+  const initiative = presence.publishingInitiative;
+  const existing = publishingAssignmentFor(state, presence, sandboxSession?.id);
   if (initiative.mode === "off") {
     if (existing) {
       existing.status = existing.status === "completed" ? existing.status : "paused";
@@ -965,8 +981,8 @@ export function syncPublishingInitiativeAssignment(source: OpenPresenceState, pr
   const quantity = isPace ? initiative.target?.count : undefined;
   const mode: AssignmentQuantityMode = "target";
   const timestamp = sandboxSession?.virtualNow ?? now();
-  const replayAssignmentId = sandboxSession?.seed
-    ? `assignment_${sandboxReplayToken(sandboxSession.seed, "publishing-initiative", 0)}`
+  const replayAssignmentId = sandboxSession
+    ? sandboxReplayId(state.assignments.map((item) => item.id), sandboxSession.seed, "publishing-initiative", 0, "assignment", sandboxSession.id)
     : undefined;
   const assignment = existing ?? {
     id: replayAssignmentId ?? id("assignment"), agentId: state.agent.id, presenceId: presence.id, channelId: presence.channel,
@@ -3334,7 +3350,8 @@ export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: s
   const actionId = input.actionId ?? input.kind ?? simulation.actions[0]?.id ?? "post";
   const action = simulation.actions.find((item) => item.id === actionId);
   const actor = state.sandboxActors.find((item) => item.id === input.actorId && item.sessionId === session.id) ?? state.sandboxActors.find((item) => item.sessionId === session.id && item.displayName === input.actorName?.trim());
-  const actorId = actor?.id ?? (sandboxReplayToken(session.seed, "actor", state.sandboxActors.filter((item) => item.sessionId === session.id).length) ? `actor_${sandboxReplayToken(session.seed, "actor", state.sandboxActors.filter((item) => item.sessionId === session.id).length)}` : id("actor"));
+  const actorOrdinal = state.sandboxActors.filter((item) => item.sessionId === session.id).length;
+  const actorId = actor?.id ?? sandboxReplayId(state.sandboxActors.map((item) => item.id), session.seed, "actor", actorOrdinal, "actor", session.id);
   const actorName = actor?.displayName ?? input.actorName?.trim();
   if (!actorName) throw new Error("Choose or create a simulated person.");
   if (!actor) state.sandboxActors.push({ id: actorId, sessionId: session.id, displayName: actorName, handle: input.actorHandle?.trim() || undefined, profile: input.profile, role: "audience", createdAt: now() });
@@ -3343,7 +3360,7 @@ export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: s
     if (actorIndex >= 0) state.sandboxActors[actorIndex] = { ...state.sandboxActors[actorIndex]!, handle: input.actorHandle?.trim() || state.sandboxActors[actorIndex]!.handle, profile: input.profile ?? state.sandboxActors[actorIndex]!.profile };
   }
   const objectOrdinal = state.mirrorObjects.filter((item) => item.sessionId === session.id).length;
-  const objectId = sandboxReplayToken(session.seed, "object", objectOrdinal) ? `sandbox-object_${sandboxReplayToken(session.seed, "object", objectOrdinal)}` : id("sandbox-object");
+  const objectId = sandboxReplayId(state.mirrorObjects.map((item) => item.externalRef.id), session.seed, "object", objectOrdinal, "sandbox-object", session.id);
   const objectType = action?.objectType ?? input.kind ?? actionId;
   const targetExternalRef = input.targetExternalRef ?? input.parentExternalRef;
   // Scenario stimuli are exact world content. A simulated event without an
@@ -3365,7 +3382,7 @@ export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: s
   const unsupportedAssets = (input.assets ?? []).filter((item) => !supportedAssetKinds.includes(item.kind as never));
   if (unsupportedAssets.length) throw new Error(`The simulated ${channelName(session.channelId)} world does not support these asset kinds: ${unsupportedAssets.map((item) => item.kind).join(", ")}.`);
   const assetInputs = input.assets ?? [];
-  const mirrorId = sandboxReplayToken(session.seed, "mirror", objectOrdinal) ? `mirror_${sandboxReplayToken(session.seed, "mirror", objectOrdinal)}` : id("mirror");
+  const mirrorId = sandboxReplayId(state.mirrorObjects.map((item) => item.id), session.seed, "mirror", objectOrdinal, "mirror", session.id);
   const object = { id: mirrorId, bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: targetExternalRef, conversationExternalRef, objectType, language: observedLanguage, simulationActionId: actionId, author: { externalRef: { type: `${session.channelId}.user`, id: actorId }, displayName: actorName, handle: (actor?.handle ?? input.actorHandle?.trim()) || undefined }, content: { text: content, language: observedLanguage }, assetRefs: [] as { assetId: string; kind: SocialAssetKind; role?: "primary" | "attachment" | "link-preview" }[], occurredAt: observedAt, observedAt: now(), visibility, shareability, environment: "sandbox" as const, sessionId: session.id, sourceEventId: `sandbox-event:${objectId}`, sourceTemporalEventId: input.temporalEventId, source: input.source, trust: input.trust, scenarioStimulusId: input.scenarioStimulusId };
   for (const assetInput of assetInputs) {
     const asset = sandboxAssetFromInput(state, presence, session, assetInput, visibility, shareability);

@@ -94,4 +94,24 @@ describe("Workstream A deterministic replay contract", () => {
       vi.useRealTimers();
     }
   });
+
+  it("keeps concurrent sessions with the same seed identity-isolated", () => {
+    let state = startPlaygroundSession(createAgent({ name: "Replay Agent", description: "Replay proofs", audience: "builders", mode: "agent", handle: "@replay_agent", accent: "#aa7744" }), undefined, "fresh", "same-seed-concurrent");
+    const firstSession = state.playgroundSessions[0]!;
+    state = startPlaygroundSession(state, state.presence!.id, "fresh", "same-seed-concurrent");
+    const secondSession = state.playgroundSessions.find((item) => item.id !== firstSession.id)!;
+
+    state = addSandboxEvent(state, { sessionId: firstSession.id, actorName: "Maya A", content: "first session marker" });
+    state = addSandboxEvent(state, { sessionId: secondSession.id, actorName: "Maya B", content: "second session marker" });
+
+    const firstObject = state.mirrorObjects.find((item) => item.sessionId === firstSession.id)!;
+    const secondObject = state.mirrorObjects.find((item) => item.sessionId === secondSession.id)!;
+    expect(firstObject.content.text).toBe("first session marker");
+    expect(secondObject.content.text).toBe("second session marker");
+    expect(firstObject.id).not.toBe(secondObject.id);
+    expect(firstObject.externalRef.id).not.toBe(secondObject.externalRef.id);
+    expect(firstObject.author.externalRef.id).not.toBe(secondObject.author.externalRef.id);
+    expect(state.assignments.filter((item) => item.sessionId === firstSession.id)).toHaveLength(1);
+    expect(state.assignments.filter((item) => item.sessionId === secondSession.id)).toHaveLength(1);
+  });
 });
