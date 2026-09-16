@@ -38,6 +38,14 @@ describe("Workstream A deterministic replay contract", () => {
     expect(() => SandboxTemporalKernel.fromSnapshot(kernel.snapshot())).toThrow(/requires replay handler/);
   });
 
+  it("restores a checkpoint with its executable handler registry", () => {
+    const kernel = new SandboxTemporalKernel({ startAt: 0 });
+    kernel.scheduleEvent({ id: "restore-parent", type: "parent", offsetMs: 10, handlerId: "restore-handler", handler: () => [{ type: "record", kind: "restored_effect" }] });
+    const checkpoint = kernel.checkpoint("restore point");
+    expect(() => kernel.restoreCheckpoint(checkpoint.id).advanceBy(10)).not.toThrow();
+    expect(kernel.trajectory.some((item) => item.kind === "restored_effect")).toBe(true);
+  });
+
   it("captures and restores the complete session-scoped world without touching another session", () => {
     let state = createAgent({ name: "Replay Agent", description: "Replay proofs", audience: "builders", mode: "agent", handle: "@replay_agent", accent: "#aa7744" });
     state = startPlaygroundSession(state, state.presence!.id, "fresh", "sbx-a-003");
@@ -50,5 +58,15 @@ describe("Workstream A deterministic replay contract", () => {
     expect(sandboxWorldDigest(replay)).toBe(checkpoint.digest);
     expect(replay.collections.mirrorObjects).toHaveLength(1);
     expect(replay.session.seed).toBe("sbx-a-003");
+  });
+
+  it("uses a seed for reproducible Sandbox clock and actor identities", () => {
+    const firstState = startPlaygroundSession(createAgent({ name: "Replay Agent", description: "Replay proofs", audience: "builders", mode: "agent", handle: "@replay_agent", accent: "#aa7744" }), undefined, "fresh", "same-seed");
+    const secondState = startPlaygroundSession(createAgent({ name: "Replay Agent", description: "Replay proofs", audience: "builders", mode: "agent", handle: "@replay_agent", accent: "#aa7744" }), undefined, "fresh", "same-seed");
+    const first = addSandboxEvent(firstState, { sessionId: firstState.playgroundSessions[0]!.id, actorName: "Maya", content: "same input" });
+    const second = addSandboxEvent(secondState, { sessionId: secondState.playgroundSessions[0]!.id, actorName: "Maya", content: "same input" });
+    expect(first.playgroundSessions[0]!.virtualNow).toBe(second.playgroundSessions[0]!.virtualNow);
+    expect(first.sandboxActors[0]!.id).toBe(second.sandboxActors[0]!.id);
+    expect(first.mirrorObjects[0]!.externalRef.id).toBe(second.mirrorObjects[0]!.externalRef.id);
   });
 });

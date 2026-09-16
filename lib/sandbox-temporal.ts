@@ -670,7 +670,10 @@ export class SandboxTemporalKernel {
   restoreCheckpoint(id: string): this {
     const checkpoint = this.checkpointsValue.get(id);
     if (!checkpoint) throw new TemporalValidationError(`Unknown checkpoint: ${id}.`);
-    const restored = SandboxTemporalKernel.fromSnapshot(checkpoint.snapshot);
+    // A checkpoint is an executable branch point, not just serialized clock
+    // state. Rehydrate the same stable handler registry used by fork() so a
+    // restored branch can continue firing pending events.
+    const restored = SandboxTemporalKernel.fromSnapshot(checkpoint.snapshot, Object.fromEntries(this.handlers.entries()));
     this.copyFrom(restored);
     this.addTrajectory("checkpoint_restored", { checkpointId: id });
     return this;

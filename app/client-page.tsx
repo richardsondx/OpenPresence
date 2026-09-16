@@ -12390,7 +12390,7 @@ function AssignmentQueue({
         <div><SectionEyebrow>Assignments</SectionEyebrow><strong>{openCount ? `${openCount} open` : "No open assignments"}</strong></div>
         <span>{completedCount} completed</span>
       </div>
-      <p className="assignment-queue-intro">A durable view of what you asked {presence?.name ?? "this Presence"} to do. Planned work stays here until it starts; only verified outcomes count as completed.</p>
+      <p className="assignment-queue-intro">A durable view of what {presence?.name ?? "this Presence"} owns. Planned work stays here until it starts; only verified outcomes count as completed.</p>
       <div className="assignment-queue-counts" aria-label="Assignment counts by status">
         <button type="button" className="assignment-queue-count assignment-queue-count-planned" aria-pressed={assignmentFilter === "planned"} onClick={() => setAssignmentFilter("planned")}><span aria-hidden="true" />Planned · {plannedCount}</button>
         <button type="button" className="assignment-queue-count assignment-queue-count-active" aria-pressed={assignmentFilter === "active"} onClick={() => setAssignmentFilter("active")}><span aria-hidden="true" />Active · {activeCount}</button>
@@ -12423,21 +12423,6 @@ function AssignmentQueue({
             <div className="assignment-queue-item-actions" style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px", marginBottom: "4px", flexWrap: "wrap" }}>
               {mutate && row.statusKey !== "completed" && (
                 <>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={runningAssignmentId === row.id}
-                    onClick={async () => {
-                      setRunningAssignmentId(row.id);
-                      try {
-                        await mutate({ type: "runLiveAssignment", assignmentId: row.id, presenceId });
-                      } finally {
-                        setRunningAssignmentId(null);
-                      }
-                    }}
-                  >
-                    <Play size={12} /> {runningAssignmentId === row.id ? "Working now…" : "Work now"}
-                  </Button>
                   {row.kind === "assignment" && <Button
                     type="button"
                     variant="danger"
@@ -12647,11 +12632,6 @@ function AgentAgenda({
               >
                 {isProfileOnlyUrl ? `Open @${handleMatch![1]} on X ↗` : "Open on X ↗"}
               </a>
-            )}
-            {mutate && item.assignmentId && item.state !== "upcoming" && item.state !== "needs_operator" && (
-              <button type="button" className="priority-agenda-btn" disabled={isWorking} onClick={() => void runWorkItem(item)}>
-                <Play size={11} /> {isWorking ? "Working now…" : "Work now"}
-              </button>
             )}
             {mutate && (
               <button

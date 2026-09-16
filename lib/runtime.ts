@@ -35,6 +35,16 @@ import type { TemporalEvent } from "./sandbox-temporal";
 
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+
+// Sandbox replay identities must come from the seeded world, not wall-clock
+// randomness. These identifiers are only used for simulated world objects;
+// live entities continue to use the ordinary runtime id generator.
+function sandboxReplayToken(seed: string | undefined, kind: string, ordinal: number): string | undefined {
+  if (!seed?.trim()) return undefined;
+  let value = 2166136261;
+  for (const character of `${seed}\u0000${kind}\u0000${ordinal}`) value = Math.imul(value ^ character.charCodeAt(0), 16777619);
+  return (value >>> 0).toString(36).padStart(7, "0");
+}
 const channelName = (channel: ChannelId) => channel === "x" ? "X" : channel === "linkedin" ? "LinkedIn" : channel === "substack" ? "Substack" : channel;
 const providerName = (provider: import("./types").ModelProvider) => provider === "openai" ? "OpenAI" : provider === "openrouter" ? "OpenRouter" : provider === "ollama" ? "Ollama" : provider === "anthropic" ? "Anthropic" : provider === "gemini" ? "Gemini" : provider === "custom" ? "Custom" : provider;
 const localDateKey = (value: Date) => `${value.getFullYear()}-${value.getMonth() + 1}-${value.getDate()}`;
@@ -3232,7 +3242,10 @@ export function startPlaygroundSession(source: OpenPresenceState, presenceId?: s
   const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
   if (!presence) throw new Error("Choose a Presence before starting Playground.");
   const environment = sandboxEnvironmentFor(state, presence);
-  const timestamp = now();
+  const replayClock = sandboxReplayToken(seed, "clock", 0);
+  const timestamp = replayClock
+    ? new Date(Date.UTC(2026, 0, 1) + (parseInt(replayClock, 36) % (365 * 86_400_000))).toISOString()
+    : now();
   const temporal = new SandboxTemporalKernel({ startAt: Date.parse(timestamp) });
   const session: PlaygroundSession = { id: id("session"), environmentId: environment.id, presenceId: presence.id, channelId: presence.channel, source: sourceType, ...(seed?.trim() ? { seed: seed.trim() } : {}), status: "active", virtualNow: timestamp, virtualTimeMode: "realtime", worldRevision: 1, temporalSnapshot: temporal.snapshot(), createdAt: timestamp, updatedAt: timestamp, evaluatedSlotIds: [], judgedObjectIds: [] };
   state.playgroundSessions.unshift(session);
@@ -3309,7 +3322,7 @@ export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: s
   const actionId = input.actionId ?? input.kind ?? simulation.actions[0]?.id ?? "post";
   const action = simulation.actions.find((item) => item.id === actionId);
   const actor = state.sandboxActors.find((item) => item.id === input.actorId && item.sessionId === session.id) ?? state.sandboxActors.find((item) => item.sessionId === session.id && item.displayName === input.actorName?.trim());
-  const actorId = actor?.id ?? id("actor");
+  const actorId = actor?.id ?? (sandboxReplayToken(session.seed, "actor", state.sandboxActors.filter((item) => item.sessionId === session.id).length) ? `actor_${sandboxReplayToken(session.seed, "actor", state.sandboxActors.filter((item) => item.sessionId === session.id).length)}` : id("actor"));
   const actorName = actor?.displayName ?? input.actorName?.trim();
   if (!actorName) throw new Error("Choose or create a simulated person.");
   if (!actor) state.sandboxActors.push({ id: actorId, sessionId: session.id, displayName: actorName, handle: input.actorHandle?.trim() || undefined, profile: input.profile, role: "audience", createdAt: now() });
@@ -3317,7 +3330,8 @@ export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: s
     const actorIndex = state.sandboxActors.findIndex((item) => item.id === actor.id);
     if (actorIndex >= 0) state.sandboxActors[actorIndex] = { ...state.sandboxActors[actorIndex]!, handle: input.actorHandle?.trim() || state.sandboxActors[actorIndex]!.handle, profile: input.profile ?? state.sandboxActors[actorIndex]!.profile };
   }
-  const objectId = id("sandbox-object");
+  const objectOrdinal = state.mirrorObjects.filter((item) => item.sessionId === session.id).length;
+  const objectId = sandboxReplayToken(session.seed, "object", objectOrdinal) ? `sandbox-object_${sandboxReplayToken(session.seed, "object", objectOrdinal)}` : id("sandbox-object");
   const objectType = action?.objectType ?? input.kind ?? actionId;
   const targetExternalRef = input.targetExternalRef ?? input.parentExternalRef;
   // Scenario stimuli are exact world content. A simulated event without an
@@ -3339,7 +3353,7 @@ export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: s
   const unsupportedAssets = (input.assets ?? []).filter((item) => !supportedAssetKinds.includes(item.kind as never));
   if (unsupportedAssets.length) throw new Error(`The simulated ${channelName(session.channelId)} world does not support these asset kinds: ${unsupportedAssets.map((item) => item.kind).join(", ")}.`);
   const assetInputs = input.assets ?? [];
-  const mirrorId = id("mirror");
+  const mirrorId = sandboxReplayToken(session.seed, "mirror", objectOrdinal) ? `mirror_${sandboxReplayToken(session.seed, "mirror", objectOrdinal)}` : id("mirror");
   const object = { id: mirrorId, bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: targetExternalRef, conversationExternalRef, objectType, language: observedLanguage, simulationActionId: actionId, author: { externalRef: { type: `${session.channelId}.user`, id: actorId }, displayName: actorName, handle: (actor?.handle ?? input.actorHandle?.trim()) || undefined }, content: { text: content, language: observedLanguage }, assetRefs: [] as { assetId: string; kind: SocialAssetKind; role?: "primary" | "attachment" | "link-preview" }[], occurredAt: observedAt, observedAt: now(), visibility, shareability, environment: "sandbox" as const, sessionId: session.id, sourceEventId: `sandbox-event:${objectId}`, sourceTemporalEventId: input.temporalEventId, source: input.source, trust: input.trust, scenarioStimulusId: input.scenarioStimulusId };
   for (const assetInput of assetInputs) {
     const asset = sandboxAssetFromInput(state, presence, session, assetInput, visibility, shareability);
