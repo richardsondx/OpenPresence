@@ -867,18 +867,18 @@ describe("OpenPresence runtime boundaries", () => {
     const session = startPlaygroundSession(state, state.presence!.id);
     const sessionId = session.playgroundSessions[0]!.id;
     state = applyOperation(session, { type: "createAssignment", instruction: "Produce 2 original Sandbox posts about useful agent ideas.", presenceId: state.presence!.id, sessionId, environment: "sandbox" });
-    const assignmentId = state.assignments[0]!.id;
+    const assignmentId = state.assignments.find((item) => item.instruction === "Produce 2 original Sandbox posts about useful agent ideas.")!.id;
 
     state = applyOperation(state, { type: "cancelAssignment", id: assignmentId });
-    expect(state.assignments).toHaveLength(1);
-    expect(state.assignments[0]).toMatchObject({ id: assignmentId, status: "cancelled" });
+    expect(state.assignments).toHaveLength(2);
+    expect(state.assignments.find((item) => item.id === assignmentId)).toMatchObject({ id: assignmentId, status: "cancelled" });
     expect(state.events[0]?.title).toBe("Assignment cancelled");
 
     const restarted = applyOperation(state, { type: "startAssignment", id: assignmentId, sessionId });
-    expect(restarted.assignments[0]?.status).toBe("cancelled");
+    expect(restarted.assignments.find((item) => item.id === assignmentId)?.status).toBe("cancelled");
 
     const activeDraft = applyOperation(restarted, { type: "createAssignment", instruction: "Produce 1 original Sandbox post about a useful agent idea.", presenceId: state.presence!.id, sessionId, environment: "sandbox" });
-    const activeAssignmentId = activeDraft.assignments[0]!.id;
+    const activeAssignmentId = activeDraft.assignments.find((item) => item.instruction === "Produce 1 original Sandbox post about a useful agent idea.")!.id;
     const active = applyOperation(activeDraft, { type: "startAssignment", id: activeAssignmentId, sessionId });
     expect(active.assignments.find((item) => item.id === activeAssignmentId)?.status).toBe("active");
     const cancelledActive = applyOperation(active, { type: "cancelAssignment", id: activeAssignmentId });
