@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readState, writeState } from "../lib/db";
 import { dispatchAutonomyWorker, queueAutonomyRun } from "../lib/autonomy-worker";
 import { POST as statePost } from "../app/api/state/route";
@@ -8,6 +8,10 @@ const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mo
 
 beforeEach(() => {
   process.env.OPENPRESENCE_AI_MOCK = "1";
+});
+
+afterEach(() => {
+  delete process.env.OPENPRESENCE_AI_MOCK;
 });
 
 async function stateOperation(body: Record<string, unknown>) {
