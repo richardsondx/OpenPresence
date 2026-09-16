@@ -12,10 +12,10 @@ function navigation(page: import("@playwright/test").Page) {
   return page.getByRole("navigation", { name: (page.viewportSize()?.width ?? 1440) < 768 ? "Mobile navigation" : "Desktop navigation" });
 }
 
-test("five destinations preserve Agent scope and task aliases share one editor", async ({ page }) => {
+test("five destinations preserve Agent scope and Tasks remain a supervisory projection", async ({ page }) => {
   const nav = navigation(page);
-  await expect(nav.getByRole("button")).toHaveText(["Chat", "Tasks", "People", "Growth", "Media"]);
-  for (const [name, route] of [["Tasks", "/schedule"], ["People", "/people"], ["Growth", "/growth"], ["Media", "/assets"], ["Chat", "/chat"]]) {
+  await expect(nav.getByRole("button")).toHaveText(["Chat", "Tasks", "People", "Growth", "Artifacts"]);
+  for (const [name, route] of [["Tasks", "/schedule"], ["People", "/people"], ["Growth", "/growth"], ["Artifacts", "/artifacts"], ["Chat", "/chat"]]) {
     await nav.getByRole("button", { name, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(route + "(?:\\?|$)"));
     await expect(page.getByRole("button", { name: "About Jenny" })).toBeVisible();
@@ -28,8 +28,9 @@ test("five destinations preserve Agent scope and task aliases share one editor",
   await expect(page.getByRole("button", { name: "Calendar", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.reload();
   await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Add task", exact: true }).click();
-  await expect(page.getByLabel("What should Jenny accomplish?")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add task", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Chat is the place to redirect Jenny", exact: true })).toBeVisible();
+  await expect(page.getByText(/Jenny will add work here when Chat or her autonomous plan calls for it/i)).toBeVisible();
 });
 
 test("chat remains usable with media picker, durable messages, and reload", async ({ page }) => {
@@ -68,7 +69,7 @@ test("Agent menu retains setup and testing without competing daily tabs", async 
 test("existing media survives send and reload, and Agent details stay compact", async ({ page, request }) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
-  await navigation(page).getByRole("button", { name: "Media", exact: true }).click();
+  await navigation(page).getByRole("button", { name: "Artifacts", exact: true }).click();
   await page.getByLabel("Upload assets", { exact: true }).setInputFiles("docs/social-post-assets/agent-and-presence.png");
   await expect(page.locator(".asset-card")).toHaveCount(1, { timeout: 60000 });
   await page.reload();
