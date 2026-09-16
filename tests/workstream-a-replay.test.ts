@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { captureSandboxWorld, restoreSandboxWorld, sandboxWorldDigest } from "../lib/sandbox-replay";
 import { SandboxTemporalKernel } from "../lib/sandbox-temporal";
-import { addSandboxEvent, createAgent, startPlaygroundSession } from "../lib/runtime";
+import { addSandboxEvent, applyOperation, createAgent, startPlaygroundSession } from "../lib/runtime";
 
 describe("Workstream A deterministic replay contract", () => {
   it("does not expose delayed truth before its causal event", () => {
@@ -58,6 +58,22 @@ describe("Workstream A deterministic replay contract", () => {
     expect(sandboxWorldDigest(replay)).toBe(checkpoint.digest);
     expect(replay.collections.mirrorObjects).toHaveLength(1);
     expect(replay.session.seed).toBe("sbx-a-003");
+  });
+
+  it("captures Agent-owned executable work as part of the replayable world", () => {
+    let state = createAgent({ name: "Replay Agent", description: "Replay proofs", audience: "builders", mode: "agent", handle: "@replay_agent", accent: "#aa7744" });
+    state = startPlaygroundSession(state, state.presence!.id, "fresh", "assignment-replay");
+    const session = state.playgroundSessions[0]!;
+    state = applyOperation(state, { type: "createAssignment", presenceId: session.presenceId, sessionId: session.id, environment: "sandbox", createdBy: "agent", instruction: "Keep testing the durable replay path." });
+    const assignment = state.assignments.find((item) => item.sessionId === session.id);
+    expect(assignment).toBeDefined();
+    const checkpoint = captureSandboxWorld(state, session.id);
+    expect(checkpoint.collections.assignments).toHaveLength(1);
+
+    const other = startPlaygroundSession(state, state.presence!.id, "fresh", "other-world");
+    const restored = restoreSandboxWorld(other, checkpoint);
+    expect(restored.assignments.filter((item) => item.sessionId === session.id)).toHaveLength(1);
+    expect(restored.assignments.filter((item) => item.sessionId === other.playgroundSessions[0]!.id)).toHaveLength(0);
   });
 
   it("uses a seed for reproducible Sandbox clock and actor identities", () => {
