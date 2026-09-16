@@ -268,8 +268,10 @@ describe("Autonomous Resilience, System Log Projection & Dynamic Freshness", () 
     const candidate = { ...state, assignments: [{ ...assignment, status: "working" as const }], assignmentRuns: [run] };
     const recovered = recoverStaleAssignmentRuns(candidate, timestamp);
     expect(recovered.recoveredRunIds).toEqual([run.id]);
-    expect(recovered.state.assignmentRuns?.[0]).toMatchObject({ status: "failed", leaseOwner: undefined, leaseExpiresAt: undefined });
-    expect(recovered.state.assignments[0]).toMatchObject({ status: "blocked", work: { blockedReason: expect.stringContaining("stopped reporting") } });
+    expect(recovered.spawnedRunIds).toHaveLength(1);
+    expect(recovered.state.assignmentRuns?.find((item) => item.id === run.id)).toMatchObject({ status: "superseded_stale", leaseOwner: undefined, leaseExpiresAt: undefined });
+    expect(recovered.state.assignmentRuns?.find((item) => item.id === recovered.spawnedRunIds[0])).toMatchObject({ status: "queued", recoveryOf: run.id, attempts: 4 });
+    expect(recovered.state.assignments[0]).toMatchObject({ status: "active" });
 
     const active = recoverStaleAssignmentRuns(candidate, timestamp, new Set([run.id]));
     expect(active.recoveredRunIds).toHaveLength(0);
