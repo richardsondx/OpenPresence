@@ -2546,7 +2546,7 @@ export interface AssignmentPursuitWindow {
 }
 
 export interface SandboxEnvironment { id: string; presenceId: string; channelId: ChannelId; connectorId: string; status: "ready" | "active" | "paused" | "error"; createdAt: string; updatedAt: string; }
-export interface PlaygroundSession { id: string; environmentId: string; presenceId: string; channelId: ChannelId; source: "fresh" | "scenario" | "replay"; status: "ready" | "active" | "paused" | "completed"; virtualNow: string; virtualTimeMode?: "realtime" | "manual"; worldRevision?: number; temporalSnapshot?: SandboxTemporalSnapshot; createdAt: string; updatedAt: string; evaluatedSlotIds: string[]; judgedObjectIds?: string[]; scenarioRunId?: string; scenarioVersionId?: string; }
+export interface PlaygroundSession { id: string; environmentId: string; presenceId: string; channelId: ChannelId; source: "fresh" | "scenario" | "replay"; seed?: string; status: "ready" | "active" | "paused" | "completed"; virtualNow: string; virtualTimeMode?: "realtime" | "manual"; worldRevision?: number; temporalSnapshot?: SandboxTemporalSnapshot; createdAt: string; updatedAt: string; evaluatedSlotIds: string[]; judgedObjectIds?: string[]; scenarioRunId?: string; scenarioVersionId?: string; }
 export type ScenarioOwnerScope = "system" | "agent" | "presence";
 export type ScenarioSource = "builtin" | "natural_language" | "import";
 export type ScenarioStimulusOrigin = "built_in" | "generated" | "operator" | "imported";

@@ -53,6 +53,8 @@ export interface TemporalEvent {
   recurrence?: TemporalRecurrence;
   fence?: TemporalFenceToken;
   causeEventId?: string;
+  /** Stable registry key required when a handler must survive snapshot replay. */
+  handlerId?: string;
 }
 
 export interface TemporalOutcome {
@@ -124,6 +126,7 @@ export interface TemporalEventInput {
   fence?: TemporalFenceToken;
   causeEventId?: string;
   handler?: TemporalEventHandler;
+  handlerId?: string;
 }
 
 export interface TemporalOutcomeInput {
@@ -151,6 +154,8 @@ export interface SandboxTemporalSnapshot {
   acceleration: TemporalAcceleration;
   events: TemporalEvent[];
   outcomes: TemporalOutcome[];
+  /** Deferred values are runtime-only truth and never appear on a scheduled outcome. */
+  deferredOutcomeValues?: Record<string, unknown>;
   retries: TemporalRetry[];
   fences: Record<string, number>;
   trajectory: TemporalTrajectoryRecord[];
@@ -159,6 +164,7 @@ export interface SandboxTemporalSnapshot {
   nextOutcomeNumber: number;
   nextRetryNumber: number;
   nextTrajectoryNumber: number;
+  nextCheckpointNumber?: number;
   bounds: SandboxTemporalBounds;
   /** Persisted immutable branch points; omitted by nested checkpoint snapshots. */
   checkpoints?: TemporalCheckpoint[];
@@ -321,6 +327,7 @@ export class SandboxTemporalKernel {
   private readonly boundsValue: SandboxTemporalBounds;
   private eventsValue: TemporalEvent[] = [];
   private outcomesValue: TemporalOutcome[] = [];
+  private deferredOutcomeValues = new Map<string, unknown>();
   private retriesValue: TemporalRetry[] = [];
   private fencesValue = new Map<string, number>();
   private trajectoryValue: TemporalTrajectoryRecord[] = [];
@@ -351,6 +358,7 @@ export class SandboxTemporalKernel {
     kernel.accelerationValue = clone(snapshot.acceleration);
     kernel.eventsValue = clone(snapshot.events);
     kernel.outcomesValue = clone(snapshot.outcomes);
+    kernel.deferredOutcomeValues = new Map(Object.entries(snapshot.deferredOutcomeValues ?? {}));
     kernel.retriesValue = clone(snapshot.retries);
     kernel.fencesValue = new Map(Object.entries(snapshot.fences));
     kernel.trajectoryValue = clone(snapshot.trajectory);
@@ -360,7 +368,12 @@ export class SandboxTemporalKernel {
     kernel.outcomeNumberValue = snapshot.nextOutcomeNumber;
     kernel.retryNumberValue = snapshot.nextRetryNumber;
     kernel.trajectoryNumberValue = snapshot.nextTrajectoryNumber;
+    kernel.checkpointNumberValue = snapshot.nextCheckpointNumber ?? 0;
     kernel.handlers = new Map(Object.entries(handlers ?? {}));
+    for (const event of kernel.eventsValue) {
+      if (event.handlerId && !kernel.handlers.has(event.id) && kernel.handlers.has(event.handlerId)) kernel.handlers.set(event.id, kernel.handlers.get(event.handlerId)!);
+      if (event.status === "pending" && event.handlerId && !kernel.handlers.has(event.id)) throw new TemporalValidationError(`Snapshot requires replay handler ${event.handlerId}.`);
+    }
     return kernel;
   }
 
@@ -381,6 +394,7 @@ export class SandboxTemporalKernel {
       acceleration: clone(this.accelerationValue),
       events: clone(this.eventsValue),
       outcomes: clone(this.outcomesValue),
+      deferredOutcomeValues: Object.fromEntries(this.deferredOutcomeValues.entries()),
       retries: clone(this.retriesValue),
       fences: Object.fromEntries(this.fencesValue.entries()),
       trajectory: clone(this.trajectoryValue),
@@ -389,6 +403,7 @@ export class SandboxTemporalKernel {
       nextOutcomeNumber: this.outcomeNumberValue,
       nextRetryNumber: this.retryNumberValue,
       nextTrajectoryNumber: this.trajectoryNumberValue,
+      nextCheckpointNumber: this.checkpointNumberValue,
       bounds: clone(this.boundsValue),
     };
   }
@@ -417,7 +432,8 @@ export class SandboxTemporalKernel {
 
   setAcceleration(factor: number, mode: TemporalAcceleration["mode"] = factor === 1 ? "manual" : "accelerated"): this {
     positiveNumber(factor, "accelerationFactor");
-    this.accelerationValue = { ...this.accelerationValue, factor, mode, updatedAt: this.nowValue };
+    const normalizedMode = factor === 1 ? "manual" : "accelerated";
+    this.accelerationValue = { ...this.accelerationValue, factor, mode: normalizedMode, updatedAt: this.nowValue };
     this.addTrajectory("acceleration_changed", { factor, mode });
     return this;
   }
@@ -425,7 +441,7 @@ export class SandboxTemporalKernel {
   /** Apply real elapsed time through the explicit acceleration factor. */
   tick(realElapsedMs: number, options: AdvanceOptions = {}): AdvanceResult {
     nonNegativeInteger(realElapsedMs, "realElapsedMs");
-    const virtualElapsedMs = realElapsedMs * this.accelerationValue.factor;
+    const virtualElapsedMs = this.pausedValue ? 0 : realElapsedMs * this.accelerationValue.factor;
     if (!Number.isSafeInteger(virtualElapsedMs)) throw new TemporalValidationError("Accelerated duration exceeds safe integer milliseconds.");
     this.accelerationValue = { ...this.accelerationValue, realElapsedMs, virtualElapsedMs, updatedAt: this.nowValue };
     return this.advanceBy(virtualElapsedMs, options);
@@ -463,10 +479,14 @@ export class SandboxTemporalKernel {
       ...(recurrence === undefined ? {} : { recurrence: clone(recurrence) }),
       ...(input.fence === undefined ? {} : { fence: clone(input.fence) }),
       ...(input.causeEventId === undefined ? {} : { causeEventId: input.causeEventId }),
+      ...(input.handlerId === undefined && !input.handler ? {} : { handlerId: input.handlerId ?? id }),
     };
     this.assertEventBudget();
     this.eventsValue.push(event);
-    if (input.handler) this.handlers.set(id, input.handler);
+    if (input.handler) {
+      this.handlers.set(id, input.handler);
+      if (input.handlerId) this.handlers.set(input.handlerId, input.handler);
+    }
     this.addTrajectory("event_scheduled", { type: event.type, at: event.at, occurrence: event.occurrence }, id);
     return clone(event);
   }
@@ -488,10 +508,10 @@ export class SandboxTemporalKernel {
       id,
       causeEventId: input.causeEventId,
       eventId: event.id,
-      ...(input.value === undefined ? {} : { value: clone(input.value) }),
       status: "scheduled",
       scheduledAt: this.nowValue,
     };
+    if (input.value !== undefined) this.deferredOutcomeValues.set(id, clone(input.value));
     this.outcomesValue.push(outcome);
     this.addTrajectory("outcome_scheduled", { causeEventId: input.causeEventId, at, outcomeId: id }, event.id);
     return clone(outcome);
@@ -706,7 +726,7 @@ export class SandboxTemporalKernel {
       this.addTrajectory("event_fired", { type: event.type, occurrence: event.occurrence }, event.id);
       if (event.type === "outcome") this.recordScheduledOutcome(event);
       if (event.type === "retry") this.markRetryAttempt(event);
-      const handler = this.handlers.get(event.id) ?? this.handlers.get(event.rootId);
+      const handler = this.handlers.get(event.id) ?? this.handlers.get(event.handlerId ?? "") ?? this.handlers.get(event.rootId);
       const effects = [handler, onEvent].filter(Boolean).flatMap((callback) => callback!(clone(event), { now: this.nowValue, event: clone(event), currentFence: (key) => this.currentFence(key) }) ?? []);
       for (const effect of effects) this.applyEffect(effect);
       this.scheduleNextOccurrence(event);
@@ -750,6 +770,10 @@ export class SandboxTemporalKernel {
       }
     }
     outcome.status = "recorded";
+    if (this.deferredOutcomeValues.has(outcome.id)) {
+      outcome.value = clone(this.deferredOutcomeValues.get(outcome.id));
+      this.deferredOutcomeValues.delete(outcome.id);
+    }
     outcome.recordedAt = event.at;
     this.addTrajectory("outcome_recorded", { outcomeId: outcome.id, causeEventId: outcome.causeEventId, value: clone(outcome.value) }, event.id);
   }
@@ -820,6 +844,7 @@ export class SandboxTemporalKernel {
     this.accelerationValue = clone(other.accelerationValue);
     this.eventsValue = clone(other.eventsValue);
     this.outcomesValue = clone(other.outcomesValue);
+    this.deferredOutcomeValues = new Map(other.deferredOutcomeValues);
     this.retriesValue = clone(other.retriesValue);
     this.fencesValue = new Map(other.fencesValue);
     this.trajectoryValue = clone(other.trajectoryValue);

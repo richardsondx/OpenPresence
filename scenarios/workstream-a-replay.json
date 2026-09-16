@@ -1,0 +1,9 @@
+{
+  "name": "Workstream A seeded hidden-truth replay",
+  "seed": "sbx-a-003",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario", "seed": "sbx-a-003" } },
+    { "command": "inject", "options": { "actor": "Maya", "action": "post", "content": "A delayed consequence belongs to the world, not to the Agent, until its cause is observed.", "observeOnly": true } },
+    { "command": "timeline" }
+  ]
+}

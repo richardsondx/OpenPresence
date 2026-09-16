@@ -48,6 +48,7 @@ Common options:
   --url <url>          OpenPresence server URL (default: $OPENPRESENCE_URL or localhost:3000)
   --session <id>       Playground session id
   --presence <id>      Presence id when starting a session
+  --seed <value>       Deterministic scenario seed recorded in the Sandbox session
   --responsibility <mode>  Schedule mode: consider (default) or assign
   --id <id>            Existing Watch, Assignment, Calendar, or rehearsal id
   --reasons <list>     Comma-separated preference reasons for feedback
@@ -197,6 +198,7 @@ function projectState(state, explicitSessionId, mode = "inspect") {
     session: {
       id: session.id,
       environmentId: session.environmentId,
+      seed: session.seed,
       status: session.status,
       channel: session.channelId,
       virtualNow: session.virtualNow,
@@ -581,7 +583,7 @@ async function executePlayground(baseUrl, command, options, positionals) {
     fail(`Unknown Scenario command: ${subcommand}.`, "INVALID_ARGUMENT");
   }
   if (command === "start") {
-    const next = await postOperation(baseUrl, { type: "startPlayground", presenceId: options.presence, source: options.source ?? "fresh" });
+    const next = await postOperation(baseUrl, { type: "startPlayground", presenceId: options.presence, source: options.source ?? "fresh", seed: typeof options.seed === "string" ? options.seed : undefined });
     const startedSessionId = options.session ?? next.playgroundSessions
       ?.filter((session) => !options.presence || session.presenceId === options.presence)
       .sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")))[0]?.id;

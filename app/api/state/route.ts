@@ -5118,7 +5118,7 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("confirmAutoMode"), presenceId: z.string().min(1), capabilities: z.array(z.string().trim().min(1).max(80)).min(1).max(20), executionIds: z.array(z.string().min(1)).max(100) }),
   z.object({ type: z.literal("approveSandboxIntroduction"), id: z.string().min(1) }),
   z.object({ type: z.literal("declineSandboxIntroduction"), id: z.string().min(1) }),
-  z.object({ type: z.literal("startPlayground"), presenceId: z.string().min(1).optional(), source: z.enum(["fresh", "scenario", "replay"]).optional() }),
+  z.object({ type: z.literal("startPlayground"), presenceId: z.string().min(1).optional(), source: z.enum(["fresh", "scenario", "replay"]).optional(), seed: z.string().trim().min(1).max(200).optional() }),
   z.object({ type: z.literal("syncPlaygroundTime"), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("resetPlayground"), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("removeSandboxObject"), sessionId: z.string().min(1), objectId: z.string().min(1) }),
@@ -6583,7 +6583,7 @@ export async function POST(request: Request) {
       }
     }
     if (parsed.type === "startPlayground") {
-      const next = startPlaygroundSession(current, parsed.presenceId, parsed.source ?? "fresh");
+      const next = startPlaygroundSession(current, parsed.presenceId, parsed.source ?? "fresh", parsed.seed);
       writeState(next);
       return stateResponse(request, next);
     }

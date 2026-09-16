@@ -3227,14 +3227,14 @@ export function blockExecutionForTargetLanguage(source: OpenPresenceState, execu
   return state;
 }
 
-export function startPlaygroundSession(source: OpenPresenceState, presenceId?: string, sourceType: PlaygroundSession["source"] = "fresh") {
+export function startPlaygroundSession(source: OpenPresenceState, presenceId?: string, sourceType: PlaygroundSession["source"] = "fresh", seed?: string) {
   const state = cloneState(source);
   const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
   if (!presence) throw new Error("Choose a Presence before starting Playground.");
   const environment = sandboxEnvironmentFor(state, presence);
   const timestamp = now();
   const temporal = new SandboxTemporalKernel({ startAt: Date.parse(timestamp) });
-  const session: PlaygroundSession = { id: id("session"), environmentId: environment.id, presenceId: presence.id, channelId: presence.channel, source: sourceType, status: "active", virtualNow: timestamp, virtualTimeMode: "realtime", worldRevision: 1, temporalSnapshot: temporal.snapshot(), createdAt: timestamp, updatedAt: timestamp, evaluatedSlotIds: [], judgedObjectIds: [] };
+  const session: PlaygroundSession = { id: id("session"), environmentId: environment.id, presenceId: presence.id, channelId: presence.channel, source: sourceType, ...(seed?.trim() ? { seed: seed.trim() } : {}), status: "active", virtualNow: timestamp, virtualTimeMode: "realtime", worldRevision: 1, temporalSnapshot: temporal.snapshot(), createdAt: timestamp, updatedAt: timestamp, evaluatedSlotIds: [], judgedObjectIds: [] };
   state.playgroundSessions.unshift(session);
   state.sandboxEnvironments = state.sandboxEnvironments.map((item) => item.id === environment.id ? { ...item, status: "active", updatedAt: timestamp } : item);
   state.events.unshift(event("system", "Playground session started", `${channelName(presence.channel)} is simulated. ${presence.name} is using the real Agent runtime in an isolated world.`, "positive", { presenceId: presence.id }));

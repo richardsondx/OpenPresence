@@ -128,6 +128,24 @@ describe("Playground CLI", () => {
     expect(received).toMatchObject({ type: "addSandboxEvent", sessionId: "session-1", actionId: "post", actorName: "Maya", content: "Hello" });
   });
 
+  it("passes and projects a replay seed through the real Playground start operation", async () => {
+    let received: unknown;
+    const server = await startApi((request, response) => {
+      if (request.method === "GET") return json(response, fixtureState);
+      let body = "";
+      request.on("data", (chunk) => { body += chunk.toString(); });
+      request.on("end", () => {
+        received = JSON.parse(body);
+        json(response, { ...fixtureState, playgroundSessions: [{ ...fixtureState.playgroundSessions[0], seed: "sbx-a-003" }] });
+      });
+    });
+    const result = await runCli(server.url, ["start", "--seed", "sbx-a-003"]);
+    await server.close();
+    expect(result.code).toBe(0);
+    expect(received).toMatchObject({ type: "startPlayground", seed: "sbx-a-003" });
+    expect(JSON.parse(result.stdout).session.seed).toBe("sbx-a-003");
+  });
+
   it("projects the newly started session when a Presence is selected explicitly", async () => {
     const server = await startApi((request, response) => {
       if (request.method === "GET") return json(response, { ...fixtureState, presence: { ...fixtureState.presence, id: "presence-1" }, presences: [{ ...fixtureState.presence, id: "presence-1" }] });
