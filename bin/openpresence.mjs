@@ -583,10 +583,17 @@ async function executePlayground(baseUrl, command, options, positionals) {
     fail(`Unknown Scenario command: ${subcommand}.`, "INVALID_ARGUMENT");
   }
   if (command === "start") {
+    const before = await getState(baseUrl);
+    const priorSessionIds = new Set((before.playgroundSessions ?? []).map((session) => session.id));
     const next = await postOperation(baseUrl, { type: "startPlayground", presenceId: options.presence, source: options.source ?? "fresh", seed: typeof options.seed === "string" ? options.seed : undefined });
-    const startedSessionId = options.session ?? next.playgroundSessions
-      ?.filter((session) => !options.presence || session.presenceId === options.presence)
-      .sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")))[0]?.id;
+    // The API prepends the newly-created session. Do not infer recency from
+    // createdAt: seeded sessions intentionally share a deterministic virtual
+    // timestamp, so sorting can select an older world and contaminate replay.
+    const newSessions = (next.playgroundSessions ?? []).filter((session) => !priorSessionIds.has(session.id) && (!options.presence || session.presenceId === options.presence));
+    const startedSessionId = options.session
+      ?? newSessions.find((session) => !options.seed || session.seed === options.seed)?.id
+      ?? newSessions[0]?.id
+      ?? next.playgroundSessions?.find((session) => !options.presence || session.presenceId === options.presence)?.id;
     return projectState(next, startedSessionId, command);
   }
   if (command === "inspect" || command === "status") return projectState(await getState(baseUrl), options.session, "inspect");

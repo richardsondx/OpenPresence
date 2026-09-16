@@ -448,12 +448,30 @@ function stateResponse(request: Request, state: OpenPresenceState, options?: { r
     try { setRuntimeScopeCookie(response, createRuntimeScope(state, { presenceId: state.presence?.id })); } catch { /* onboarding has no RuntimeScope yet */ }
     return response;
   }
-  const browserState = stateForResponse(request, state, options?.activity);
+  const browserState = redactSandboxTruth(stateForResponse(request, state, options?.activity));
   const response = stateBodyResponse(request, JSON.stringify(browserState), {
     headers: options?.runId ? { "X-OpenPresence-Run-Id": options.runId } : undefined,
   });
   try { setRuntimeScopeCookie(response, createRuntimeScope(state, { presenceId: state.presence?.id })); } catch { /* onboarding has no RuntimeScope yet */ }
   return response;
+}
+
+/** Hidden delayed consequences are kernel internals, never operator/API data. */
+function redactSandboxTruth(state: OpenPresenceState): OpenPresenceState {
+  return {
+    ...state,
+    playgroundSessions: (state.playgroundSessions ?? []).map((session) => session.temporalSnapshot ? {
+      ...session,
+      temporalSnapshot: {
+        ...session.temporalSnapshot,
+        deferredOutcomeValues: undefined,
+        checkpoints: session.temporalSnapshot.checkpoints?.map((checkpoint) => ({
+          ...checkpoint,
+          snapshot: { ...checkpoint.snapshot, deferredOutcomeValues: undefined },
+        })),
+      },
+    } : session),
+  };
 }
 
 function conciseStateMutationValidationError(error: z.ZodError) {
@@ -5173,6 +5191,9 @@ function validateRequestLineage(state: OpenPresenceState, parsed: RuntimeOperati
   const session = usesPlaygroundSession && candidate.sessionId ? state.playgroundSessions.find((item) => item.id === candidate.sessionId) : undefined;
   if (usesPlaygroundSession && candidate.sessionId && !session) throw new Error("That Playground session does not belong to the requested Agent workspace.");
   if (session && candidate.presenceId && session.presenceId !== candidate.presenceId) throw new Error("The Playground session and Presence do not share the same durable scope.");
+  if (session && parsed.type === "createAssignment" && parsed.environment === "live") {
+    throw new Error("A Playground session can only own Sandbox Assignments.");
+  }
   if (["startAssignment", "workAssignment", "pauseAssignment", "resumeAssignment", "cancelAssignment", "startAssignmentPursuit", "scaleAssignmentPursuit"].includes(parsed.type)) {
     const assignmentId = parsed.type === "startAssignmentPursuit"
       ? parsed.assignmentId
@@ -5334,7 +5355,7 @@ export async function GET(request: Request) {
             : projection === "playground"
               ? agentLibraryBrowserProjection(contextualState, "playground")
           : browserWorkspaceProjection(contextualState);
-      const payload = { ...withAgentPresenceDirectory(browserState, contextualState), runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } };
+      const payload = { ...withAgentPresenceDirectory(redactSandboxTruth(browserState), contextualState), runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } };
       if (!["activity", "chat"].includes(projection ?? "")) return stateBodyResponse(request, JSON.stringify(payload), { headers: responseHeaders });
       const body = JSON.stringify(payload);
       rememberActivityResponse(activityCacheKey, { etag, body });

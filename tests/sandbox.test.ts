@@ -3,9 +3,10 @@ import { writeState } from "../lib/db";
 import { claimExecutions, createBridgeWithKey } from "../lib/bridge";
 import * as x from "../lib/x";
 import { deliverNativeExecutions } from "../lib/native-execution-delivery";
-import { POST as statePost } from "../app/api/state/route";
+import { GET as stateGet, POST as statePost } from "../app/api/state/route";
 import { addSandboxEvent, advanceSandboxTime, advanceSandboxTimeWithTemporalEvents, applyOperation, beginOriginalPostRehearsal, completeOriginalPostRehearsal, confirmAutoMode, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, recordPreferenceEvidence, resetPlaygroundSession, startPlaygroundSession, syncPlaygroundTime } from "../lib/runtime";
 import type { OpenPresenceState } from "../lib/types";
+import { SandboxTemporalKernel } from "../lib/sandbox-temporal";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -39,6 +40,28 @@ describe("Sandbox and Playground boundaries", () => {
     expect(state.presence?.environment).toBe("sandbox");
     expect(state.sandboxEnvironments).toHaveLength(1);
     expect(state.sandboxEnvironments[0]?.connectorId).toContain("sandbox-connector");
+  });
+
+  it("does not expose deferred Sandbox truth through the state response", async () => {
+    let state = startPlaygroundSession(createAgent(input), undefined, "replay", "hidden-truth-response");
+    const session = state.playgroundSessions[0]!;
+    const kernel = SandboxTemporalKernel.fromSnapshot(session.temporalSnapshot!);
+    const cause = kernel.scheduleEvent({ id: "hidden-response-cause", type: "world_cause", offsetMs: 60_000 });
+    kernel.scheduleDelayedOutcome({ id: "hidden-response-outcome", causeEventId: cause.id, offsetMs: 120_000, value: { canary: "SECRET" } });
+    session.temporalSnapshot = kernel.snapshot();
+    writeState(state);
+    const response = await stateGet(new Request("http://localhost/api/state", { method: "GET" }));
+    const exposed = await response.json() as OpenPresenceState;
+    const exposedSession = exposed.playgroundSessions.find((item) => item.id === session.id)!;
+    expect(response.status).toBe(200);
+    expect(exposedSession.temporalSnapshot?.deferredOutcomeValues).toBeUndefined();
+    expect(JSON.stringify(exposed)).not.toContain("SECRET");
+  });
+
+  it("rejects a live Assignment attached to a Playground session", () => {
+    const state = startPlaygroundSession(createAgent(input));
+    const session = state.playgroundSessions[0]!;
+    expect(() => applyOperation(state, { type: "createAssignment", presenceId: session.presenceId, sessionId: session.id, environment: "live", instruction: "Probe a live escape." })).toThrow(/Playground session can only own Sandbox Assignments/);
   });
 
   it("persists ordered temporal calendar events through a multi-day advance", () => {

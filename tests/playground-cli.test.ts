@@ -146,6 +146,24 @@ describe("Playground CLI", () => {
     expect(JSON.parse(result.stdout).session.seed).toBe("sbx-a-003");
   });
 
+  it("does not select an older tied-timestamp session during seeded start", async () => {
+    const sameTime = "2026-01-01T00:00:00.000Z";
+    const server = await startApi((request, response) => {
+      if (request.method === "GET") return json(response, { ...fixtureState, playgroundSessions: [{ ...fixtureState.playgroundSessions[0], id: "old-session", seed: "same-seed", createdAt: sameTime, updatedAt: sameTime }] });
+      json(response, {
+        ...fixtureState,
+        playgroundSessions: [
+          { ...fixtureState.playgroundSessions[0], id: "new-session", seed: "same-seed", createdAt: sameTime, updatedAt: sameTime },
+          { ...fixtureState.playgroundSessions[0], id: "old-session", seed: "same-seed", createdAt: sameTime, updatedAt: sameTime },
+        ],
+      });
+    });
+    const result = await runCli(server.url, ["start", "--seed", "same-seed"]);
+    await server.close();
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout).session.id).toBe("new-session");
+  });
+
   it("projects the newly started session when a Presence is selected explicitly", async () => {
     const server = await startApi((request, response) => {
       if (request.method === "GET") return json(response, { ...fixtureState, presence: { ...fixtureState.presence, id: "presence-1" }, presences: [{ ...fixtureState.presence, id: "presence-1" }] });
