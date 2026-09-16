@@ -3800,7 +3800,30 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
       state.events.unshift({ ...event("execution", assignmentIsSatisfied(assignment) ? "Assignment complete" : "Assignment progress updated", `${assignment.progress.verified} / ${assignment.progress.required} verified publications.`, "positive", { presenceId: presence.id, executionId: execution.id }), sessionId: session.id });
       recordSandboxTrajectoryInPlace(state, session.id, "learning", { assignmentId: assignment.id, outcomeId: outcome.id, verified: assignment.progress.verified, required: assignment.progress.required, lesson: "Sandbox outcome verified in the simulated world." }, now());
       if (!assignmentIsSatisfied(assignment)) recordSandboxTrajectoryInPlace(state, session.id, "replan", { assignmentId: assignment.id, outcomeId: outcome.id, reason: "The verified outcome did not yet satisfy the Assignment; more work remains." }, now());
+
     }
+  }
+  // Repeated verified outcomes are the first point at which a Sandbox
+  // learning signal clears the operator-interruption threshold. This is
+  // session-scoped because an Agent-owned responsibility may span several
+  // execution records without every act carrying an Assignment attachment.
+  const verifiedSessionOutcomes = state.outcomes.filter((item) => item.sessionId === session.id && item.status === "succeeded");
+  const learningDedupeKey = `sandbox-learning:${session.id}`;
+  const learningUpdateAlreadySent = (state.operatorConversations ?? []).some((conversation) => conversation.messages.some((message) => message.agentInitiated?.dedupeKey === learningDedupeKey));
+  if (verifiedSessionOutcomes.length >= 2 && !learningUpdateAlreadySent) {
+    const assignment = execution.assignmentId ? state.assignments.find((item) => item.id === execution.assignmentId) : undefined;
+    const learningEvent = event("learning", "Strategy learning update", "Repeated verified outcomes gave the Agent a meaningful signal about what is converting better. It is carrying that lesson into the next experiments.", "positive", { presenceId: presence.id, executionId: execution.id, outcomeId: outcome.id, sourceObjectId: assignment?.id });
+    state.events.unshift({ ...learningEvent, sessionId: session.id });
+    const communication = recordAgentInitiatedUpdate(state, presence.id, {
+      id: learningEvent.id,
+      title: learningEvent.title,
+      detail: learningEvent.detail,
+      type: learningEvent.type,
+      tone: learningEvent.tone,
+      kind: "strategy_change",
+      dedupeKey: learningDedupeKey,
+    });
+    if (communication.recorded) state = communication.state;
   }
   if (repliedToId) {
     const repliedTo = state.mirrorObjects.find((item) => item.externalRef.id === repliedToId && item.actorPresenceId !== presence.id);

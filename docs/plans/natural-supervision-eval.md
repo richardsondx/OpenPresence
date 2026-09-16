@@ -21,18 +21,21 @@ answer.
 ## Contract and current gaps
 
 Runtime events now pass through the shared importance gate in
-`lib/runtime.ts`. Meaningful warning/problem events can therefore create a
-Presence-scoped unsolicited Chat message with event provenance and dedupe;
-routine execution receipts remain silent in Chat. This is an integration seam,
-not a second conversation store.
+`lib/runtime.ts`. Meaningful warning/problem/learning events can therefore
+create a Presence-scoped unsolicited Chat message with event provenance and
+dedupe; routine execution receipts remain silent in Chat. This is an
+integration seam, not a second conversation store. The Sandbox now emits one
+session-scoped, deduplicated strategy-learning update after repeated verified
+outcomes, and the natural-supervision trajectory requires that non-routine
+reverse-direction message.
 
 - The current deterministic runtime can prove the initial ownership mutation
   and downstream social acts, but later natural supervision turns are saved as
   Chat context rather than producing an inspectable plan revision or learning
   mutation. The eval keeps that gap visible instead of treating a plausible
   private reply as evidence of adaptation. Agent-initiated event delivery is
-  covered at the runtime boundary, but a full multi-day milestone/recap is
-  still an open trajectory proof.
+  covered at the runtime boundary, but a full autonomous multi-day
+  milestone/recap is still an open trajectory proof.
 - Operator Chat messages retain their wall-clock timestamp for normal product
   history and now also carry a `causalTime` annotation: active Sandbox turns
   record the Sandbox virtual timestamp and session ID, while live turns remain

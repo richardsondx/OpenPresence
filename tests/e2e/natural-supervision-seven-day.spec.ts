@@ -253,6 +253,8 @@ test.describe("Seven-day natural supervision trajectory", () => {
     expect(finalExecutions.length).toBeGreaterThan(0);
     expect(finalOutcomes.filter((item) => item.status === "succeeded").length).toBeGreaterThan(0);
     expect(finalExecutions.every((item) => item.environment === "sandbox")).toBe(true);
+    expect(agentInitiatedMessages.length).toBeGreaterThan(0);
+    expect(agentInitiatedMessages.some((message) => message.agentInitiated?.kind === "strategy_change")).toBe(true);
     expect(agentInitiatedMessages.every((message) => !/action verified|delivery complete|published scheduled/i.test(text(message.content)))).toBe(true);
   });
 });
