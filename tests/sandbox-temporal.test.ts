@@ -22,6 +22,17 @@ describe("sandbox temporal kernel", () => {
     expect(kernel.acceleration).toMatchObject({ factor: 4, realElapsedMs: 100, virtualElapsedMs: 400, mode: "accelerated" });
   });
 
+  it("does not report virtual elapsed time while paused and normalizes acceleration metadata", () => {
+    const kernel = new SandboxTemporalKernel({ startAt: 1_000 });
+    kernel.pause("certification pause");
+    expect(kernel.tick(100)).toMatchObject({ from: 1_000, to: 1_000, processed: [] });
+    expect(kernel.acceleration).toMatchObject({ realElapsedMs: 100, virtualElapsedMs: 0 });
+    kernel.setAcceleration(2, "manual");
+    expect(kernel.acceleration).toMatchObject({ factor: 2, mode: "accelerated" });
+    kernel.setAcceleration(1, "accelerated");
+    expect(kernel.acceleration).toMatchObject({ factor: 1, mode: "manual" });
+  });
+
   it("orders equal-time events by priority and then insertion sequence", () => {
     const kernel = new SandboxTemporalKernel();
     kernel.scheduleEvent({ type: "late", offsetMs: 10, priority: 10 });

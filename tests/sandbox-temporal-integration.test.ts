@@ -72,6 +72,15 @@ describe("Playground temporal integration boundary", () => {
     expect(rehydrated.events).toEqual(expect.arrayContaining([expect.objectContaining({ id: "integration:branch-marker", status: "pending" })]));
   });
 
+  it("continues checkpoint numbering after rehydration", () => {
+    const kernel = new SandboxTemporalKernel({ startAt: 0 });
+    const first = kernel.checkpoint("first");
+    const rehydrated = SandboxTemporalKernel.fromSnapshot(JSON.parse(JSON.stringify(kernel.snapshot())));
+    const second = rehydrated.checkpoint("second");
+    expect(second.id).not.toBe(first.id);
+    expect(second.id).toBe("checkpoint-2");
+  });
+
   it("resets temporal state without changing the legacy fresh-world contract", () => {
     let state = startPlaygroundSession(fixtureState());
     const session = state.playgroundSessions[0]!;

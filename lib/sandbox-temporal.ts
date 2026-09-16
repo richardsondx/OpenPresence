@@ -366,6 +366,7 @@ export class SandboxTemporalKernel {
     kernel.fencesValue = new Map(Object.entries(snapshot.fences));
     kernel.trajectoryValue = clone(snapshot.trajectory);
     kernel.checkpointsValue = new Map((snapshot.checkpoints ?? []).map((checkpoint) => [checkpoint.id, clone(checkpoint)]));
+    kernel.checkpointNumberValue = Math.max(0, ...(snapshot.checkpoints ?? []).map((checkpoint) => Number(checkpoint.id.match(/^checkpoint-(\d+)$/)?.[1] ?? 0)));
     kernel.sequenceValue = snapshot.nextSequence;
     kernel.eventNumberValue = snapshot.nextEventNumber;
     kernel.outcomeNumberValue = snapshot.nextOutcomeNumber;
@@ -434,11 +435,14 @@ export class SandboxTemporalKernel {
     return this;
   }
 
-  setAcceleration(factor: number, mode: TemporalAcceleration["mode"] = factor === 1 ? "manual" : "accelerated"): this {
+  setAcceleration(factor: number, _mode: TemporalAcceleration["mode"] = factor === 1 ? "manual" : "accelerated"): this {
     positiveNumber(factor, "accelerationFactor");
+    void _mode; // Retain the API parameter while deriving truthful metadata below.
+    // Mode describes the factor, so never persist contradictory metadata when
+    // a caller supplies the wrong label (for example, 2x + "manual").
     const normalizedMode = factor === 1 ? "manual" : "accelerated";
     this.accelerationValue = { ...this.accelerationValue, factor, mode: normalizedMode, updatedAt: this.nowValue };
-    this.addTrajectory("acceleration_changed", { factor, mode });
+    this.addTrajectory("acceleration_changed", { factor, mode: normalizedMode });
     return this;
   }
 
