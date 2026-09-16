@@ -711,7 +711,6 @@ export class SandboxTemporalKernel {
     if (!Number.isSafeInteger(to)) throw new TemporalValidationError("Virtual time exceeds safe integer milliseconds.");
     const beforeTrajectory = this.trajectoryNumberValue;
     this.nowValue = to;
-    if (deltaMs > 0) this.addTrajectory("time_advanced", { from, to, deltaMs });
     const processed: TemporalEvent[] = [];
     while (true) {
       const event = this.nextDueEvent(to);
@@ -719,6 +718,10 @@ export class SandboxTemporalKernel {
       if (processed.length >= this.boundsValue.maxEventsPerAdvance) throw new TemporalBoundsError("Per-advance event bound exceeded.");
       this.processEvent(event, options.onEvent, processed);
     }
+    // Record the enclosing advance after its event-local records. This keeps
+    // append order and virtual time order aligned for black-box trajectory
+    // reconstruction; event handlers still observe their exact event time.
+    if (deltaMs > 0) this.addTrajectory("time_advanced", { from, to, deltaMs }, undefined, to);
     return { from, to, processed: clone(processed), trajectory: clone(this.trajectoryValue.slice(beforeTrajectory)) };
   }
 

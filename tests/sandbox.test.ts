@@ -194,6 +194,7 @@ describe("Sandbox and Playground boundaries", () => {
     const target = state.mirrorObjects.find((item) => item.sessionId === session.id)!;
     state = formSandboxIntent(state, { sessionId: session.id, affordance: "reply", text: "The useful detail is in the tradeoff.", target: target.externalRef });
     const execution = state.executions[0]!;
+    const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId)!;
     state = deliverSandboxExecution(state, execution.id);
 
     const kinds = state.playgroundSessions.find((item) => item.id === session.id)!.temporalSnapshot!.trajectory.map((item) => item.kind);
@@ -201,6 +202,11 @@ describe("Sandbox and Playground boundaries", () => {
     const trajectory = state.playgroundSessions.find((item) => item.id === session.id)!.temporalSnapshot!.trajectory;
     expect(trajectory.find((item) => item.kind === "observation")?.data).toMatchObject({ mirrorObjectId: target.id, environment: "sandbox" });
     expect(trajectory.find((item) => item.kind === "outcome")?.data).toMatchObject({ executionId: execution.id, status: "succeeded" });
+    expect(trajectory.find((item) => item.kind === "decision")?.data).toMatchObject({ causal: { parentIds: [target.id] } });
+    expect(trajectory.find((item) => item.kind === "intent")?.data).toMatchObject({ causal: { parentIds: [target.id] } });
+    expect(trajectory.find((item) => item.kind === "execution")?.data).toMatchObject({ causal: { parentIds: [intent.id] } });
+    expect(trajectory.find((item) => item.kind === "result")?.data).toMatchObject({ causal: { parentIds: [execution.id] } });
+    expect(trajectory.find((item) => item.kind === "outcome")?.data).toMatchObject({ causal: { parentIds: [execution.id, intent.id] } });
   });
 
   it("does not let a real Bridge claim or native writer consume Sandbox work", async () => {

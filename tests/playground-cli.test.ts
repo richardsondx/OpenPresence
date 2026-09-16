@@ -63,6 +63,7 @@ describe("Playground CLI", () => {
     expect(output).not.toHaveProperty("providerConnections");
     expect(output.configuration.channel.affordances).toBeDefined();
     expect(output.configuration.meaningFiles).toBeDefined();
+    expect(output.trajectory).toEqual([]);
   });
 
   it("resolves scenario session and object references from prior steps", async () => {

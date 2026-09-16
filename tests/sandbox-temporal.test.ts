@@ -189,6 +189,17 @@ describe("sandbox temporal kernel", () => {
     ]);
   });
 
+  it("keeps enclosing time advances after event-local records", () => {
+    const kernel = new SandboxTemporalKernel({ startAt: 0 });
+    kernel.scheduleEvent({ id: "scheduled", type: "world", offsetMs: 10 });
+    kernel.advanceBy(20);
+    const eventIndex = kernel.trajectory.findIndex((record) => record.kind === "event_fired");
+    const advanceIndex = kernel.trajectory.findIndex((record) => record.kind === "time_advanced");
+    expect(eventIndex).toBeGreaterThanOrEqual(0);
+    expect(advanceIndex).toBeGreaterThan(eventIndex);
+    expect(kernel.trajectory[eventIndex]!.time).toBeLessThanOrEqual(kernel.trajectory[advanceIndex]!.time);
+  });
+
   it("does not report virtual elapsed time while paused", () => {
     const kernel = new SandboxTemporalKernel({ startAt: 1000 });
     kernel.pause();

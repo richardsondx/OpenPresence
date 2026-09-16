@@ -314,6 +314,16 @@ function projectState(state, explicitSessionId, mode = "inspect") {
       time: item.time,
       sourceObjectId: item.sourceObjectId,
     })),
+    // The temporal trace is the authoritative causal spine for Playground
+    // verification. It is session-scoped and only contains truth released by
+    // the kernel at or after its causal event.
+    trajectory: (session.temporalSnapshot?.trajectory ?? []).map((record) => ({
+      sequence: record.sequence,
+      time: new Date(record.time).toISOString(),
+      kind: record.kind,
+      eventId: record.eventId,
+      data: record.data,
+    })),
   };
   if (mode === "timeline") {
     result.timeline = [
