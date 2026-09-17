@@ -552,3 +552,13 @@ passed 1/1 with permission, execution, result/outcome, and retry temporal-parent
 checks. This closes the focused Slice A revalidation without promoting SBX-004,
 SBX-008, or EVAL-004: the broader composed/native and complete causal-cone
 contracts remain unmet.
+
+An independent public learning attempt then created a fresh Agent-owned Sandbox
+responsibility and materialized a session-scoped supported hypothesis from four
+measured outcomes, but could not produce the required retained-vs-removed
+checkpoint/fork ablation: public `reviewGrowth` rejected the clean session and
+the automatic counterfactuals all remained `not_demonstrated`. The verifier
+found no public operation for the altered-learning branch with identical future
+inputs. The result is preserved as an inconclusive proof-boundary artifact in
+`qa-learnings/independent-public-learning-ablation-9baca92-2026-09-17.md`; the
+LEARN-002/003/004 rows remain PARTIAL.
