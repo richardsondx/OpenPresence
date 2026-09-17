@@ -425,10 +425,14 @@ export function ensureGrowthEvidenceRecords(state: OpenPresenceState, presenceId
 
   // Observed formats are candidates for learning, never proof they caused growth.
   const environment = state.presences.find((presence) => presence.id === presenceId)?.environment ?? "live";
+  const growthAssignment = state.assignments.find((assignment) => assignment.presenceId === presenceId
+    && assignment.successEvidence?.kind === "metric_threshold"
+    && !["cancelled", "completed"].includes(assignment.status));
+  const growthLineage = growthAssignment ? { assignmentId: growthAssignment.id, assignmentPlanRevision: growthAssignment.plan?.revision } : {};
   const observedPosts = state.mirrorObjects.filter((item) => item.presenceId === presenceId && item.visibility === "public" && !item.archived && item.content?.text && (!item.environment || item.environment === environment)).sort((a, b) => b.observedAt.localeCompare(a.observedAt));
   const selectedPostIds = new Set([...observedPosts.slice(0, 40).map(item => item.id), ...requestedMirrorObjectIds]);
   for (const post of observedPosts.filter(item => selectedPostIds.has(item.id))) {
-    upsert({ id: `growth-evidence:observed:${post.id}`, agentId, presenceId, kind: "STRATEGY_OBSERVATION", claimScope: "presence", statement: `Observed social format (untrusted source content): ${post.content!.text!.slice(0, 1000)}`, sourceRefs: [{ kind: "mirror_object", id: post.id, sourcePresenceId: presenceId, observedAt: post.observedAt }], verified: false, createdAt });
+    upsert({ id: `growth-evidence:observed:${post.id}`, agentId, presenceId, ...growthLineage, kind: "STRATEGY_OBSERVATION", claimScope: "presence", statement: `Observed social format (untrusted source content): ${post.content!.text!.slice(0, 1000)}`, sourceRefs: [{ kind: "mirror_object", id: post.id, sourcePresenceId: presenceId, observedAt: post.observedAt }], verified: false, createdAt });
   }
 
   for (const snapshot of (state.audienceSnapshots ?? []).filter((item) => item.presenceId === presenceId).slice(0, 24)) {
@@ -436,6 +440,7 @@ export function ensureGrowthEvidenceRecords(state: OpenPresenceState, presenceId
       id: `growth-evidence:audience:${snapshot.id}`,
       agentId,
       presenceId,
+      ...growthLineage,
       kind: "WORLD_OUTCOME",
       claimScope: "presence",
       statement: `Observed audience snapshot: ${snapshot.followers.toLocaleString()} followers on ${snapshot.observedAt}.`,
@@ -452,6 +457,7 @@ export function ensureGrowthEvidenceRecords(state: OpenPresenceState, presenceId
       id: `growth-evidence:publication:${metric.id}`,
       agentId,
       presenceId,
+      ...(metricExecution?.assignmentId ? { assignmentId: metricExecution.assignmentId, assignmentPlanRevision: state.assignments.find((assignment) => assignment.id === metricExecution.assignmentId)?.plan?.revision } : growthLineage),
       kind: "WORLD_OUTCOME",
       claimScope: "presence",
       statement: `Observed publication outcome for ${metric.mirrorObjectId}: ${metric.impressions ?? 0} impressions, ${metric.likes ?? 0} likes, ${metric.replies ?? 0} replies.`,
@@ -467,6 +473,7 @@ export function ensureGrowthEvidenceRecords(state: OpenPresenceState, presenceId
       id: `growth-evidence:strategy:${decision.id}`,
       agentId,
       presenceId,
+      ...growthLineage,
       kind: "STRATEGY_OBSERVATION",
       claimScope: "presence",
       statement: `Observed strategy use: ${decision.socialStrategy.selectedByAct.map((selection) => selection.patternId ?? selection.act).join(", ")}.`,

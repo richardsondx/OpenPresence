@@ -1231,6 +1231,39 @@ export function replacePublishingPlan(source: OpenPresenceState, input: { presen
     workHistory: [], createdAt: timestamp, updatedAt: timestamp, revision: previous.reduce((max, item) => Math.max(max, item.revision), 0) + 1, modelProvider: input.modelProvider, modelId: input.modelId,
   };
   state.publishingPlans.unshift(plan);
+  const linkedAssignment = state.assignments.find((assignment) => assignment.id === presence.publishingInitiative.assignmentId)
+    ?? state.assignments.find((assignment) => assignment.presenceId === presence.id && assignment.origin === "publishing_initiative" && assignment.environment === environment && assignment.status !== "cancelled");
+  if (linkedAssignment) {
+    const priorPlan = linkedAssignment.plan;
+    const assignmentPlan: AssignmentPlan = {
+      ...(priorPlan ?? {
+        summary: plan.rationaleSummary ?? "Maintain a useful, evidence-led publishing presence.",
+        dailyTargets: [],
+        publishingApproach: [],
+        discoveryDirections: [],
+        relationshipFocus: [],
+        hypotheses: [],
+      }),
+      id: id("assignment-plan"),
+      assignmentId: linkedAssignment.id,
+      revision: (priorPlan?.revision ?? 0) + 1,
+      summary: plan.rationaleSummary ?? priorPlan?.summary ?? "Maintain a useful, evidence-led publishing presence.",
+      dailyTargets: [
+        ...(plan.windows.slice(0, 4).map((window) => `${window.purpose}: ${window.summary}`)),
+        ...(priorPlan?.dailyTargets ?? []),
+      ].slice(0, 20),
+      publishingApproach: plan.constraints?.length ? [...plan.constraints] : (priorPlan?.publishingApproach ?? []),
+      discoveryDirections: plan.replanSignals?.length ? [...plan.replanSignals] : (priorPlan?.discoveryDirections ?? []),
+      relationshipFocus: priorPlan?.relationshipFocus ?? [],
+      hypotheses: priorPlan?.hypotheses ?? [],
+      source: "agent",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    linkedAssignment.planHistory = [...(linkedAssignment.planHistory ?? []), assignmentPlan].slice(-50);
+    linkedAssignment.plan = assignmentPlan;
+    linkedAssignment.updatedAt = timestamp;
+  }
   state.events.unshift(event("decision", "Publishing plan created", `${presence.name} created a visible working plan for its ${initiative.mode === "pace" ? "operator publishing expectation" : "adaptive publishing responsibility"}.`, "positive", { presenceId: presence.id }));
   const sandboxSession = environment === "sandbox"
     ? state.playgroundSessions.find((session) => session.presenceId === presence.id && session.status === "active")
@@ -2127,6 +2160,7 @@ function growthAssignmentFor(source: OpenPresenceState, presenceId: string, assi
 export function deriveGrowthEvidenceSnapshot(source: OpenPresenceState, presenceId: string): import("./types").GrowthEvidenceSnapshot {
   const state = normalizeState(source);
   const presence = state.presences.find((p) => p.id === presenceId) ?? state.presence;
+  const growthAssignment = growthAssignmentFor(state, presenceId);
   const nowDate = new Date();
   const periodDays = 7;
   const windowEnd = nowDate.toISOString();
@@ -2165,6 +2199,7 @@ export function deriveGrowthEvidenceSnapshot(source: OpenPresenceState, presence
   return {
     id: id("growth-snapshot"),
     presenceId,
+    ...(growthAssignment ? { assignmentId: growthAssignment.id, assignmentPlanRevision: growthAssignment.plan?.revision } : {}),
     watermark,
     windowStart,
     windowEnd,

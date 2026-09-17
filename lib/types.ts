@@ -533,6 +533,9 @@ export type GrowthReviewKind = "weekly" | "strategic" | "event_driven";
 export interface GrowthEvidenceSnapshot {
   id: string;
   presenceId: string;
+  /** The Agent-owned Growth responsibility this snapshot evaluates. */
+  assignmentId?: string;
+  assignmentPlanRevision?: number;
   watermark: number;
   windowStart: string;
   windowEnd: string;
@@ -952,6 +955,9 @@ export interface GrowthEvidenceRecord {
   id: string;
   agentId: string;
   presenceId: string;
+  /** Durable responsibility lineage; absent only for legacy/unscoped evidence. */
+  assignmentId?: string;
+  assignmentPlanRevision?: number;
   kind: SocialStrategyEvidenceKind;
   claimScope: SocialStrategyScope;
   statement: string;

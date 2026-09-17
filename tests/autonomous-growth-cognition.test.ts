@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyOperation, compileAgendaWork, createAgent, createGrowthReview, deriveGrowthEvidenceSnapshot, deriveSelfDirectedDiscoveryPlan } from "@/lib/runtime";
+import { ensureGrowthEvidenceRecords } from "@/lib/social-strategy";
 import { parseGrowthReviewDecision } from "@/lib/ai";
 import { autonomousGrowthReviewNeed, runAutonomousAttention } from "@/lib/autonomy-worker";
 import { listOperationalRuns, upsertRecoveryIncident, writeState } from "@/lib/db";
@@ -46,11 +47,25 @@ describe("Continuous Growth Awareness & Strategy Adaptation", () => {
     const snapshot = deriveGrowthEvidenceSnapshot(state, presenceId);
 
     expect(snapshot.presenceId).toBe(presenceId);
+    expect(snapshot.assignmentId).toBeUndefined();
     expect(snapshot.observedOutcomes.currentFollowers).toBe(3);
     expect(snapshot.observedOutcomes.followerDelta).toBe(-1);
     expect(snapshot.baselineMaturity.periodTargetDays).toBe(7);
     expect(snapshot.metricAvailability.followers).toBe(true);
     expect(snapshot.sourceRefs.length).toBeGreaterThan(0);
+  });
+
+  it("attaches Growth evidence to the active Agent-owned responsibility", () => {
+    let state = fixture();
+    const presenceId = state.presence!.id;
+    state = applyOperation(state, { type: "createAssignment", presenceId, environment: "sandbox", instruction: "Grow this Presence toward 10,000 followers while building an audience of AI founders." });
+    const assignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "activateAssignment", id: assignment.id });
+    state = applyOperation(state, { type: "recordAudienceSnapshot", presenceId, followers: 12, source: "sandbox", observedAt: new Date().toISOString() });
+    const snapshot = deriveGrowthEvidenceSnapshot(state, presenceId);
+    expect(snapshot).toMatchObject({ assignmentId: assignment.id, assignmentPlanRevision: assignment.plan?.revision });
+    const records = ensureGrowthEvidenceRecords(state, presenceId);
+    expect(records.find((record) => record.kind === "WORLD_OUTCOME")).toMatchObject({ assignmentId: assignment.id, assignmentPlanRevision: assignment.plan?.revision });
   });
 
   it("compiles Agenda growth-review work item when unreviewed evidence is present", () => {
