@@ -80,7 +80,7 @@ function sessionItems(state: OpenPresenceState, key: string, sessionId: string):
   return clone(values.filter((item) => belongsToSession(item, sessionId)));
 }
 
-function learningItems(state: OpenPresenceState, key: string, presenceId: string, sandboxSessionId?: string): unknown[] {
+function learningItems(state: OpenPresenceState, key: string, presenceId: string, sandboxSessionId?: string, includeGlobal = false): unknown[] {
   const values = (state as unknown as Record<string, unknown>)[key];
   if (!Array.isArray(values)) return [];
   return clone(values.filter((item) => {
@@ -90,7 +90,9 @@ function learningItems(state: OpenPresenceState, key: string, presenceId: string
       // A source/new session owns Presence-global learning only. Replay
       // overlays belong to their fork and must never be silently captured
       // into a fresh source checkpoint.
-      && (sandboxSessionId ? record.sandboxSessionId === sandboxSessionId : record.sandboxSessionId === undefined);
+      && (sandboxSessionId
+        ? record.sandboxSessionId === sandboxSessionId || (includeGlobal && record.sandboxSessionId === undefined)
+        : record.sandboxSessionId === undefined);
   }));
 }
 
@@ -127,10 +129,13 @@ export function captureSandboxWorld(state: OpenPresenceState, sessionId: string)
   const collections = Object.fromEntries(SESSION_COLLECTIONS.map((key) => [key, sessionItems(state, key, sessionId)]));
   const learning = {
     presenceId: session.presenceId,
-    growthHypotheses: learningItems(state, "growthHypotheses", session.presenceId, session.source === "replay" ? session.id : undefined),
-    growthEvidenceRecords: learningItems(state, "growthEvidenceRecords", session.presenceId, session.source === "replay" ? session.id : undefined),
-    learningCheckpoints: learningItems(state, "learningCheckpoints", session.presenceId, session.source === "replay" ? session.id : undefined),
-    learningCounterfactuals: learningItems(state, "learningCounterfactuals", session.presenceId, session.source === "replay" ? session.id : undefined),
+    // A fresh session owns its own Sandbox learning too. Capture that scope
+    // alongside global Presence learning, but never another session's replay
+    // overlay; otherwise Process B restores an incomplete causal world.
+    growthHypotheses: learningItems(state, "growthHypotheses", session.presenceId, session.id, true),
+    growthEvidenceRecords: learningItems(state, "growthEvidenceRecords", session.presenceId, session.id, true),
+    learningCheckpoints: learningItems(state, "learningCheckpoints", session.presenceId, session.id, true),
+    learningCounterfactuals: learningItems(state, "learningCounterfactuals", session.presenceId, session.id, true),
   };
   const base = { version: 1 as const, session: clone(session), collections, learning };
   return { ...base, digest: hash(canonical(base)) };
