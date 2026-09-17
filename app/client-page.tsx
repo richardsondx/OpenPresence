@@ -13713,6 +13713,12 @@ function ScheduleView({
   const [scheduleRecurrenceFilter, setScheduleRecurrenceFilter] = useState<ScheduleRecurrenceFilter>("all");
   const [compactSchedule, setCompactSchedule] = useState(true);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(() => typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("assignmentId"));
+  const [runningLiveAssignmentId, setRunningLiveAssignmentId] = useState<string | null>(null);
+  const pendingReviewCount = state.executions.filter((execution) => execution.presenceId === presenceId && execution.status === "awaiting-review").length;
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [intervention, setIntervention] = useState("");
+  const [sendingIntervention, setSendingIntervention] = useState(false);
+  const [scheduleNow] = useState(() => Date.now());
   const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
   const [editingAssignmentInstruction, setEditingAssignmentInstruction] = useState("");
   const [editingAssignmentType, setEditingAssignmentType] = useState<"one-time" | "weekly">("one-time");
@@ -13724,25 +13730,9 @@ function ScheduleView({
   const [editingAssignmentRequiresAsset, setEditingAssignmentRequiresAsset] = useState(false);
   const [editingAssignmentSchedule, setEditingAssignmentSchedule] = useState<Assignment["schedule"]>();
   const [savingAssignmentId, setSavingAssignmentId] = useState<string | null>(null);
-  const [runningLiveAssignmentId, setRunningLiveAssignmentId] = useState<string | null>(null);
-  const pendingReviewCount = state.executions.filter((execution) => execution.presenceId === presenceId && execution.status === "awaiting-review").length;
-  const resetForm = () => {
-    setInstruction("");
-    setScheduleType("one-time");
-    setDate(localDateInputValue());
-    setDay("Tuesday");
-    setTime("08:00");
-    setAssetConstraintCollectionId("");
-    setAssetConstraintRequired(false);
-  };
-  const changeScheduleTime = (nextTime: string) => {
-    setTime(nextTime);
-  };
+  const resetForm = () => { setInstruction(""); setScheduleType("one-time"); setDate(localDateInputValue()); setDay("Tuesday"); setTime("08:00"); setAssetConstraintCollectionId(""); setAssetConstraintRequired(false); };
+  const changeScheduleTime = (nextTime: string) => setTime(nextTime);
   const [creatingAssignment, setCreatingAssignment] = useState(false);
-  const [cancellingId, setCancellingId] = useState<string | null>(null);
-  const [intervention, setIntervention] = useState("");
-  const [sendingIntervention, setSendingIntervention] = useState(false);
-  const [scheduleNow] = useState(() => Date.now());
   const add = async (event: React.FormEvent) => {
     event.preventDefault();
     if (creatingAssignment) return;
@@ -13751,21 +13741,21 @@ function ScheduleView({
       let next = await mutate({ type: "createAssignment", instruction, presenceId, environment: selectedPresence?.connectionMode === "sandbox" ? "sandbox" : "live", schedule: { day: scheduleType === "one-time" ? weekdayForDate(date) : day, time, executionWindow: `${time}–${time}`, ...(scheduleType === "one-time" ? { date } : {}) }, assetConstraint: assetConstraintCollectionId || assetConstraintRequired ? { collectionId: assetConstraintCollectionId || undefined, required: assetConstraintRequired } : undefined });
       let created = next?.assignments.find((item) => item.instruction === instruction.trim() && item.presenceId === presenceId);
       if (next && created && created.status === "draft" && ["ready", "ready_with_assumptions"].includes(created.preflight?.status ?? "")) {
-        // The create response is the newest workspace snapshot. Reuse it for
-        // the follow-up activation so the two-step create flow does not send
-        // a stale revision and manufacture an avoidable conflict retry.
         next = (await mutate({ type: "activateAssignment", id: created.id }, next)) ?? next;
         created = next.assignments.find((item) => item.id === created?.id) ?? created;
       }
-      if (next && created) {
-        resetForm();
-        setShowForm(false);
-        setSelectedAssignmentId(created.id);
-     }
-   } finally {
-     setCreatingAssignment(false);
-   }
- };
+      if (next && created) { resetForm(); setShowForm(false); setSelectedAssignmentId(created.id); }
+    } finally { setCreatingAssignment(false); }
+  };
+  const saveAssignmentEdit = async (assignment: Assignment) => {
+    if (savingAssignmentId || !editingAssignmentInstruction.trim()) return;
+    setSavingAssignmentId(assignment.id);
+    try {
+      const schedule = editingAssignmentSchedule ? { day: editingAssignmentType === "one-time" ? weekdayForDate(editingAssignmentDate) : editingAssignmentSchedule.day, time: editingAssignmentSchedule.time, executionWindow: `${editingAssignmentSchedule.time}–${editingAssignmentSchedule.time}`, ...(editingAssignmentType === "one-time" ? { date: editingAssignmentDate } : {}) } : null;
+      const next = await mutate({ type: "updateAssignment", id: assignment.id, title: editingTaskTitle, timeframe: editingWindowStart && editingWindowEnd ? { startsAt: new Date(editingWindowStart).toISOString(), deadline: new Date(editingWindowEnd).toISOString() } : undefined, instruction: editingAssignmentInstruction, schedule, assetConstraint: editingAssignmentCollectionId || editingAssignmentRequiresAsset ? { collectionId: editingAssignmentCollectionId || undefined, required: editingAssignmentRequiresAsset } : undefined });
+      if (next) setEditingAssignmentId(null);
+    } finally { setSavingAssignmentId(null); }
+  };
   const visibleSlots: CalendarSlot[] = [];
   const visibleAssignments = state.assignments.filter((item) => item.presenceId === presenceId && item.status !== "cancelled");
   const goalAssignments = visibleAssignments.filter((assignment) => assignment.activation?.type === "continuous");
@@ -13829,36 +13819,6 @@ function ScheduleView({
     setEditingAssignmentId(null);
     scrollToInspector();
   };
-  const beginAssignmentEdit = (assignment: Assignment) => {
-    setEditingAssignmentId(assignment.id);
-    setEditingTaskTitle(assignment.title || assignment.instruction);
-    const localInstant = (value?: string) => value ? new Date(Date.parse(value) - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
-    setEditingWindowStart(localInstant(assignment.timeframe?.startsAt));
-    setEditingWindowEnd(localInstant(assignment.timeframe?.deadline));
-    setEditingAssignmentInstruction(assignment.instruction);
-    const isOneTime = assignmentIsOneTime(assignment);
-    setEditingAssignmentType(isOneTime ? "one-time" : "weekly");
-    setEditingAssignmentDate(assignment.schedule?.date ?? localDateInputValue());
-    setEditingAssignmentCollectionId(assignment.assetConstraint?.collectionId ?? "");
-    setEditingAssignmentRequiresAsset(assignment.assetConstraint?.required === true);
-    setEditingAssignmentSchedule(assignment.schedule);
-  };
-  const saveAssignmentEdit = async (assignment: Assignment) => {
-    if (savingAssignmentId || !editingAssignmentInstruction.trim()) return;
-    setSavingAssignmentId(assignment.id);
-    try {
-      const schedule = editingAssignmentSchedule ? {
-        day: editingAssignmentType === "one-time" ? weekdayForDate(editingAssignmentDate) : editingAssignmentSchedule.day,
-        time: editingAssignmentSchedule.time,
-        executionWindow: `${editingAssignmentSchedule.time}–${editingAssignmentSchedule.time}`,
-        ...(editingAssignmentType === "one-time" ? { date: editingAssignmentDate } : {}),
-      } : null;
-      const next = await mutate({ type: "updateAssignment", id: assignment.id, title: editingTaskTitle, timeframe: editingWindowStart && editingWindowEnd ? { startsAt: new Date(editingWindowStart).toISOString(), deadline: new Date(editingWindowEnd).toISOString() } : undefined, instruction: editingAssignmentInstruction, schedule, assetConstraint: editingAssignmentCollectionId || editingAssignmentRequiresAsset ? { collectionId: editingAssignmentCollectionId || undefined, required: editingAssignmentRequiresAsset } : undefined });
-      if (next) setEditingAssignmentId(null);
-    } finally {
-      setSavingAssignmentId(null);
-    }
-  };
   const selectedAssignment = visibleAssignments.find((assignment) => assignment.id === selectedAssignmentId) ?? null;
   return (
     <div className="page">
@@ -13880,10 +13840,6 @@ function ScheduleView({
             <button type="button" aria-pressed={viewMode === "list"} className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}>List</button>
             <button type="button" aria-pressed={viewMode === "week"} className={viewMode === "week" ? "active" : ""} onClick={() => setViewMode("week")}>Calendar</button>
           </div>
-          <Button variant="ghost" onClick={() => setView("chat")}>
-            {showForm ? <X size={15} /> : <Plus size={15} />}{" "}
-            Chat is the place to redirect Jenny
-          </Button>
         </>}
       />
       {processingAssignments.length > 0 && (
@@ -14091,10 +14047,10 @@ function ScheduleView({
         </aside>
       )}
       {viewMode === "week" ? (
-        <WeekCalendar assignments={filteredVisibleAssignments} compact={compactSchedule} onToggleCompact={() => setCompactSchedule((current) => !current)} state={state} presenceName={presenceName} runningLiveAssignmentId={runningLiveAssignmentId} onAssignment={openAssignment} onAdd={() => setShowForm(true)} />
+        <WeekCalendar assignments={filteredVisibleAssignments} compact={compactSchedule} onToggleCompact={() => setCompactSchedule((current) => !current)} state={state} presenceName={presenceName} runningLiveAssignmentId={runningLiveAssignmentId} onAssignment={openAssignment} />
       ) : (
         <>
-          <ScheduleList assignments={filteredVisibleAssignments} presenceName={presenceName} timezone={timezone} state={state} runningLiveAssignmentId={runningLiveAssignmentId} dayFilter={scheduleDayFilter} onDayFilterChange={setScheduleDayFilter} recurrenceFilter={scheduleRecurrenceFilter} onRecurrenceFilterChange={setScheduleRecurrenceFilter} onAssignment={openAssignment} onAdd={() => setShowForm(true)} />
+          <ScheduleList assignments={filteredVisibleAssignments} presenceName={presenceName} timezone={timezone} state={state} runningLiveAssignmentId={runningLiveAssignmentId} dayFilter={scheduleDayFilter} onDayFilterChange={setScheduleDayFilter} recurrenceFilter={scheduleRecurrenceFilter} onRecurrenceFilterChange={setScheduleRecurrenceFilter} onAssignment={openAssignment} />
           <GoalsSection goals={goalAssignments} presenceName={presenceName} state={state} onAssignment={openAssignment} />
         </>
       )}
@@ -14113,7 +14069,6 @@ function ScheduleList({
   recurrenceFilter,
   onRecurrenceFilterChange,
   onAssignment,
-  onAdd,
 }: {
   assignments: Assignment[];
   presenceName: string;
@@ -14125,7 +14080,6 @@ function ScheduleList({
   recurrenceFilter: ScheduleRecurrenceFilter;
   onRecurrenceFilterChange: (filter: ScheduleRecurrenceFilter) => void;
   onAssignment: (assignment: Assignment) => void;
-  onAdd: () => void;
 }) {
   const scheduledAssignments = assignments.filter((assignment) => assignment.status !== "cancelled");
   const today = weekdayInTimezone(new Date(), timezone);
@@ -14235,7 +14189,6 @@ function WeekCalendar({
   presenceName,
   runningLiveAssignmentId,
   onAssignment,
-  onAdd,
 }: {
   assignments: Assignment[];
   compact: boolean;
@@ -14244,7 +14197,6 @@ function WeekCalendar({
   presenceName: string;
   runningLiveAssignmentId?: string | null;
   onAssignment: (assignment: Assignment) => void;
-  onAdd: () => void;
 }) {
   const calendarAssignments = assignments.map((assignment) => {
     if (assignment.schedule || !assignment.timeframe?.startsAt || assignment.activation?.type === "continuous") return assignment;

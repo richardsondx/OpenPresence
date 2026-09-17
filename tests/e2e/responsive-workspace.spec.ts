@@ -29,7 +29,7 @@ test("five destinations preserve Agent scope and Tasks remain a supervisory proj
   await page.reload();
   await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add task", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Chat is the place to redirect Jenny", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to Chat", exact: true })).toBeVisible();
   await expect(page.getByText(/Jenny will add work here when Chat or her autonomous plan calls for it/i)).toBeVisible();
 });
 
