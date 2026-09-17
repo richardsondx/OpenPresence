@@ -17,6 +17,18 @@ Use only `UNPROVEN`, `PARTIAL`, `PROVEN`, `REGRESSED`, and `BLOCKED`.
 `PROVEN` requires concrete evidence appropriate to the capability; code
 presence, a prompt, or a passing unit test alone is not enough.
 
+Closure checkpoint `4d4903d` is now the immutable release candidate, tagged
+`openpresence-release-candidate-2026-09-17-4d4903d`. Its candidate-bound
+evidence is recorded in
+`qa-learnings/release-candidate-4d4903d-2026-09-17.md`: canonical seven-day
+public certification, independent verifier (including multi-rate and
+cross-process checks), lint/typecheck/build, and broad Vitest all passed.
+The bounded Sandbox contradiction path now retires a hypothesis after four
+distinct measured contradictions while preserving history. No PARTIAL row is
+promoted solely from this aggregate result: rows whose contract still calls
+for independent adversarial review, complete causal-cone coverage,
+relevant-media learning, or another explicit gate remain PARTIAL.
+
 Delta note: commits `27ebac1` and `31f62b0` propagate Sandbox session scope
 and reject stale caller-supplied retrieval runs for Assignment and normal
 public inject-cycle decisions. Independent verification passed post-restart
