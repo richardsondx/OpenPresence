@@ -79,6 +79,8 @@ function projectedState(state, explicitSessionId, command = "inspect") {
   const intents = (state.socialIntents ?? []).filter((item) => item.sessionId === session.id);
   const executions = (state.executions ?? []).filter((item) => item.sessionId === session.id);
   const outcomes = (state.outcomes ?? []).filter((item) => item.sessionId === session.id);
+  const socialDecisions = (state.socialDecisions ?? []).filter((item) => item.sessionId === session.id);
+  const learning = (state.growthHypotheses ?? []).filter((item) => item.sandboxSessionId === session.id);
   const events = (state.events ?? [])
     .filter((item) => item.sessionId === session.id)
     .sort((left, right) => String(right.time ?? "").localeCompare(String(left.time ?? "")));
@@ -158,6 +160,7 @@ function projectedState(state, explicitSessionId, command = "inspect") {
       validity: intent.validity,
       execution: executions.find((item) => item.socialIntentId === intent.id),
       outcome: outcomes.find((item) => item.socialIntentId === intent.id),
+      socialDecision: socialDecisions.find((item) => item.socialIntentId === intent.id),
     })),
     network: { searches, introductions },
     recentEvents: events.slice(0, 20).map((item) => ({
@@ -169,6 +172,7 @@ function projectedState(state, explicitSessionId, command = "inspect") {
       time: item.time,
       sourceObjectId: item.sourceObjectId,
     })),
+    learning,
   };
   if (command === "timeline") {
     result.timeline = [
@@ -254,6 +258,15 @@ async function runScenario(scenarioPath, presenceId) {
     } else if (step.command === "consider") {
       const state = await postOperation({ type: "runSandboxPulse", sessionId });
       result = projectedState(state, sessionId, "consider");
+    } else if (step.command === "original") {
+      const state = await postOperation({ type: "considerOriginalPublication", sessionId, inspiration: options.inspiration });
+      result = projectedState(state, sessionId, "original");
+    } else if (step.command === "metric") {
+      if (!sessionId) throw new Error(`Scenario step ${index + 1} records a metric before a session starts.`);
+      const state = await getState();
+      const mirrorId = resolveValue(options.object, previous);
+      const updated = await postOperation({ type: "recordPublicationMetricSnapshot", presenceId: sessionFor(state, sessionId).presenceId, mirrorObjectId: mirrorId, publicationAgeSeconds: Number(options.publicationAgeSeconds ?? 3600), metrics: options.metrics ?? { impressions: 100, likes: 10, replies: 4, reposts: 2, quotes: 1 }, source: "sandbox", observationStatus: "observed" });
+      result = projectedState(updated, sessionId, "metric");
     } else if (step.command === "timeline") {
       const state = await getState();
       result = projectedState(state, sessionId, "timeline");

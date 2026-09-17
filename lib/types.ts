@@ -1,7 +1,7 @@
 import type { SandboxTemporalSnapshot } from "./sandbox-temporal";
 import type { LearningCounterfactualResult } from "./learning-counterfactual";
 
-export type View = "teach" | "knowledge" | "assets" | "usage" | "chat" | "rehearsal" | "watching" | "people" | "playground" | "live" | "review" | "feed" | "growth" | "analytics" | "calendar" | "schedule" | "work" | "brain" | "presence";
+export type View = "teach" | "knowledge" | "assets" | "usage" | "chat" | "delegate" | "rehearsal" | "watching" | "people" | "playground" | "live" | "review" | "feed" | "growth" | "analytics" | "calendar" | "schedule" | "work" | "brain" | "presence";
 export type BuiltInChannelId = "x" | "linkedin" | "substack";
 export type ChannelId = string;
 export type ConnectorKind = "simulated" | "native" | "bridge" | "manual";
@@ -938,6 +938,8 @@ export interface SocialStrategyRetrievalRun {
   compatibleSkillIds: string[];
   recentStrategyShape: Record<string, number>;
   noPatternReason?: string;
+  /** Source observations that materially informed this retrieval, when any. */
+  sourceObservationIds?: string[];
   learningCounterfactual?: { checkpointId: string; checkpointHash: string; situationId: string; claim: "demonstrated" | "not_demonstrated" };
   createdAt: string;
 }
@@ -949,6 +951,8 @@ export interface SocialStrategyUse {
   consideredPatternIds: string[];
   selectedByAct: Array<{ act: string; patternId?: string; mechanismId?: string; reason?: string }>;
   strategyTemplateId?: string;
+  /** Learning artifact selected for this act, when distinct from a bundled pattern. */
+  learningHypothesisId?: string;
 }
 
 export interface GrowthEvidenceRecord {
@@ -1984,7 +1988,7 @@ export interface SocialDecision {
   origin?: SocialOrigin;
   decision: SocialDecisionKind;
   /** A decision may express several independent, compatible social acts. */
-  acts?: Array<{ decision: Exclude<SocialDecisionKind, "no_op">; text?: string; rationale?: string; strategyId?: string; mechanismId?: string; noStrategyReason?: string }>;
+  acts?: Array<{ decision: Exclude<SocialDecisionKind, "no_op">; text?: string; rationale?: string; strategyId?: string; mechanismId?: string; noStrategyReason?: string; learningHypothesisId?: string }>;
   conversationDisposition?: ConversationDisposition;
   /** Natural private response to the operator when this decision came from Chat. */
   operatorReaction?: string;
@@ -2000,6 +2004,11 @@ export interface SocialDecision {
   invocationId?: string;
   relevantGrowthRevisionRef?: string;
   socialStrategy?: SocialStrategyUse;
+  sourceObservationIds?: string[];
+  learningHypothesisId?: string;
+  experimentId?: string;
+  learningObjective?: string;
+  variationSpecification?: string;
   autobiographicalEventIds?: string[];
   createdAt: string;
   attentionEpisodeId?: string;

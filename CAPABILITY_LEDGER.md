@@ -587,3 +587,27 @@ later decision transfer, and a retained-vs-removed independent counterfactual.
 - Next single highest-impact gate: rerun the real public-runtime canary on the repaired candidate and complete the causal learning lineage through measurement, disposition, later decision, and learned-artifact-removed counterfactual.
 
 Run 4 on candidate `360e75f` completed the same real-model public Sandbox scenario with durable original-post exploration lineage. The persisted chain was verified as `SocialDecision → SocialIntent → Publication → Execution → succeeded Outcome`, including generated text, rationale, and `noStrategyReason`; no live side effect was possible. This closes attribution for the exercised exploration path, but does not prove learned-template transfer, measured keep/modify/retire disposition, media-choice learning, or an independent retained-vs-removed counterfactual. No capability status changed.
+
+## 2026-09-17 autonomous learning canary delta — source-backed extraction
+
+The runtime audit found that autonomous Sandbox cognition had no path from a
+measured external post to a reusable learning artifact. The smallest repair
+reused the existing Growth hypothesis/template model, kept extracted artifacts
+session-scoped and `testing`, and preserved source mirror IDs in retrieval and
+decision lineage. The public experiment harness now supports a metric step and
+an explicit real-model original-publication follow-up.
+
+Run 5 (`qa-learnings/autonomous-learning-canary-e6b9f22-2026-09-17.md`) failed
+at the second scheduling boundary: extraction occurred, but the same cycle
+stopped before a subsequent original decision. Run 6 (`rerun13`) completed the
+real OpenAI public Sandbox path and produced a concrete, non-copied original
+variation with the source observation retained in retrieval lineage. The model
+truthfully classified that act as exploration rather than selecting the supplied
+template/hypothesis. Existing measurement reconciliation weakened the
+unproven artifact; no independent retained-vs-removed transfer was run.
+
+No capability is promoted. LEARN-002/003/004, AUT-001, EVAL-004/005, and UX-004
+remain PARTIAL. The next single highest-impact gate is an independent composed
+canary that requires selected learned-artifact lineage when applicable, records
+the measured keep/modify/retire disposition, and proves a later decision differs
+when that artifact is removed, with the causal cone independently reconstructed.

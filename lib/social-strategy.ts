@@ -770,6 +770,7 @@ export function compileSocialStrategyContext(state: OpenPresenceState, presence:
     consideredPatterns: candidates.map((pattern) => JSON.parse(JSON.stringify(pattern)) as SocialStrategyPattern),
     relevantGrowthHypothesisIds: hypotheses.map((hypothesis) => hypothesis.id),
     relevantSocialTemplateIds: templates.map((hypothesis) => hypothesis.id),
+    sourceObservationIds: [...new Set(hypotheses.flatMap((hypothesis) => hypothesis.template?.sourceMirrorObjectIds ?? []))],
     selectedTemplateId: requestedTemplate?.id,
     compatibleSkillIds: skills.map((skill) => skill.id),
     recentStrategyShape: recent,
@@ -794,7 +795,7 @@ export function compileSocialStrategyContext(state: OpenPresenceState, presence:
   };
 }
 
-export function strategyUseFromDecision(run: SocialStrategyRetrievalRun | undefined, acts: Array<{ action: string; strategyId?: string; mechanismId?: string; noStrategyReason?: string }> | undefined): SocialStrategyUse | undefined {
+export function strategyUseFromDecision(run: SocialStrategyRetrievalRun | undefined, acts: Array<{ action: string; strategyId?: string; mechanismId?: string; noStrategyReason?: string; learningHypothesisId?: string }> | undefined): SocialStrategyUse | undefined {
   if (!run) return undefined;
   const allowed = new Set(run.consideredPatterns.map((pattern) => pattern.id));
   const selectedByAct = (acts ?? []).map((act) => {
@@ -806,6 +807,7 @@ export function strategyUseFromDecision(run: SocialStrategyRetrievalRun | undefi
       // pattern; never attach a mechanism borrowed from another candidate.
       mechanismId: pattern && (!act.mechanismId || act.mechanismId === pattern.mechanism) ? pattern.mechanism : undefined,
       reason: act.noStrategyReason?.trim() || (!pattern ? "Strategy selection not recorded." : undefined),
+      ...(act.learningHypothesisId && run.relevantGrowthHypothesisIds.includes(act.learningHypothesisId) ? { learningHypothesisId: act.learningHypothesisId } : {}),
     };
   });
   return { retrievalRunId: run.id, playbookId: run.playbookId, playbookVersion: run.playbookVersion, consideredPatternIds: run.consideredPatterns.map((pattern) => pattern.id), selectedByAct, strategyTemplateId: run.selectedTemplateId };
@@ -956,4 +958,21 @@ export function learnObservedSocialPattern(source: OpenPresenceState, presenceId
   const reviewId = `chat-pattern:${crypto.randomUUID()}`;
   applyGrowthHypothesisActions(state, presenceId, reviewId, [{ action: "create", statement: input.statement, evidenceIds, confidence: "low", scope: "presence" }]);
   return { state, hypothesis: state.growthHypotheses!.find((item) => item.id === `growth-hypothesis:${reviewId}:0`)! };
+}
+
+/** Create a private, session-scoped reusable format from an autonomous model
+ * review of observed Sandbox evidence. It is a hypothesis until measured and
+ * never becomes Presence-global learning by virtue of being created. */
+export function learnObservedSandboxTemplate(source: OpenPresenceState, presenceId: string, sessionId: string, input: { title: string; body: string; whenToUse?: string; visualGuidance?: string; mirrorObjectIds: string[]; patternId?: string; audienceFit?: string }) {
+  const state = structuredClone(source);
+  const ids = [...new Set(input.mirrorObjectIds)].slice(0, 30);
+  if (!ids.length || ids.some((id) => !state.mirrorObjects.some((m) => m.id === id && m.presenceId === presenceId && m.environment === "sandbox" && m.visibility === "public"))) throw new Error("Sandbox learning sources must be observed public posts in the active session.");
+  ensureGrowthEvidenceRecords(state, presenceId, new Date().toISOString(), ids);
+  const reviewId = `sandbox-template:${sessionId}:${crypto.randomUUID()}`;
+  applyGrowthHypothesisActions(state, presenceId, reviewId, [{ action: "create", statement: `Sandbox source-backed format: ${input.title}`, evidenceIds: ids.map((id) => `growth-evidence:observed:${id}`), confidence: "low", scope: "presence", ...(input.patternId ? { patternIds: [input.patternId] } : {}) }]);
+  const hypothesis = state.growthHypotheses!.find((item) => item.id === `growth-hypothesis:${reviewId}:0`)!;
+  hypothesis.sandboxSessionId = sessionId;
+  hypothesis.template = { title: input.title.trim().slice(0, 160), body: input.body.trim().slice(0, 4000), whenToUse: input.whenToUse?.trim().slice(0, 500), visualGuidance: input.visualGuidance?.trim().slice(0, 800), source: "observed_post", sourceMirrorObjectIds: ids, sourceCount: ids.length, patternId: input.patternId, audienceFit: input.audienceFit?.trim().slice(0, 300) };
+  hypothesis.updatedAt = new Date().toISOString();
+  return { state, hypothesis };
 }

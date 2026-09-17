@@ -773,7 +773,7 @@ function event(type: LiveEvent["type"], title: string, detail: string, tone: Liv
 
 export interface SocialDecisionInput {
   decision: SocialDecisionKind;
-  acts?: Array<{ decision: Exclude<SocialDecisionKind, "no_op">; text?: string; rationale?: string; strategyId?: string; mechanismId?: string; noStrategyReason?: string }>;
+  acts?: Array<{ decision: Exclude<SocialDecisionKind, "no_op">; text?: string; rationale?: string; strategyId?: string; mechanismId?: string; noStrategyReason?: string; learningHypothesisId?: string }>;
   conversationDisposition?: import("./types").ConversationDisposition;
   focalMirrorObjectIds?: string[];
   origin?: SocialOrigin;
@@ -796,6 +796,12 @@ export interface SocialDecisionInput {
   /** Actual action surface available to this decision's learning ablation. */
   counterfactualActions?: string[];
   socialStrategy?: { retrievalRun: import("./types").SocialStrategyRetrievalRun; use?: import("./types").SocialStrategyUse };
+  sourceObservationIds?: string[];
+  learningHypothesisId?: string;
+  experimentId?: string;
+  learningObjective?: string;
+  variationSpecification?: string;
+  generatedContentHash?: string;
 }
 
 function socialDecisionLabel(decision: SocialDecisionKind) {
@@ -830,7 +836,7 @@ function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInp
   // impossible to attribute to a pattern and turns learning into decorative
   // memory. The retrieval run is already session-scoped above, so preserving
   // its use does not leak learning across Sandbox branches.
-  const localStrategyUse = strategyUseFromDecision(strategyRun, input.acts?.map((act) => ({ action: act.decision, strategyId: act.strategyId, mechanismId: act.mechanismId, noStrategyReason: act.noStrategyReason })) ?? [{ action: input.decision }]);
+  const localStrategyUse = strategyUseFromDecision(strategyRun, input.acts?.map((act) => ({ action: act.decision, strategyId: act.strategyId, mechanismId: act.mechanismId, noStrategyReason: act.noStrategyReason, learningHypothesisId: act.learningHypothesisId })) ?? [{ action: input.decision }]);
   const socialStrategy = sandboxSessionId ? localStrategyUse : input.socialStrategy?.use ?? localStrategyUse;
   const causalEventId = input.causalEventId ?? input.focalMirrorObjectIds?.map((objectId) => state.mirrorObjects.find((object) => object.id === objectId)?.sourceTemporalEventId).find((value): value is string => Boolean(value));
   if (socialStrategy && assignmentTemplateId && !socialStrategy.strategyTemplateId) socialStrategy.strategyTemplateId = assignmentTemplateId;
@@ -843,7 +849,7 @@ function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInp
     focalMirrorObjectIds: [...new Set((input.focalMirrorObjectIds ?? []).filter(Boolean))].slice(0, 6),
     origin: input.origin,
     decision: input.decision,
-    acts: input.acts?.length ? input.acts.map((act) => ({ decision: act.decision, text: act.text?.trim() || undefined, rationale: act.rationale?.trim() || undefined, strategyId: act.strategyId, mechanismId: act.mechanismId, noStrategyReason: act.noStrategyReason?.trim() || undefined })) : undefined,
+    acts: input.acts?.length ? input.acts.map((act) => ({ decision: act.decision, text: act.text?.trim() || undefined, rationale: act.rationale?.trim() || undefined, strategyId: act.strategyId, mechanismId: act.mechanismId, noStrategyReason: act.noStrategyReason?.trim() || undefined, learningHypothesisId: act.learningHypothesisId })) : undefined,
     conversationDisposition: input.conversationDisposition,
     operatorReaction: input.operatorReaction?.trim() || undefined,
     summary: input.summary?.trim() || `The Presence selected ${socialDecisionLabel(input.decision)} from the available channel context.`,
@@ -857,6 +863,12 @@ function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInp
     invocationId: input.invocationId,
     relevantGrowthRevisionRef: input.relevantGrowthRevisionRef ?? presence.activeGrowthRevisionRef,
     socialStrategy,
+    sourceObservationIds: input.sourceObservationIds ?? (strategyRun.sourceObservationIds?.length ? strategyRun.sourceObservationIds : undefined),
+    learningHypothesisId: input.learningHypothesisId ?? socialStrategy?.learningHypothesisId,
+    experimentId: input.experimentId,
+    learningObjective: input.learningObjective,
+    variationSpecification: input.variationSpecification,
+    generatedContentHash: input.generatedContentHash,
     autobiographicalEventIds: input.autobiographicalEventIds?.filter((eventId) => state.autobiographicalEvents.some((event) => event.id === eventId)),
     attentionEpisodeId: input.attentionEpisodeId,
     causalEventId,

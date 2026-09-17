@@ -1,4 +1,4 @@
-import { saveSocialTemplate, socialPlaybookForPresence, updateSocialTemplate } from "@/lib/social-strategy";
+import { compileSocialStrategyContext, learnObservedSandboxTemplate, saveSocialTemplate, socialPlaybookForPresence, updateSocialTemplate } from "@/lib/social-strategy";
 import { assignmentHasPendingDelivery, assignmentWindowState, expireAssignmentWindows } from "@/lib/assignment-timeframe";
 import { inspectionReportSummary } from "@/lib/chat-activity-presentation";
 import { assignmentInspectionEvidence, persistAssignmentReport } from "@/lib/assignment-private-report";
@@ -4156,11 +4156,41 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
   prompt += `\n\n${networkMemoryContext}`;
   prompt += `\n\n${publicationHistoryContext}`;
   prompt += `\n\nPublishing initiative context:\n${publishingGuidance}\nThis context describes an ongoing responsibility, not a command to force a weak post. A no_op may reject the current candidate, but it does not complete the standing responsibility.`;
+  if (isOriginalRehearsal) prompt += "\n\nIf a relevant source-backed reusable template is supplied, preserve its exact strategyTemplateId and learningHypothesisId when it materially shapes the draft. If exploring instead, state noStrategyReason.";
   prompt += `\n\n${sandboxAssetLibraryContext}`;
   prompt += structuredEvidenceGuidance;
   prompt += "\n\nLanguage and phrasing policy:\n" + presenceLanguageGuidance(presence.language) + "\n" + languagePolicyGuidance(effectiveLanguagePolicy(cognitionSource.agent, presence));
   let decision: AgentSocialDecision;
   let actionSource = networkResult ? recordSandboxNetworkSearch(cognitionSource, { sessionId, presenceId: presence.id, result: networkResult }) : cognitionSource;
+  // Autonomous original-publication cognition may turn a measured external
+  // source into a private, session-scoped reusable hypothesis before the
+  // decision is compiled. This is the missing consideration -> strategy
+  // transition: retrieval alone must not imply that the Agent learned.
+  if (!inbound && !isAssignment && !isPublishingWindow && !isOriginalRehearsal && !isAiMockEnabled()) {
+    const metrics = new Map(actionSource.publicationMetricSnapshots.filter((item) => item.presenceId === presence.id).map((item) => [item.mirrorObjectId, item]));
+    const sources = mirror
+      .filter((item) => item.actorPresenceId !== presence.id && item.objectType === "post" && item.environment === "sandbox")
+      .map((item) => ({ item, metric: metrics.get(item.id) }))
+      .filter(({ metric }) => metric && ((metric.likes ?? 0) + (metric.replies ?? 0) * 2 + (metric.reposts ?? 0) * 3 + (metric.quotes ?? 0) * 3 > 0))
+      .sort((left, right) => ((right.metric?.likes ?? 0) + (right.metric?.replies ?? 0) * 2 + (right.metric?.reposts ?? 0) * 3 + (right.metric?.quotes ?? 0) * 3) - ((left.metric?.likes ?? 0) + (left.metric?.replies ?? 0) * 2 + (left.metric?.reposts ?? 0) * 3 + (left.metric?.quotes ?? 0) * 3))
+      .slice(0, 3);
+    const alreadyLearned = (actionSource.growthHypotheses ?? []).some((item) => item.sandboxSessionId === sessionId && item.template?.sourceMirrorObjectIds?.some((id) => sources.some(({ item: sourceItem }) => sourceItem.id === id)));
+    if (sources.length && !alreadyLearned) {
+      try {
+        const extraction = await generateIndependentModelText(actionSource,
+          "Return JSON only with title, body, whenToUse, visualGuidance, audienceFit, and patternId. Abstract a reusable post structure from the supplied high-performing public examples. Preserve the mechanism, not wording or identity. Use placeholders in brackets for facts. Choose patternId only from the supplied IDs, otherwise omit it. This is an unproven hypothesis, not a claim of causation.",
+          JSON.stringify({ sources: sources.map(({ item, metric }) => ({ id: item.id, text: item.content?.text, metrics: metric })), patterns: compileSocialStrategyContext(actionSource, presence, { invocation: "sandbox_learning", objective: "source-backed original publication", availableActions: ["post"], sandboxSessionId: sessionId }).retrievalRun.consideredPatterns.map((item) => item.id) }));
+        const parsed = JSON.parse(extraction) as { title?: unknown; body?: unknown; whenToUse?: unknown; visualGuidance?: unknown; audienceFit?: unknown; patternId?: unknown };
+        if (typeof parsed.title === "string" && typeof parsed.body === "string" && parsed.title.trim() && parsed.body.trim()) {
+          const learned = learnObservedSandboxTemplate(actionSource, presence.id, sessionId, { title: parsed.title, body: parsed.body, whenToUse: typeof parsed.whenToUse === "string" ? parsed.whenToUse : undefined, visualGuidance: typeof parsed.visualGuidance === "string" ? parsed.visualGuidance : undefined, audienceFit: typeof parsed.audienceFit === "string" ? parsed.audienceFit : undefined, patternId: typeof parsed.patternId === "string" ? parsed.patternId : undefined, mirrorObjectIds: sources.map(({ item }) => item.id) });
+          actionSource = recordRuntimeEvent(learned.state, presence.id, "Source-backed strategy learned", `The Agent abstracted a reusable format from ${sources.length} measured public source post${sources.length === 1 ? "" : "s"}. It remains an unproven hypothesis until an original variation is measured.`, "positive", { sessionId, sourceObjectId: sources[0]?.item.id });
+        }
+      } catch {
+        // Learning extraction is optional at this boundary; a failed model
+        // call must preserve the source evidence and allow ordinary exploration.
+      }
+    }
+  }
   if (publishingContext) {
     actionSource = recordPublishingPlanWork(actionSource, { ...publishingContext, stage: "considered", detail: `The Agent considered original expression during the ${publishingWindow?.purpose ?? "publishing"} window.` });
   }
@@ -4511,7 +4541,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
   if (socialDecisionKind) {
     next = recordSocialDecision(next, {
       decision: socialDecisionKind as "reply" | "like" | "follow" | "quote" | "repost" | "original_post",
-      acts: (decision.acts ?? []).filter((act) => ["post", "original_post", "reply", "like", "follow", "quote", "repost"].includes(act.action)).map((act) => ({ decision: (act.action === "post" ? "original_post" : act.action) as "original_post" | "reply" | "like" | "follow" | "quote" | "repost", text: act.text, rationale: act.rationale, strategyId: act.strategyId, mechanismId: act.mechanismId, noStrategyReason: act.noStrategyReason })),
+      acts: (decision.acts ?? []).filter((act) => ["post", "original_post", "reply", "like", "follow", "quote", "repost"].includes(act.action)).map((act) => ({ decision: (act.action === "post" ? "original_post" : act.action) as "original_post" | "reply" | "like" | "follow" | "quote" | "repost", text: act.text, rationale: act.rationale, strategyId: act.strategyId, mechanismId: act.mechanismId, noStrategyReason: act.noStrategyReason, learningHypothesisId: act.learningHypothesisId })),
       focalMirrorObjectIds: inbound ? [inbound.id] : [],
       origin: assignment ? { kind: "assignment", refId: assignment.id } : publishingContext ? { kind: "publishing_initiative", planId: publishingContext.planId, planRevision: publishingContext.planRevision, planWindowId: publishingContext.windowId } : rehearsal ? { kind: "other" } : { kind: "self_directed_discovery", refId: sessionId },
       summary: decision.rationale,
