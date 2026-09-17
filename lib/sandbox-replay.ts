@@ -67,7 +67,10 @@ function learningItems(state: OpenPresenceState, key: string, presenceId: string
     if (!item || typeof item !== "object") return false;
     const record = item as { presenceId?: string; originatingPresenceId?: string; sandboxSessionId?: string };
     return (record.presenceId === presenceId || record.originatingPresenceId === presenceId)
-      && (!sandboxSessionId || record.sandboxSessionId === sandboxSessionId);
+      // A source/new session owns Presence-global learning only. Replay
+      // overlays belong to their fork and must never be silently captured
+      // into a fresh source checkpoint.
+      && (sandboxSessionId ? record.sandboxSessionId === sandboxSessionId : record.sandboxSessionId === undefined);
   }));
 }
 

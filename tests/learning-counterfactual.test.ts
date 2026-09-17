@@ -159,6 +159,9 @@ describe("runtime learning boundary", () => {
     const forkLearning = learningStateForPresence(state, presence, fork.id);
     expect(forkLearning.hypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience.", targets: expect.arrayContaining([expect.objectContaining({ strategyId })]) })]));
     expect((state.growthHypotheses ?? []).filter((item) => (item as typeof item & { sandboxSessionId?: string }).sandboxSessionId === fork.id)).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience." })]));
+    const freshSourceSnapshot = captureSandboxWorld(state, source.id);
+    expect(freshSourceSnapshot.learning?.growthHypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ id: hypothesisId })]));
+    expect(freshSourceSnapshot.learning?.growthHypotheses?.some((item) => (item as { sandboxSessionId?: string }).sandboxSessionId)).toBe(false);
     const restoredSource = restoreSandboxCheckpoint(state, source.id, checkpoint.id);
     expect(learningStateForPresence(restoredSource, presence, fork.id).hypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience." })]));
     const forkCheckpointState = createSandboxCheckpoint(state, fork.id, "fork replay checkpoint");
