@@ -88,6 +88,17 @@ behavioral gate, including independent research/delivery, dependent-work
 reconsideration, complete causal reconstruction, media interpretation, and
 full independent natural-supervision/adversarial review.
 
+Final candidate delta: immutable candidate `4c1fac8` passed the canonical
+composed seven-day trajectory, the exact-candidate independent verifier
+(including cross-process replay and cross-rate checks), and final broad release
+health (lint 0 errors / 156 existing warnings; build; typecheck; 130 files /
+1,215 tests). The canonical run now also proves successor Calendar work is
+copied into the linked Agent-owned plan after breaking-event invalidation. The
+candidate-bound evidence is recorded in
+`qa-learnings/release-candidate-4c1fac8-2026-09-17.md` and
+`qa-learnings/canonical-dependent-work-2026-09-17.md`. `AUT-006` is promoted;
+all other PARTIAL rows retain their exact missing behavioral gates.
+
 Current autonomy/learning delta: commits `e9c2a8a`, `86cdd8a`, `d470aa0`, and
 `d48193e` close concrete implementation gaps without changing the declared
 status of the remaining capabilities. Supervisory intervention now creates a
