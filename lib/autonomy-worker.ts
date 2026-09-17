@@ -213,12 +213,12 @@ function missingGrowthContextQuestion(state: OpenPresenceState, message: string,
   return "I can take that on. Before I choose the direction, who are we trying to reach and what should this account be known for?";
 }
 
-function applyGrowthContextAnswer(state: OpenPresenceState, conversation: import("./types").OperatorConversation, operatorMessage: import("./types").OperatorConversationMessage) {
+function applyGrowthContextAnswer(state: OpenPresenceState, conversation: import("./types").OperatorConversation, operatorMessage: import("./types").OperatorConversationMessage, presenceId: string) {
   const ordered = orderedOperatorChatMessages(conversation.messages);
   const index = ordered.findIndex((item) => item.id === operatorMessage.id);
   const previous = index > 0 ? ordered[index - 1] : undefined;
   if (!previous || previous.role !== "presence" || !/who are we trying to reach[\s\S]*known for/i.test(previous.content)) return state;
-  const presence = state.presences.find((item) => item.id === operatorMessage.presenceId) ?? state.presence;
+  const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   if (!presence) return state;
   const brief = inferGrowthContextAnswer(operatorMessage.content, presence.brief);
   if (!brief || JSON.stringify(brief) === JSON.stringify(presence.brief)) return state;
@@ -655,7 +655,7 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
     if (wasCancelled()) return readStateSnapshotForContext({ presenceId: run.presenceId });
     const knowledge = compileKnowledgeContext(base, { presenceId: run.presenceId, query: operatorMessage.content, purpose: "operator_chat" });
     next = knowledge.state;
-    next = applyGrowthContextAnswer(next, conversation, operatorMessage);
+    next = applyGrowthContextAnswer(next, conversation, operatorMessage, run.presenceId);
     presence = next.presences.find((item) => item.id === run.presenceId) ?? next.presence ?? presence;
     const strategy = compileSocialStrategyContext(next, presence, { invocation: "operator_chat", objective: operatorMessage.content, availableActions: ["original_post", "reply", "quote", "like", "repost", "follow"] });
     next.socialStrategyRetrievalRuns = [strategy.retrievalRun, ...(next.socialStrategyRetrievalRuns ?? [])].slice(0, 200);
