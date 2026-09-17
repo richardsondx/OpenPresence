@@ -46,6 +46,7 @@ function evidenceForHypothesis(state: OpenPresenceState, hypothesis: GrowthHypot
 
 function outcomeSupportsTarget(state: OpenPresenceState, record: GrowthEvidenceRecord, hypothesis: GrowthHypothesis, sandboxSessionId?: string) {
   if (record.kind !== "WORLD_OUTCOME" || !record.verified || !record.causalDecisionIds?.length) return false;
+  if (record.learningHypothesisIds?.includes(hypothesis.id)) return true;
   const targets = hypothesis.decisionTargets ?? [];
   return record.causalDecisionIds.some((decisionId) => {
     const decision = state.socialDecisions.find((item) => (!sandboxSessionId || (item as typeof item & SandboxScoped).sandboxSessionId === sandboxSessionId)

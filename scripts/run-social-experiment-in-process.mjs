@@ -176,6 +176,7 @@ function projectedState(state, explicitSessionId, command = "inspect") {
     growthReviews: (state.growthReviews ?? []).filter((item) => item.presenceId === presence.id && item.assignmentId),
     growthEvidence: (state.growthEvidenceRecords ?? []).filter((item) => item.presenceId === presence.id && item.sandboxSessionId === session.id),
     publicationMetrics: (state.publicationMetricSnapshots ?? []).filter((item) => item.presenceId === presence.id && state.mirrorObjects.some((object) => object.id === item.mirrorObjectId && object.sessionId === session.id)),
+    learningCounterfactuals: (state.learningCounterfactuals ?? []).filter((item) => item.presenceId === presence.id && item.sandboxSessionId === session.id),
   };
   if (command === "timeline") {
     result.timeline = [
@@ -270,6 +271,12 @@ async function runScenario(scenarioPath, presenceId) {
       const mirrorId = resolveValue(options.object, previous);
       const updated = await postOperation({ type: "recordPublicationMetricSnapshot", presenceId: sessionFor(state, sessionId).presenceId, mirrorObjectId: mirrorId, publicationAgeSeconds: Number(options.publicationAgeSeconds ?? 3600), metrics: options.metrics ?? { impressions: 100, likes: 10, replies: 4, reposts: 2, quotes: 1 }, source: "sandbox", observationStatus: "observed" });
       result = projectedState(updated, sessionId, "metric");
+    } else if (step.command === "review") {
+      if (!sessionId) throw new Error(`Scenario step ${index + 1} reviews before a session starts.`);
+      const current = await getState();
+      const session = sessionFor(current, sessionId);
+      const state = await postOperation({ type: "reviewGrowth", presenceId: session.presenceId, kind: options.kind ?? "weekly" });
+      result = projectedState(state, sessionId, "review");
     } else if (step.command === "timeline") {
       const state = await getState();
       result = projectedState(state, sessionId, "timeline");

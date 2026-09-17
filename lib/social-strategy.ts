@@ -408,8 +408,9 @@ function evidenceIsCurrent(record: GrowthEvidenceRecord, nowMs = Date.now()) {
 }
 
 function attributedWorldOutcome(state: OpenPresenceState, record: GrowthEvidenceRecord, hypothesis: GrowthHypothesis) {
-  if (record.kind !== "WORLD_OUTCOME" || !record.verified || !record.causalDecisionIds?.length || !hypothesis.decisionTargets?.length) return false;
+  if (record.kind !== "WORLD_OUTCOME" || !record.verified || !record.causalDecisionIds?.length) return false;
   if (record.learningHypothesisIds?.includes(hypothesis.id)) return true;
+  if (!hypothesis.decisionTargets?.length) return false;
   return record.causalDecisionIds.some((decisionId) => {
     const decision = state.socialDecisions.find((item) => item.id === decisionId && item.presenceId === hypothesis.originatingPresenceId);
     return Boolean(decision?.socialStrategy?.selectedByAct.some((selection) => hypothesis.decisionTargets!.some((target) =>
@@ -993,7 +994,14 @@ export function learnObservedSandboxTemplate(source: OpenPresenceState, presence
   if (!ids.length || ids.some((id) => !state.mirrorObjects.some((m) => m.id === id && m.presenceId === presenceId && m.environment === "sandbox" && m.visibility === "public"))) throw new Error("Sandbox learning sources must be observed public posts in the active session.");
   ensureGrowthEvidenceRecords(state, presenceId, new Date().toISOString(), ids);
   const reviewId = `sandbox-template:${sessionId}:${crypto.randomUUID()}`;
-  applyGrowthHypothesisActions(state, presenceId, reviewId, [{ action: "create", statement: `Sandbox source-backed format: ${input.title}`, evidenceIds: ids.map((id) => `growth-evidence:observed:${id}`), confidence: "low", scope: "presence", ...(input.patternId ? { patternIds: [input.patternId] } : {}) }]);
+  applyGrowthHypothesisActions(state, presenceId, reviewId, [{
+    action: "create",
+    statement: `Sandbox source-backed format: ${input.title}`,
+    evidenceIds: ids.map((id) => `growth-evidence:observed:${id}`),
+    confidence: "low",
+    scope: "presence",
+    ...(input.patternId ? { patternIds: [input.patternId], decisionTargets: [{ strategyId: input.patternId, action: "original_post", effect: 0.75 }] } : {}),
+  }]);
   const hypothesis = state.growthHypotheses!.find((item) => item.id === `growth-hypothesis:${reviewId}:0`)!;
   hypothesis.sandboxSessionId = sessionId;
   hypothesis.template = { title: input.title.trim().slice(0, 160), body: input.body.trim().slice(0, 4000), whenToUse: input.whenToUse?.trim().slice(0, 500), visualGuidance: input.visualGuidance?.trim().slice(0, 800), source: "observed_post", sourceMirrorObjectIds: ids, sourceCount: ids.length, patternId: input.patternId, audienceFit: input.audienceFit?.trim().slice(0, 300) };

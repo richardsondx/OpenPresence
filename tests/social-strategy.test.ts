@@ -85,6 +85,48 @@ describe("Social Strategy Intelligence", () => {
     expect(state.growthHypotheses![0]!.supportingEvidenceIds).toEqual(["unrelated-1"]);
   });
 
+  it("attributes measured outcomes directly to a source-backed template without invented decision targets", () => {
+    const state = createAgent(input);
+    const presenceId = state.presence!.id;
+    const hypothesisId = "sandbox-template:session-1";
+    state.growthHypotheses = [{
+      id: hypothesisId,
+      agentId: state.agent!.id,
+      originatingPresenceId: presenceId,
+      scope: "presence",
+      statement: "A source-backed template is worth testing.",
+      status: "testing",
+      confidence: "low",
+      patternIds: [],
+      supportingEvidenceIds: [],
+      contradictingEvidenceIds: [],
+      derivedFrom: [],
+      reviewHistory: [{ reviewId: "create", status: "testing", at: new Date().toISOString() }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      sandboxSessionId: "session-1",
+      template: { title: "Test", body: "A reusable structure.", source: "observed_post", sourceMirrorObjectIds: ["source-1"], sourceCount: 1 },
+    }];
+    state.growthEvidenceRecords = ["outcome-1", "outcome-2"].map((id) => ({
+      id,
+      agentId: state.agent!.id,
+      presenceId,
+      kind: "WORLD_OUTCOME",
+      claimScope: "presence",
+      statement: "Measured outcome for the selected template.",
+      sourceRefs: [{ kind: "publication_metric", id: `metric-${id}` }],
+      verified: true,
+      causalDecisionIds: [`decision-${id}`],
+      learningHypothesisIds: [hypothesisId],
+      sandboxSessionId: "session-1",
+      createdAt: new Date().toISOString(),
+    } satisfies GrowthEvidenceRecord));
+    applyGrowthHypothesisActions(state, presenceId, "review-1", [{ action: "support", hypothesisId, evidenceIds: ["outcome-1"] }]);
+    expect(state.growthHypotheses[0]?.status).toBe("weakened");
+    applyGrowthHypothesisActions(state, presenceId, "review-2", [{ action: "support", hypothesisId, evidenceIds: ["outcome-1", "outcome-2"] }]);
+    expect(state.growthHypotheses[0]?.status).toBe("supported");
+  });
+
   it("decreases confidence on contradictory evidence and retires the pattern from retrieval", () => {
     const state = createAgent(input);
     const presenceId = state.presence!.id;

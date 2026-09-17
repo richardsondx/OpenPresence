@@ -679,3 +679,30 @@ retained-vs-removed independent counterfactual: obtain a real Growth Review
 action for this exact hypothesis, then prove a later autonomous decision
 changes for that artifact and differs in an independently run artifact-removed
 counterfactual. Do not infer that gate from the new evidence linkage alone.
+
+## 2026-09-17 autonomous learning canary delta — disposition attribution
+
+The next real-model public rerun used the existing `reviewGrowth` operation
+through the scenario harness after two measured source-backed variations. It
+completed on the rebuilt route and recorded a model Growth Review that marked
+the exact session template `disfavored`. The hypothesis retained two
+publication metrics and the verified Sandbox outcome as supporting evidence;
+its final status was not inferred from delivery or UI text.
+
+Evidence:
+
+- JSON: `/tmp/openpresence-learning-canary-real-1789685322-direct-attribution.json`
+- DB: `/tmp/openpresence-learning-canary-real-1789685322-direct-attribution.db`
+- Model: OpenAI `gpt-5.6-luna`, low reasoning; all executable affordances auto;
+  Sandbox-only delivery.
+- Focused suite after the attribution repair: 135/135 passed.
+- Production build passed with only existing lint warnings.
+
+The direct-attribution guard and template `original_post` decision target are
+now implemented. This closes the measured evidence → review-disposition
+boundary for a negative result, but it does not prove positive transfer: the
+observed artifact was disfavored, so it must not influence later allocation.
+LEARN-002, LEARN-003, LEARN-004, AUT-001, EVAL-004, EVAL-005, and UX-004 remain
+PARTIAL. The next gate is a positive, independently reconstructed
+retained-versus-removed counterfactual on a supported artifact; do not promote
+from the disfavored run.
