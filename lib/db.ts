@@ -458,19 +458,21 @@ function writeNewHighVolumeCollectionRows(state: OpenPresenceState, previous?: O
 function syncMirrorObjectRows(state: OpenPresenceState, previous?: OpenPresenceState) {
   const agentId = state.agent?.id;
   if (!agentId) return;
-  const existingRows = previous
-    ? undefined
-    : new Map((sqlite.prepare("SELECT id, payload FROM mirror_objects WHERE agent_id = ?").all(agentId) as Array<{ id: string; payload?: string }>).map((row) => [row.id, row.payload ?? ""]));
+  // Reconcile against SQLite on every write. A restore can intentionally
+  // remove rows that are still present in the caller's previous cache; using
+  // that cache as the deletion set lets the normalized projection resurrect
+  // stale Sandbox mirrors after a process restart.
+  const existingRows = new Map((sqlite.prepare("SELECT id, payload FROM mirror_objects WHERE agent_id = ?").all(agentId) as Array<{ id: string; payload?: string }>).map((row) => [row.id, row.payload ?? ""]));
   const previousById = new Map((previous?.mirrorObjects ?? []).map((item) => [item.id, item]));
   const currentIds = new Set(state.mirrorObjects.map((item) => item.id));
   const insert = sqlite.prepare("INSERT OR REPLACE INTO mirror_objects (id, agent_id, parent_id, payload, updated_at) VALUES (?, ?, ?, ?, ?)");
   for (const item of state.mirrorObjects) {
     const prior = previousById.get(item.id);
     const payload = JSON.stringify(item);
-    if (prior === item || (prior && JSON.stringify(prior) === payload) || existingRows?.get(item.id) === payload) continue;
+    if (prior === item || (prior && JSON.stringify(prior) === payload) || existingRows.get(item.id) === payload) continue;
     insert.run(item.id, agentId, item.presenceId ?? null, payload, item.observedAt ?? item.occurredAt ?? new Date().toISOString());
   }
-  const storedIds = previous ? previousById.keys() : existingRows?.keys() ?? [];
+  const storedIds = existingRows.keys();
   const remove = sqlite.prepare("DELETE FROM mirror_objects WHERE agent_id = ? AND id = ?");
   for (const id of storedIds) if (!currentIds.has(id)) remove.run(agentId, id);
 }
