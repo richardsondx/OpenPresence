@@ -30,7 +30,12 @@ PARTIAL row because the required public composed/adversarial contracts were not
 actually exercised. Its fresh launch also hit a detached-environment `bindings`
 resolution error (HTTP 500); this setup failure is preserved in
 `qa-learnings/independent-verifier-38e97ca-2026-09-17.md` and is not product
-evidence. No replay-specific hardening is reopened.
+evidence. The verifier later repaired its isolated dependencies and passed a
+public composed slice (10,080 virtual minutes, 43 typed causal records,
+browser reload truth, and zero live executions), but still returned
+`INCONCLUSIVE` for the remaining rows because the exact native-race,
+full-causal-cone, learning-transfer, interruption, and legacy-ablation gates
+were not all exercised. No replay-specific hardening is reopened.
 
 The corrected action-family learning implementation was verified on exact
 commit `67a7544` and is documented in
