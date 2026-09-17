@@ -181,6 +181,19 @@ natural-supervision review, and legacy-migration capability ablation. Replay
 closure is complete; do not add replay-specific hardening without a new
 material defect.
 
+## Supervisory intervention delta — 2026-09-17
+
+Commit `9918bcd` closes a product-architecture mismatch in `AUT-004`,
+`AUT-006`, and `UX-005`: supervisory cancel now removes one future
+Agent-owned publishing window and creates a coherent successor plan while
+keeping the continuous publishing responsibility active. The explicit
+whole-responsibility `cancelAssignment` primitive remains available for a true
+shutdown. Focused runtime evidence: `tests/publishing-plan.test.ts` plus
+`tests/runtime.test.ts`, 185 tests passed. The rows remain `PARTIAL` because
+the full composed trajectory still needs dependent-work reconsideration and
+projection coherence after mutation/reload; this is not promoted from the
+focused proof alone.
+
 ## Update protocol
 
 Latest integrated Sandbox evidence (2026-09-16): the real CLI-launched
