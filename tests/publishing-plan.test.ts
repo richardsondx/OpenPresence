@@ -136,6 +136,23 @@ describe("Publishing Plan", () => {
     expect(normalizeState(state).publishingPlans).toHaveLength(2);
   });
 
+  it("keeps a supervised publishing plan window aligned with its Agent-owned responsibility", () => {
+    const fixture = publishingFixture("Publish one evidence-led note.");
+    const planBefore = fixture.state.publishingPlans[0]!;
+    const movedDate = "2026-10-01";
+    const next = applyOperation(fixture.state, {
+      type: "planIntervention",
+      assignmentId: fixture.state.presence!.publishingInitiative.assignmentId!,
+      action: "postpone",
+      note: "Move this until Thursday.",
+      schedule: { date: movedDate, day: "Thursday", time: "10:00", executionWindow: "10:00–11:00" },
+    });
+    const plan = next.publishingPlans.find((item) => item.id === planBefore.id)!;
+    expect(plan.constraints).toContain("Move this until Thursday.");
+    expect(plan.windows[0]?.startAt).toBe(`${movedDate}T10:00:00.000Z`);
+    expect(derivePublishingPlanProjection(next, next.presence!.id, `${movedDate}T09:00:00.000Z`, { normalized: true })?.windows[0]?.startAt).toBe(`${movedDate}T10:00:00.000Z`);
+  });
+
   it("keeps an active plan ahead of a newer stale blocked planning attempt", () => {
     let state = createAgent(input);
     state = applyOperation(state, { type: "setPresence", patch: { connectionMode: "native" } });

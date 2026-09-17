@@ -1896,13 +1896,17 @@ describe("OpenPresence runtime boundaries", () => {
     let state = createAgent(input);
     state = applyOperation(state, { type: "addSlot", instruction: "Publish the weekly evidence note", day: "Tuesday", time: "08:00", objective: "education", executionWindow: "08:00–11:00" });
     const assignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "updateAssignmentPlan", assignmentId: assignment.id, plan: { summary: "Publish useful evidence.", dailyTargets: ["Publish one useful note."], publishingApproach: ["Use a concrete example."], discoveryDirections: ["Relevant builder conversations."], relationshipFocus: ["AI builders."], hypotheses: ["Specific evidence earns attention."], source: "agent" } });
     const slot = state.calendar.find((item) => item.assignmentId === assignment.id)!;
     state = applyOperation(state, { type: "planIntervention", assignmentId: assignment.id, action: "postpone", note: "Move this to Thursday.", schedule: { day: "Thursday", time: "10:00", executionWindow: "10:00–13:00" } });
     expect(state.calendar.find((item) => item.id === slot.id)).toMatchObject({ day: "Thursday", time: "10:00", executionWindow: "10:00–13:00" });
+    expect(state.assignments.find((item) => item.id === assignment.id)?.planHistory).toHaveLength(2);
+    expect(state.assignments.find((item) => item.id === assignment.id)?.plan?.dailyTargets[0]).toContain("Thursday at 10:00");
     state = applyOperation(state, { type: "planIntervention", assignmentId: assignment.id, action: "constrain", note: "Use only verified benchmark evidence.", instruction: "Use only verified benchmark evidence." });
     const projected = state.calendar.find((item) => item.id === slot.id)!;
     expect(projected.instruction).toContain("Use only verified benchmark evidence.");
     expect(state.standingIntents.find((item) => item.id === projected.standingIntentId)?.instruction).toContain("Use only verified benchmark evidence.");
+    expect(state.assignments.find((item) => item.id === assignment.id)?.plan?.summary).toContain("Use only verified benchmark evidence.");
     state = applyOperation(state, { type: "planIntervention", assignmentId: assignment.id, action: "cancel", note: "Cancel this plan." });
     expect(state.calendar.find((item) => item.id === slot.id)?.enabled).toBe(false);
   });

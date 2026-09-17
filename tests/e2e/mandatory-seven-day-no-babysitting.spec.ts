@@ -358,7 +358,11 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
         expect(intervention.ok(), "The scoped supervisory intervention was not accepted.").toBeTruthy();
         current = await readSnapshot(request, sessionId!);
         expect(current.events.some((event) => text(event.title) === "Agent plan changed" && text(event.sourceObjectId) === text(agentAssignment?.id))).toBe(true);
-        expect(current.assignments.find((item) => text(item.id) === text(agentAssignment?.id))?.instruction).toContain("Never use that visual style again.");
+        const revisedAssignment = current.assignments.find((item) => text(item.id) === text(agentAssignment?.id));
+        const revisedPlan = revisedAssignment?.plan as JsonRecord | undefined;
+        expect(revisedAssignment?.instruction).toContain("Never use that visual style again.");
+        expect(records(revisedAssignment?.planHistory).length).toBeGreaterThan(1);
+        expect(text(revisedPlan?.summary)).toContain("Never use that visual style again.");
       }
       const work = newRecords(previous.assignments, current.assignments).filter((item) => text(item.createdBy) === "agent" || text(item.origin) === "publishing_initiative");
       const intents = newRecords(previous.intents, current.intents);

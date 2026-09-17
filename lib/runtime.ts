@@ -995,12 +995,15 @@ export function syncPublishingInitiativeAssignment(source: OpenPresenceState, pr
   const quantity = isPace ? initiative.target?.count : undefined;
   const mode: AssignmentQuantityMode = "target";
   const timestamp = sandboxSession?.virtualNow ?? now();
+  const priorInstruction = existing?.instruction;
+  const supervisorySuffix = priorInstruction?.match(/\n\nSupervisory constraint:[\\s\\S]*$/)?.[0];
+  const canonicalInstruction = isPace ? `Aim for ${quantity ?? 1} original posts per ${initiative.target?.period ?? "day"}.` : "Maintain a useful original presence when there is something worth publishing.";
   const replayAssignmentId = sandboxSession
     ? sandboxReplayId(state.assignments.map((item) => item.id), sandboxSession.seed, "publishing-initiative", 0, "assignment", sandboxSession.id)
     : undefined;
   const assignment = existing ?? {
     id: replayAssignmentId ?? id("assignment"), agentId: state.agent.id, presenceId: presence.id, channelId: presence.channel,
-    environment: presence.environment ?? "live", instruction: isPace ? `Aim for ${quantity ?? 1} original posts per ${initiative.target?.period ?? "day"}.` : "Maintain a useful original presence when there is something worth publishing.",
+    environment: presence.environment ?? "live", instruction: canonicalInstruction,
     deliverable: { type: isPace ? "original_publication" : "maintain_original_presence", quantity, quantityMode: mode },
     recurrence: isPace ? { kind: initiative.target?.period === "week" ? "weekly" as const : "daily" as const, label: `Every ${initiative.target?.period ?? "day"}` } : { kind: "daily" as const, label: "Ongoing" },
     executionPolicy: { usePresenceEnvelope: true }, status: "active" as const, progress: { required: quantity ?? 0, verified: 0 }, rejectedCandidates: 0, systemFailures: 0,
@@ -1012,7 +1015,10 @@ export function syncPublishingInitiativeAssignment(source: OpenPresenceState, pr
   assignment.origin = "publishing_initiative";
   if (sessionId && assignment.environment === "sandbox") assignment.sessionId = sessionId;
   assignment.activation = { type: "continuous" };
-  assignment.instruction = isPace ? `Aim for ${quantity ?? 1} original posts per ${initiative.target?.period ?? "day"}.` : "Maintain a useful original presence when there is something worth publishing.";
+  // Reconciliation may run after a restart or a plan intervention. Preserve
+  // durable supervisory constraints while refreshing only the canonical
+  // initiative portion of the instruction.
+  assignment.instruction = `${canonicalInstruction}${supervisorySuffix ?? ""}`;
   assignment.deliverable = { type: isPace ? "original_publication" : "maintain_original_presence", quantity, quantityMode: mode };
   assignment.recurrence = isPace
     ? { kind: initiative.target?.period === "week" ? "weekly" as const : "daily" as const, label: `Every ${initiative.target?.period ?? "day"}` }
@@ -8402,6 +8408,50 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       const note = operation.instruction?.trim() || operation.note.trim();
       if (note && !assignment.instruction.includes(note)) assignment.instruction = `${assignment.instruction.trim()}\n\nSupervisory constraint: ${note}`;
       assignment.preflight = preflightAssignment(state, assignment, assignment.executionPolicy.delegationPolicy);
+    }
+    if (assignment.plan && ["postpone", "constrain", "replan"].includes(operation.action)) {
+      const note = operation.instruction?.trim() || operation.note.trim();
+      const scheduleNote = operation.action === "postpone" && operation.schedule
+        ? `The next execution window is ${operation.schedule.day} at ${operation.schedule.time} (${operation.schedule.executionWindow}).`
+        : undefined;
+      const nextPlan: AssignmentPlan = {
+        ...assignment.plan,
+        id: id("assignment-plan"),
+        revision: (assignment.plan.revision ?? 0) + 1,
+        summary: [assignment.plan.summary, scheduleNote, note ? `Supervisory guidance: ${note}` : undefined].filter(Boolean).join(" "),
+        dailyTargets: scheduleNote ? [scheduleNote, ...assignment.plan.dailyTargets.filter((target) => target !== scheduleNote)] : assignment.plan.dailyTargets,
+        source: "agent",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      assignment.planHistory = [...(assignment.planHistory ?? []), nextPlan];
+      assignment.plan = nextPlan;
+      state.events.unshift(event("decision", "Agent operating plan revised", `${assignment.title ?? assignment.instruction} now reflects the supervisory guidance in its durable operating plan.`, "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId, sourceObjectId: assignment.id }));
+    }
+    if (assignment.origin === "publishing_initiative" && ["postpone", "constrain", "replan"].includes(operation.action)) {
+      const activePlan = state.publishingPlans.find((plan) => plan.presenceId === assignment.presenceId
+        && plan.environment === assignment.environment && plan.status === "active");
+      if (activePlan) {
+        const note = operation.instruction?.trim() || operation.note.trim();
+        activePlan.constraints = [...new Set([...(activePlan.constraints ?? []), note])].slice(-8);
+        activePlan.rationaleSummary = `${activePlan.rationaleSummary ?? "The Agent is maintaining this responsibility."} Supervisory guidance is now part of the active plan.`.slice(0, 500);
+        if (operation.action === "postpone" && operation.schedule?.date) {
+          const futureWindows = activePlan.windows.filter((window) => new Date(window.startAt).getTime() >= Date.parse(timestamp)).sort((left, right) => left.startAt.localeCompare(right.startAt));
+          const first = futureWindows[0];
+          if (first) {
+            const duration = Math.max(60_000, new Date(first.endAt).getTime() - new Date(first.startAt).getTime());
+            const movedStart = new Date(`${operation.schedule.date}T${operation.schedule.time}:00Z`);
+            if (!Number.isNaN(movedStart.getTime())) {
+              first.startAt = movedStart.toISOString();
+              first.endAt = new Date(movedStart.getTime() + duration).toISOString();
+              first.status = "future";
+              first.nextConsiderAt = first.startAt;
+              activePlan.nextAttentionAt = first.startAt;
+            }
+          }
+        }
+        activePlan.updatedAt = timestamp;
+      }
     }
     // Calendar is a projection of Agent-owned work. Keep linked standing
     // intent records synchronized when supervision changes that work.
