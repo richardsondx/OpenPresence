@@ -6,6 +6,32 @@ import { addSandboxEvent, applyOperation, createAgent, startPlaygroundSession } 
 import { cognitionSafeThreadAssetSummary, createAssetPerception } from "../lib/perception";
 
 describe("sandbox link perception", () => {
+  it("releases declared Sandbox visual truth only through explicit inspection", async () => {
+    let state = startPlaygroundSession(createAgent({ name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent", handle: "@jenny_media_fixture", accent: "#D68754" }));
+    const session = state.playgroundSessions[0]!;
+    state = addSandboxEvent(state, {
+      sessionId: session.id,
+      actionId: "post",
+      actorName: "Relevant Research",
+      content: "A chart grounds this claim.",
+      assets: [{
+        name: "relevant-chart",
+        kind: "chart",
+        dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        sandboxPerception: { observation: "A legible evidence chart is visible.", interpretation: "The visual directly supports the post's claim.", uncertainty: "low", visualForm: "chart", visualRole: "evidence", legibility: "clear", decorative: false },
+      }],
+    });
+    const object = state.mirrorObjects[0]!;
+    const asset = state.assets.find((item) => item.id === object.assetRefs?.[0]?.assetId)!;
+    expect(state.perceptions.find((item) => item.assetId === asset.id)?.result.uncertainty).toBe("insufficient");
+    expect(state.perceptions.find((item) => item.assetId === asset.id)?.result.visualRole).toBeUndefined();
+
+    const inspected = await inspectSandboxObject(state, object, "inspect");
+    const perception = inspected.perceptions.find((item) => item.assetId === asset.id && item.level === "inspect");
+    expect(perception).toMatchObject({ providerId: "sandbox-fixture", modelId: "declared-observation", result: { visualForm: "chart", visualRole: "evidence", decorative: false, uncertainty: "low" } });
+    expect(perception?.result.interpretation).toContain("supports");
+  });
+
   it("labels quoted media with its owning author and social object", () => {
     const now = new Date().toISOString();
     const asset: Asset = { id: "quoted-asset", agentId: "agent", presenceId: "presence", type: "image", status: "ready", provenance: { origin: "native-x", sourceUrl: "https://pbs.twimg.com/media/demo.jpg", author: "edward40e", importedAt: now }, createdAt: now, updatedAt: now };

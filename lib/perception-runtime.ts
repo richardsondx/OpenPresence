@@ -260,6 +260,9 @@ async function inspectWithProvider(state: OpenPresenceState, asset: Asset, objec
   }
   const selected = providerSupportsVision(state);
   const media = await imageParts(asset);
+  if (asset.environment === "sandbox" && asset.sandboxPerception) {
+    return { result: JSON.parse(JSON.stringify(asset.sandboxPerception)) as PerceptionResult, providerId: "sandbox-fixture", modelId: "declared-observation", attempted: true };
+  }
   if (!selected || isAiMockEnabled()) return { result: createUninterpretedPerception(asset), attempted: false };
   if (!media) return providerError(asset, `The ${asset.type} asset could not be normalized into inspectable visual evidence.`);
   const { profile, connection } = selected;
