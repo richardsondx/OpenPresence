@@ -494,6 +494,14 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     expect(current.events.some((event) => text(event.title) === "Plan invalidation reviewed"), `The breaking event did not trigger an explicit plan invalidation review. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
     expect(activePlans.length).toBe(1);
     expect(supersededPlans.some((plan) => Number(plan.revision) < Number(activePlans[0]?.revision)), `The breaking event did not create a successor plan revision. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
+    const linkedPublishingAssignment = current.assignments.find((item) => text(item.origin) === "publishing_initiative" && text(item.presenceId) === presenceId);
+    expect(linkedPublishingAssignment?.status, `The Agent-owned responsibility disappeared during re-planning. Evidence: ${JSON.stringify(evidence)}`).toBe("active");
+    expect(Number(record(linkedPublishingAssignment?.plan).revision), `The linked responsibility did not receive the successor plan. Evidence: ${JSON.stringify(evidence)}`).toBeGreaterThan(Number(activePlans[0]?.revision ?? 0) - 1);
+    expect(records(activePlans[0]?.windows).length, `The successor plan has no dependent work to continue. Evidence: ${JSON.stringify(evidence)}`).toBeGreaterThan(0);
+    const linkedPlan = record(linkedPublishingAssignment?.plan);
+    const successorTargets: string[] = Array.isArray(linkedPlan.dailyTargets) ? linkedPlan.dailyTargets.filter((target: unknown): target is string => typeof target === "string") : [];
+    const successorWindows = records(activePlans[0]?.windows);
+    expect(successorTargets.some((target: string) => successorWindows.some((window: JsonRecord) => target.includes(text(window.summary) ?? ""))), `The successor Calendar work was not copied into the linked Agent-owned plan. dailyTargets=${JSON.stringify(successorTargets)} windows=${JSON.stringify(successorWindows)} Evidence: ${JSON.stringify(evidence)}`).toBe(true);
     expect(supersededPlans.every((plan) => records(plan.windows).every((window) => text(window.status) === "superseded")), `Superseded plan windows remained executable-looking. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
     const supersededAtByPlanId = new Map(supersededPlans.map((plan) => [text(plan.id), text(plan.supersededAt)]));
     const stalePostSupersessionExecutions = current.executions.filter((execution) => {
