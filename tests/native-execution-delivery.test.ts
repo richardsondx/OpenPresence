@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as x from "../lib/x";
+import * as db from "../lib/db";
 import { deliverNativeExecutions } from "../lib/native-execution-delivery";
 import { createAgent, formXActionIntent, formXReplyIntent } from "../lib/runtime";
 import type { NativeChannelConnection } from "../lib/types";
@@ -181,5 +182,44 @@ describe("Autonomous native execution delivery", () => {
 
     expect(delivered.executions[0]).toMatchObject({ status: "cancelled", failure: { code: "PRESENCE_PAUSED" } });
     expect(like).not.toHaveBeenCalled();
+  });
+
+  it("preserves a verified receipt and prevents retry after authority is revoked in flight", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
+    const targetId = `native-in-flight-revoke-${Date.now()}-${Math.random()}`;
+    let state = createAgent({ name: "In Flight Revoke", description: "Test", audience: "Testers", mode: "agent", handle: "@in_flight_revoke", accent: "#777777" });
+    const presence = { ...state.presence!, environment: "live" as const, connectionMode: "native" as const, execution: { ...state.presence!.execution, like: "auto" as const } };
+    const connection: NativeChannelConnection = { id: `native-in-flight-${Date.now()}`, presenceId: presence.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "in-flight-account", username: "in_flight_revoke", name: "In Flight Revoke" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    state.presence = presence;
+    state.presences = [presence];
+    state.nativeConnections = [connection];
+    state.mirrorObjects = [{ id: `mirror-${targetId}`, bridgeId: connection.id, presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: targetId }, objectType: "post", content: { text: "Target", language: "en" }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", archived: false, environment: "live" } as never];
+    state = formXActionIntent(state, { affordance: "x.like", target: { type: "x.post", id: targetId } });
+    const execution = state.executions[0]!;
+    const initialSnapshot = JSON.parse(JSON.stringify(state));
+    const revokedSnapshot = JSON.parse(JSON.stringify(state));
+    const revoked = { ...presence, execution: { ...presence.execution, like: "off" as const } };
+    revokedSnapshot.presence = revoked;
+    revokedSnapshot.presences = [revoked];
+    let snapshotReads = 0;
+    vi.spyOn(db, "readStateSnapshotForContext").mockImplementation(() => {
+      snapshotReads += 1;
+      return snapshotReads === 1 ? initialSnapshot : revokedSnapshot;
+    });
+    vi.spyOn(x, "readNativeXCredentials").mockReturnValue({ apiKey: "key", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" });
+    const like = vi.spyOn(x, "likeXPost").mockImplementation(async () => {
+      state.presence = revoked;
+      state.presences = [revoked];
+      return { type: "x.like", id: targetId };
+    });
+
+    const delivered = await deliverNativeExecutions(state, new Set([execution.id]));
+    const result = delivered.executions.find((item) => item.id === execution.id)!;
+    expect(like).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ status: "succeeded", externalRef: { type: "x.like", id: targetId } });
+    expect(result.failure).toBeUndefined();
+    expect(delivered.outcomes.filter((item) => item.executionId === execution.id)).toHaveLength(1);
+    expect(delivered.events.some((item) => item.title === "Native action completed during permission change")).toBe(true);
   });
 });

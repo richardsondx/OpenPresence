@@ -63,6 +63,25 @@ function nativeConnectionCanWrite(connection: OpenPresenceState["nativeConnectio
   return !xCreditsExhausted(connection);
 }
 
+function nativeAuthorityChanged(source: OpenPresenceState, execution: OpenPresenceState["executions"][number]) {
+  const durable = readStateSnapshotForContext({ presenceId: execution.presenceId });
+  const currentPresence = source.presences.find((item) => item.id === execution.presenceId) ?? (source.presence?.id === execution.presenceId ? source.presence : undefined);
+  const durablePresence = durable.presences.find((item) => item.id === execution.presenceId) ?? (durable.presence?.id === execution.presenceId ? durable.presence : undefined);
+  const affordance = execution.affordance.replace(/^x\./, "");
+  const currentMode = currentPresence?.execution[execution.affordance] ?? currentPresence?.execution[affordance];
+  const durableMode = durablePresence?.execution[execution.affordance] ?? durablePresence?.execution[affordance];
+  if (currentPresence?.status === "paused" || durablePresence?.status === "paused") return "The Presence was paused while the native connector was in flight.";
+  if (currentMode === "off" || durableMode === "off") return "The Presence execution permission was revoked while the native connector was in flight.";
+  return undefined;
+}
+
+function recordMidFlightAuthorityChange(source: OpenPresenceState, execution: OpenPresenceState["executions"][number], externalRef: import("./types").EntityRef) {
+  const reason = nativeAuthorityChanged(source, execution);
+  const completed = completeNativeExecution(source, execution.id, externalRef);
+  if (!reason) return completed;
+  return recordRuntimeEvent(completed, execution.presenceId, "Native action completed during permission change", `${reason} The connector returned a verified external receipt, so OpenPresence preserved the result and will not retry it.`, "warning", { executionId: execution.id, intentId: execution.socialIntentId });
+}
+
 /**
  * Deliver newly formed native executions immediately, regardless of whether
  * they came from a request handler or the autonomous worker. Autonomous runs
@@ -176,7 +195,7 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
         updatePublicActionDelivery(execution.id, "handed_off");
         const externalRef = await publishSealedXPost(credentials, sealed.expression, sealed.permit, replyTo, next.assets, quoteTweetId);
         updatePublicActionDelivery(execution.id, "verified", externalRef);
-        next = completeNativeExecution(next, execution.id, externalRef);
+        next = recordMidFlightAuthorityChange(next, execution, externalRef);
         next = detectDuplicateVerifiedExecutionOutcomes(next, execution.id);
         const publication = execution.publication;
         if (publication?.assetIds?.length) {
@@ -235,7 +254,7 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
         }
         else throw new Error(`The native X writer does not support ${execution.affordance} with target ${execution.target.type}.`);
         updatePublicActionDelivery(execution.id, "verified", externalRef);
-        next = completeNativeExecution(next, execution.id, externalRef);
+        next = recordMidFlightAuthorityChange(next, execution, externalRef);
         next = detectDuplicateVerifiedExecutionOutcomes(next, execution.id);
       } catch (error) {
         updatePublicActionDelivery(execution.id, "uncertain");
