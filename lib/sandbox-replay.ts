@@ -153,7 +153,9 @@ export function restoreSandboxWorld(source: OpenPresenceState, snapshot: Sandbox
         ...values.filter((item) => {
           if (!item || typeof item !== "object") return true;
           const record = item as { presenceId?: string; originatingPresenceId?: string; sandboxSessionId?: string };
-          return learningSessionId ? record.sandboxSessionId !== learningSessionId : record.presenceId !== snapshot.learning!.presenceId && record.originatingPresenceId !== snapshot.learning!.presenceId;
+          return learningSessionId
+            ? record.sandboxSessionId !== learningSessionId
+            : Boolean(record.sandboxSessionId) || (record.presenceId !== snapshot.learning!.presenceId && record.originatingPresenceId !== snapshot.learning!.presenceId);
         }),
         ...learningValues.map((item) => learningSessionId ? namespacedLearningRecord(item, key, learningSessionId, idMap) : item),
       ];

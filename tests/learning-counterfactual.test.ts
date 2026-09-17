@@ -7,7 +7,7 @@ import {
   type LearningCheckpoint,
   type LearningDecisionSituation,
 } from "../lib/learning-counterfactual";
-import { createAgent, createSandboxCheckpoint, forkSandboxCheckpoint, initialState, recordSocialDecision, startPlaygroundSession } from "../lib/runtime";
+import { createAgent, createSandboxCheckpoint, forkSandboxCheckpoint, initialState, recordSocialDecision, restoreSandboxCheckpoint, startPlaygroundSession } from "../lib/runtime";
 import { compileSocialStrategyContext } from "../lib/social-strategy";
 import { learningAdjustmentForPattern } from "../lib/learning-runtime";
 import { captureLearningCheckpoint, learningStateForPresence } from "../lib/learning-runtime";
@@ -159,6 +159,8 @@ describe("runtime learning boundary", () => {
     const forkLearning = learningStateForPresence(state, presence, fork.id);
     expect(forkLearning.hypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience.", targets: expect.arrayContaining([expect.objectContaining({ strategyId })]) })]));
     expect((state.growthHypotheses ?? []).filter((item) => (item as typeof item & { sandboxSessionId?: string }).sandboxSessionId === fork.id)).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience." })]));
+    const restoredSource = restoreSandboxCheckpoint(state, source.id, checkpoint.id);
+    expect(learningStateForPresence(restoredSource, presence, fork.id).hypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience." })]));
     const worldA = structuredClone(state);
     const worldB = structuredClone(state);
     worldA.playgroundSessions = worldA.playgroundSessions.filter((item) => item.id === fork.id);
@@ -173,7 +175,7 @@ describe("runtime learning boundary", () => {
     emptyLearningState.growthEvidenceRecords = [];
     emptyLearningState.learningCheckpoints = [];
     emptyLearningState.learningCounterfactuals = [];
-    const restoredA = restoreSandboxWorld(structuredClone(worldA), JSON.parse(JSON.stringify(branchSnapshotA)), { restoreLearning: true });
+    const restoredA = restoreSandboxWorld(emptyLearningState, JSON.parse(JSON.stringify(branchSnapshotA)), { restoreLearning: true });
     const restoredB = restoreSandboxWorld(emptyLearningState, JSON.parse(JSON.stringify(learningSnapshotB)), { restoreLearning: true });
     const removedLearning = learningStateForPresence(restoredB, presence);
     const learningCheckpoint = captureLearningCheckpoint(restoredA, presence, "2026-09-16T12:30:00.000Z").checkpoint;
