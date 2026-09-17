@@ -149,13 +149,16 @@ describe("runtime learning boundary", () => {
     const hypothesisId = "sandbox-learning-hypothesis";
     const evidence = ["sandbox-outcome-a", "sandbox-outcome-b"].map((id, index) => ({ id, agentId: state.agent!.id, presenceId: presence.id, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Verified proof-led outcome", sourceRefs: [], verified: true, causalDecisionIds: [`sandbox-decision-${index + 1}`], createdAt: `2026-09-1${index + 1}T12:00:00.000Z` }));
     state.growthEvidenceRecords = evidence;
-    state.socialDecisions = evidence.map((item, index) => ({ id: `sandbox-decision-${index + 1}`, agentId: state.agent!.id, presenceId: presence.id, environment: "sandbox" as const, focalMirrorObjectIds: [], decision: "original_post" as const, summary: "Proof-led decision", influences: [], socialStrategy: { retrievalRunId: `sandbox-run-${index + 1}`, consideredPatternIds: [strategyId], selectedByAct: [{ act: "original_post", patternId: strategyId }] }, createdAt: item.createdAt }));
+    state.socialDecisions = evidence.map((item, index) => ({ id: `sandbox-decision-${index + 1}`, agentId: state.agent!.id, presenceId: presence.id, environment: "sandbox" as const, sessionId: source.id, focalMirrorObjectIds: [], decision: "original_post" as const, summary: "Proof-led decision", influences: [], socialStrategy: { retrievalRunId: `sandbox-run-${index + 1}`, consideredPatternIds: [strategyId], selectedByAct: [{ act: "original_post", patternId: strategyId }] }, createdAt: item.createdAt }));
     state.growthHypotheses = [{ id: hypothesisId, agentId: state.agent!.id, originatingPresenceId: presence.id, scope: "presence", channelId: presence.channel, statement: "Useful disagreement helps this audience.", status: "supported", confidence: "high", patternIds: [strategyId], decisionTargets: [{ strategyId, action: "reply", effect: 10 }], supportingEvidenceIds: evidence.map((item) => item.id), contradictingEvidenceIds: [], derivedFrom: [], reviewHistory: [], createdAt: evidence[0]!.createdAt, updatedAt: evidence[1]!.createdAt }];
 
     state = createSandboxCheckpoint(state, source.id, "after learning event");
     const checkpoint = state.sandboxCheckpoints?.[0]!;
     state = forkSandboxCheckpoint(state, source.id, checkpoint.id);
     const fork = state.playgroundSessions.find((item) => item.id !== source.id && item.source === "replay")!;
+    const forkLearning = learningStateForPresence(state, presence, fork.id);
+    expect(forkLearning.hypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience.", targets: expect.arrayContaining([expect.objectContaining({ strategyId })]) })]));
+    expect((state.growthHypotheses ?? []).filter((item) => (item as typeof item & { sandboxSessionId?: string }).sandboxSessionId === fork.id)).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience." })]));
     const worldA = structuredClone(state);
     const worldB = structuredClone(state);
     worldA.playgroundSessions = worldA.playgroundSessions.filter((item) => item.id === fork.id);

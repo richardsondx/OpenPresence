@@ -236,6 +236,8 @@ export interface SocialStrategySituation {
   assignmentContext?: string;
   /** Exact reusable template requested by an Assignment, when applicable. */
   strategyTemplateId?: string;
+  /** Replay-only learning overlay selected by the Sandbox session. */
+  sandboxSessionId?: string;
 }
 
 export interface CompiledSocialStrategyContext {
@@ -547,10 +549,11 @@ export function applyGrowthHypothesisActions(
   return state;
 }
 
-function relevantHypotheses(state: OpenPresenceState, presence: Presence, objective: string): GrowthHypothesis[] {
+function relevantHypotheses(state: OpenPresenceState, presence: Presence, objective: string, sandboxSessionId?: string): GrowthHypothesis[] {
   const query = tokens(objective);
   return (state.growthHypotheses ?? [])
     .filter((hypothesis) => hypothesis.status !== "retired" && hypothesis.status !== "disfavored")
+    .filter((hypothesis) => !sandboxSessionId || (hypothesis as GrowthHypothesis & { sandboxSessionId?: string }).sandboxSessionId === sandboxSessionId)
     .filter((hypothesis) => hypothesis.scope === "agent"
       || (hypothesis.scope === "channel" && hypothesis.channelId === presence.channel)
       || (hypothesis.scope === "presence" && hypothesis.originatingPresenceId === presence.id))
@@ -685,7 +688,7 @@ export function compileSocialStrategyContext(state: OpenPresenceState, presence:
   const selectedPlaybook = bundledSocialStrategyPlaybooks().find((candidate) => candidate.channelId === presence.channel);
   const recent = recentStrategyShape(state, presence.id);
   const candidates = (selectedPlaybook?.patterns ?? [])
-    .map((pattern) => ({ pattern, score: scorePattern(pattern, situation, recent, learningAdjustmentForPattern(state, presence, pattern.id)) }))
+    .map((pattern) => ({ pattern, score: scorePattern(pattern, situation, recent, learningAdjustmentForPattern(state, presence, pattern.id, situation.sandboxSessionId)) }))
     .filter(({ score }) => score > 0)
     .sort((a, b) => b.score - a.score || a.pattern.id.localeCompare(b.pattern.id))
     .reduce<SocialStrategyPattern[]>((result, item) => {
@@ -694,11 +697,11 @@ export function compileSocialStrategyContext(state: OpenPresenceState, presence:
     }, [])
     .slice(0, 5);
   const requestedTemplate = situation.strategyTemplateId
-    ? (state.growthHypotheses ?? []).find((hypothesis) => hypothesis.id === situation.strategyTemplateId && hypothesis.originatingPresenceId === presence.id && hypothesis.template && !["retired", "disfavored"].includes(hypothesis.status))
+    ? (state.growthHypotheses ?? []).find((hypothesis) => hypothesis.id === situation.strategyTemplateId && hypothesis.originatingPresenceId === presence.id && (!situation.sandboxSessionId || (hypothesis as GrowthHypothesis & { sandboxSessionId?: string }).sandboxSessionId === situation.sandboxSessionId) && hypothesis.template && !["retired", "disfavored"].includes(hypothesis.status))
     : undefined;
   const hypotheses = [
     ...(requestedTemplate ? [requestedTemplate] : []),
-    ...relevantHypotheses(state, presence, situation.objective).filter((hypothesis) => hypothesis.id !== requestedTemplate?.id),
+    ...relevantHypotheses(state, presence, situation.objective, situation.sandboxSessionId).filter((hypothesis) => hypothesis.id !== requestedTemplate?.id),
   ].slice(0, 5);
   const templates = hypotheses.filter((hypothesis) => hypothesis.template);
   const skills = compatibleSkills(state, presence, situation);

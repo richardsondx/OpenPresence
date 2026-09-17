@@ -796,11 +796,14 @@ function socialDecisionLabel(decision: SocialDecisionKind) {
 function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInput, socialIntentId?: string): SocialDecision | undefined {
   const presence = input.presenceId ? state.presences.find((p) => p.id === input.presenceId) ?? state.presence : state.presence;
   if (!state.agent || !presence) return undefined;
+  const sandboxSessionId = socialIntentId
+    ? state.socialIntents.find((intent) => intent.id === socialIntentId)?.sessionId
+    : undefined;
   const assignmentTemplateId = input.origin?.kind === "assignment"
     ? state.assignments.find((assignment) => assignment.id === input.origin?.refId)?.strategyTemplateId
     : undefined;
-  const strategyRun = input.socialStrategy?.retrievalRun ?? compileSocialStrategyContext(state, presence, { invocation: input.origin?.kind ?? "social_decision", objective: input.summary ?? input.decision, availableActions: input.acts?.map((act) => act.decision) ?? [input.decision], strategyTemplateId: assignmentTemplateId }).retrievalRun;
-  const learningCounterfactual = recordLearningCounterfactualInPlace(state, presence, strategyRun, now());
+  const strategyRun = input.socialStrategy?.retrievalRun ?? compileSocialStrategyContext(state, presence, { invocation: input.origin?.kind ?? "social_decision", objective: input.summary ?? input.decision, availableActions: input.acts?.map((act) => act.decision) ?? [input.decision], strategyTemplateId: assignmentTemplateId, sandboxSessionId }).retrievalRun;
+  const learningCounterfactual = recordLearningCounterfactualInPlace(state, presence, strategyRun, now(), undefined, sandboxSessionId);
   if (learningCounterfactual) strategyRun.learningCounterfactual = {
     checkpointId: learningCounterfactual.checkpoint.id,
     checkpointHash: learningCounterfactual.checkpoint.hash,
@@ -3607,7 +3610,7 @@ export function restoreSandboxCheckpoint(source: OpenPresenceState, sessionId: s
   if (!checkpoint) throw new Error(`Sandbox checkpoint ${checkpointId} was not found for session ${sessionId}.`);
   const snapshot = checkpoint.snapshot as SandboxWorldSnapshot;
   assertSandboxWorldSnapshot(snapshot);
-  return restoreSandboxWorld(source, snapshot);
+  return restoreSandboxWorld(source, snapshot, { restoreLearning: true });
 }
 
 /** Create an isolated branch from a full-world checkpoint. Existing durable
@@ -3623,10 +3626,10 @@ export function forkSandboxCheckpoint(source: OpenPresenceState, sessionId: stri
   const forked: SandboxWorldSnapshot = {
     ...structuredClone(original),
     session: { ...structuredClone(original.session), id: forkedSessionId, source: "replay", status: "active", updatedAt: now() },
-    collections: Object.fromEntries(Object.entries(original.collections).map(([key, values]) => [key, values.map((value) => value && typeof value === "object" ? { ...(value as Record<string, unknown>), sessionId: forkedSessionId } : value)])),
+    collections: Object.fromEntries(Object.entries(original.collections).map(([key, values]) => [key, values.map((value) => value && typeof value === "object" ? { ...(value as Record<string, unknown>), sessionId: forkedSessionId, sandboxSessionId: forkedSessionId } : value)])),
   };
   forked.digest = sandboxWorldDigest(forked);
-  return restoreSandboxWorld(source, forked);
+  return restoreSandboxWorld(source, forked, { restoreLearning: true, learningSessionId: forkedSessionId });
 }
 
 export function syncPlaygroundTime(source: OpenPresenceState, sessionId: string) {

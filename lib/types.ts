@@ -604,6 +604,8 @@ export interface LearningCheckpointRecord {
   hypothesisIds: string[];
   evidenceIds: string[];
   sourceReviewId?: string;
+  /** Replay-only scope; absent for normal Presence-global learning. */
+  sandboxSessionId?: string;
 }
 
 export interface LearningCounterfactualRecord {
@@ -614,6 +616,8 @@ export interface LearningCounterfactualRecord {
   situationId: string;
   result: LearningCounterfactualResult;
   createdAt: string;
+  /** Replay-only scope; absent for normal Presence-global learning. */
+  sandboxSessionId?: string;
 }
 
 export interface GrowthReview {
@@ -957,6 +961,8 @@ export interface GrowthEvidenceRecord {
   /** Optional explicit lineage used before an outcome can influence future allocation. */
   causalDecisionIds?: string[];
   causalMirrorObjectIds?: string[];
+  /** Replay-only scope; absent for normal Presence-global learning. */
+  sandboxSessionId?: string;
 }
 
 export interface GrowthHypothesis {
@@ -977,6 +983,8 @@ export interface GrowthHypothesis {
   reviewHistory: Array<{ reviewId: string; status: SocialStrategyHypothesisStatus; at: string }>;
   createdAt: string;
   updatedAt: string;
+  /** Replay-only scope; absent for normal Presence-global learning. */
+  sandboxSessionId?: string;
   /** Optional reusable structure attached to the same evidence lifecycle. */
   template?: SocialTemplate;
 }
