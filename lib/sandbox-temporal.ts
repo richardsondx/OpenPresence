@@ -861,7 +861,12 @@ export class SandboxTemporalKernel {
   private addTrajectory(kind: string, data?: unknown, eventId?: string, at = this.nowValue): TemporalTrajectoryRecord {
     if (at < this.nowValue) throw new TemporalValidationError("Trajectory time cannot move backwards.");
     if (this.trajectoryValue.length >= this.boundsValue.maxTrajectoryRecords) throw new TemporalBoundsError("Trajectory bound exceeded.");
-    const record: TemporalTrajectoryRecord = { sequence: ++this.trajectoryNumberValue, time: at, kind, ...(eventId === undefined ? {} : { eventId }), ...(data === undefined ? {} : { data: clone(data) }) };
+    // Runtime adapters can dispatch an event-local effect after a later
+    // record was already persisted by another layer. Keep the evidence stream
+    // chronologically ordered while retaining the precise scheduled/factual
+    // timestamp in the record payload.
+    const traceAt = Math.max(at, this.trajectoryValue.at(-1)?.time ?? at);
+    const record: TemporalTrajectoryRecord = { sequence: ++this.trajectoryNumberValue, time: traceAt, kind, ...(eventId === undefined ? {} : { eventId }), ...(data === undefined ? {} : { data: clone(data) }) };
     this.trajectoryValue.push(record);
     return clone(record);
   }
