@@ -298,6 +298,13 @@ Focused proof: 2 files / 60 tests passed, with typecheck, changed-file lint,
 and diff checks passing. Evidence: `qa-learnings/sandbox-performance-learning-2026-09-17.md`.
 This strengthens LEARN-001/002 but leaves their deeper proof gates open.
 
+On the same implementation commit `0aee4ec`, the canonical public trajectory
+passed and the independent verifier passed 8 files / 91 tests. The public
+metric regression and focused learning/Sandbox suite passed 2 files / 60
+tests. Evidence is in
+`qa-learnings/sandbox-performance-learning-integration-2026-09-17.md`.
+Broad release health remains a separate future candidate gate.
+
 The natural-supervision trajectory was also rerun on `e4cc6de` and passed:
 seven realistic turns, 10,080 virtual minutes, five verified Sandbox
 outcomes, one deduplicated `strategy_change` update, durable correction
