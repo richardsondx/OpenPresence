@@ -291,14 +291,47 @@ export function growthBrowserProjection(state: OpenPresenceState, presenceId?: s
     "networkIntroductions", "recoveryAttempts", "publications", "actions", "operationalRuns", "scheduledWakes",
     "watchSignals", "operatorConversations", "agentWorkspaces", "attentionEpisodes", "socialIntents", "files",
     "socialDecisions", "outcomes", "people", "personIdentities", "relationships", "recoveryIncidents",
-    "growthEvidenceSnapshots", "growthEvidenceRecords", "growthHypotheses", "assignmentPursuitWindows", "standingIntents", "discoveryPlans",
+    "growthEvidenceSnapshots", "growthEvidenceRecords", "growthHypotheses", "growthRevisions", "growthFileVersions", "learningCheckpoints", "learningCounterfactuals", "legacyChannelStrategyGuidance", "autobiographicalEvents", "autobiographicalReflections", "growthEvidenceRecords", "assignmentPursuitWindows", "standingIntents", "discoveryPlans",
     "assignmentRuns", "publishingPlans", "playgroundSessions", "perceptions", "capabilityChangeEvents",
-    "socialStrategyRetrievalRuns", "knowledgeSegments", "knowledgeDocuments", "knowledgeVersions",
+    "socialStrategyRetrievalRuns", "knowledgeSegments", "knowledgeDocuments", "knowledgeVersions", "knowledgeCollections", "knowledgeItems", "presenceKnowledgeBindings", "mindFileKnowledgeBindings", "librarySources", "contentDrops", "bridgeSync", "assignmentContributions", "peopleNotes", "recommendationRecords", "introductionRecords", "relationshipStudies", "relationshipInsightSets", "explorations", "scenarioRuns", "scenarioEvaluations", "scenarioRunProvenance", "scenarioVersions", "scenarios", "channelDefinitions", "skills", "agentSkills", "modelProfiles", "providerConnections", "assetProviderConnections", "toolBindings", "changeSets", "operatorThreads", "operatorConversations", "operatorNudges", "agentRequests", "publicRequests", "delegationGrants", "presenceRequestPolicies", "relationshipPolicies", "watchSignals", "watches", "nativeConnections", "bridges", "bridgeSync", "sourceEvidence", "claimGrounding", "preferenceEvidence", "originalPostRehearsals", "librarySources", "assetCollections", "assetCollectionMemberships", "assetMetadataEdits", "assetProcessingJobs", "recoveryAttempts", "capabilityTrials", "attentionTests", "attentionEpisodes", "operationalRuns", "scheduledWakes", "operatorDirectives", "conversations", "messages", "presenceChatSessions", "knowledgeSegments", "knowledgeDocuments", "knowledgeVersions",
     "scenarioVersions", "conversations", "messages", "operatorNudges", "presenceChatSessions", "agentRequests",
     "calendar", "watches", "relationshipPolicies", "presenceRequestPolicies", "delegationGrants",
   ] as const) {
     (projection as unknown as Record<string, unknown>)[key] = [];
   }
 
-  return projection;
+  // Return the explicit Growth read model. Keeping the initial spread above
+  // makes the derivation easy to compare with the full workspace projection,
+  // but forwarding unknown collections here would let unrelated durable
+  // history silently regrow the browser payload.
+  return {
+    responseProjection: "growth",
+    onboarded: state.onboarded,
+    activeAgentId: state.activeAgentId,
+    activePresenceId: state.activePresenceId,
+    agent: state.agent,
+    presence: state.presence,
+    presences: projection.presences,
+    runtimeIdentity: state.runtimeIdentity,
+    metrics: state.metrics,
+    growthBrowserSummary: projection.growthBrowserSummary,
+    assets: [],
+    resourceUsageEvents: [],
+    attentionEpisodes: [],
+    socialIntents: [],
+    files: [],
+    assignments: projection.assignments,
+    audienceSnapshots: projection.audienceSnapshots,
+    executions: projection.executions,
+    growthReviews: projection.growthReviews,
+    mirrorObjects: projection.mirrorObjects,
+    nativeConnections: projection.nativeConnections,
+    outcomes: projection.outcomes,
+    people: projection.people,
+    personIdentities: projection.personIdentities,
+    publicationMetricSnapshots: projection.publicationMetricSnapshots,
+    recoveryIncidents: projection.recoveryIncidents,
+    relationships: projection.relationships,
+    socialDecisions: projection.socialDecisions,
+  } as OpenPresenceState;
 }
