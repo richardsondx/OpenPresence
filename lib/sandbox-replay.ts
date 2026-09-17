@@ -74,6 +74,7 @@ function learningItems(state: OpenPresenceState, key: string, presenceId: string
 function namespacedLearningRecord(value: unknown, key: string, sessionId: string, idMap: Map<string, string>): unknown {
   if (!value || typeof value !== "object") return value;
   const record = clone(value) as Record<string, unknown>;
+  if (record.sandboxSessionId === sessionId) return record;
   const originalId = typeof record.id === "string" ? record.id : undefined;
   if (originalId) {
     const nextId = `${originalId}:sandbox:${sessionId}`;
@@ -141,7 +142,9 @@ export function restoreSandboxWorld(source: OpenPresenceState, snapshot: Sandbox
     for (const key of learningKeys) for (const item of snapshot.learning[key]) {
       if (item && typeof item === "object" && typeof (item as { id?: unknown }).id === "string") {
         const originalId = (item as { id: string }).id;
-        idMap.set(originalId, `${originalId}:sandbox:${options.learningSessionId}`);
+        idMap.set(originalId, (item as { sandboxSessionId?: string }).sandboxSessionId === options.learningSessionId
+          ? originalId
+          : `${originalId}:sandbox:${options.learningSessionId}`);
       }
     }
     for (const key of learningKeys) {

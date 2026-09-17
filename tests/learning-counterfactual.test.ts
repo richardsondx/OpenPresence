@@ -161,6 +161,11 @@ describe("runtime learning boundary", () => {
     expect((state.growthHypotheses ?? []).filter((item) => (item as typeof item & { sandboxSessionId?: string }).sandboxSessionId === fork.id)).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience." })]));
     const restoredSource = restoreSandboxCheckpoint(state, source.id, checkpoint.id);
     expect(learningStateForPresence(restoredSource, presence, fork.id).hypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience." })]));
+    const forkCheckpointState = createSandboxCheckpoint(state, fork.id, "fork replay checkpoint");
+    const forkCheckpoint = forkCheckpointState.sandboxCheckpoints?.find((item) => item.sessionId === fork.id && item.label === "fork replay checkpoint")!;
+    const restoredFork = restoreSandboxCheckpoint(forkCheckpointState, fork.id, forkCheckpoint.id);
+    const forkHypothesisIds = restoredFork.growthHypotheses?.filter((item) => (item as typeof item & { sandboxSessionId?: string }).sandboxSessionId === fork.id).map((item) => item.id) ?? [];
+    expect(new Set(forkHypothesisIds).size).toBe(forkHypothesisIds.length);
     const worldA = structuredClone(state);
     const worldB = structuredClone(state);
     worldA.playgroundSessions = worldA.playgroundSessions.filter((item) => item.id === fork.id);

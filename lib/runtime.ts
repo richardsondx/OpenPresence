@@ -3610,7 +3610,8 @@ export function restoreSandboxCheckpoint(source: OpenPresenceState, sessionId: s
   if (!checkpoint) throw new Error(`Sandbox checkpoint ${checkpointId} was not found for session ${sessionId}.`);
   const snapshot = checkpoint.snapshot as SandboxWorldSnapshot;
   assertSandboxWorldSnapshot(snapshot);
-  return restoreSandboxWorld(source, snapshot, { restoreLearning: true });
+  const session = source.playgroundSessions.find((item) => item.id === sessionId);
+  return restoreSandboxWorld(source, snapshot, { restoreLearning: true, ...(session?.source === "replay" ? { learningSessionId: sessionId } : {}) });
 }
 
 /** Create an isolated branch from a full-world checkpoint. Existing durable
