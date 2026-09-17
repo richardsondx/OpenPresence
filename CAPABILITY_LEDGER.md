@@ -25,8 +25,12 @@ families remain open proof gaps.
 
 Release-candidate delta: immutable candidate `8645cda` passed the canonical
 composed seven-day trajectory, exact-candidate independent verifier (including
-cross-process replay and cross-rate checks), and broad release health. The
-resulting bundle is recorded in `qa-learnings/release-candidate-8645cda-2026-09-17.md`.
+cross-process replay and cross-rate checks), and broad release health. These
+gates were rerun against that same candidate after the checkpoint; the
+resulting bundle is recorded in
+`qa-learnings/release-candidate-8645cda-2026-09-17.md`. No additional capability
+is promoted: every remaining `PARTIAL` row still has an explicit behavioral
+gate missing from its contract.
 Statuses below remain PARTIAL wherever a declared behavioral contract still has
 an explicit missing gate; no row is promoted from a green test alone.
 
