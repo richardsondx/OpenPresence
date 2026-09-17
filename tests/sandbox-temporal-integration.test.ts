@@ -4,6 +4,7 @@ import {
   cloneState,
   createAgent,
   createSandboxCheckpoint,
+  cancelSandboxRetry,
   forkSandboxCheckpoint,
   resetPlaygroundSession,
   scheduleSandboxRetry,
@@ -68,6 +69,19 @@ describe("Playground temporal integration boundary", () => {
       expect.objectContaining({ kind: "retry_failed" }),
       expect.objectContaining({ kind: "retry_exhausted" }),
     ]));
+  });
+
+  it("fences a pending public retry before its first attempt", () => {
+    let state = startPlaygroundSession(fixtureState());
+    const session = state.playgroundSessions[0]!;
+    state = scheduleSandboxRetry(state, session.id, "integration:cancelled", 3, 5);
+    state = cancelSandboxRetry(state, session.id, "integration:cancelled");
+    const cancelled = state.playgroundSessions[0]!.temporalSnapshot!;
+    expect(cancelled.retries[0]).toMatchObject({ operationId: "integration:cancelled", status: "cancelled" });
+    expect(cancelled.events).toEqual(expect.arrayContaining([expect.objectContaining({ type: "retry", status: "cancelled" })]));
+    const advanced = advanceSandboxTimeWithTemporalEvents(state, session.id, 60);
+    expect(advanced.state.playgroundSessions[0]!.temporalSnapshot?.retries[0]).toMatchObject({ operationId: "integration:cancelled", status: "cancelled" });
+    expect(advanced.processed).toEqual([]);
   });
 
   it("round-trips a queued event and trajectory through the persisted session shape", () => {

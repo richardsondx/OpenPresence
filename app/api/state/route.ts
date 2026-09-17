@@ -21,6 +21,7 @@ import { defaultSelfDirectedAttentionPolicy } from "@/lib/runtime";
 import { setSandboxAcceleration, setSandboxPaused } from "@/lib/runtime";
 import { stageSandboxOutcome } from "@/lib/runtime";
 import { scheduleSandboxRetry } from "@/lib/runtime";
+import { cancelSandboxRetry } from "@/lib/runtime";
 import { createSandboxCheckpoint, forkSandboxCheckpoint, restoreSandboxCheckpoint } from "@/lib/runtime";
 import { SandboxTemporalKernel } from "@/lib/sandbox-temporal";
 import { assignmentPublicExpressionLeakageReason } from "@/lib/runtime";
@@ -5189,6 +5190,7 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("setSandboxPaused"), sessionId: z.string().min(1), paused: z.boolean() }),
   z.object({ type: z.literal("stageSandboxOutcome"), sessionId: z.string().min(1), causeEventId: z.string().min(1), visibleAfterMinutes: z.number().int().min(0).max(43200), value: z.unknown() }),
   z.object({ type: z.literal("scheduleSandboxRetry"), sessionId: z.string().min(1), operationId: z.string().trim().min(1).max(160), maxAttempts: z.number().int().min(1).max(20), initialDelayMinutes: z.number().int().min(0).max(43200) }),
+  z.object({ type: z.literal("cancelSandboxRetry"), sessionId: z.string().min(1), operationId: z.string().trim().min(1).max(160) }),
   z.object({ type: z.literal("createSandboxCheckpoint"), sessionId: z.string().min(1), label: z.string().trim().max(200).optional() }),
   z.object({ type: z.literal("restoreSandboxCheckpoint"), sessionId: z.string().min(1), checkpointId: z.string().min(1) }),
   z.object({ type: z.literal("forkSandboxCheckpoint"), sessionId: z.string().min(1), checkpointId: z.string().min(1) }),
@@ -5236,7 +5238,7 @@ function validateRequestLineage(state: OpenPresenceState, parsed: RuntimeOperati
   }
   // Presence chat sessions also use `sessionId`, but they are a separate
   // durable collection from Playground worlds and must not be conflated.
-  const usesPlaygroundSession = ["createAssignment", "startAssignment", "workAssignment", "planIntervention", "syncPlaygroundTime", "resetPlayground", "removeSandboxObject", "inspectSandboxMedia", "addSandboxEvent", "advanceSandboxTime", "setSandboxAcceleration", "setSandboxPaused", "stageSandboxOutcome", "scheduleSandboxRetry", "createSandboxCheckpoint", "restoreSandboxCheckpoint", "forkSandboxCheckpoint", "runSandboxPulse", "considerOriginalPublication", "recordPreferenceEvidence", "askPresenceToReply", "askPresenceToIgnore"].includes(parsed.type);
+  const usesPlaygroundSession = ["createAssignment", "startAssignment", "workAssignment", "planIntervention", "syncPlaygroundTime", "resetPlayground", "removeSandboxObject", "inspectSandboxMedia", "addSandboxEvent", "advanceSandboxTime", "setSandboxAcceleration", "setSandboxPaused", "stageSandboxOutcome", "scheduleSandboxRetry", "cancelSandboxRetry", "createSandboxCheckpoint", "restoreSandboxCheckpoint", "forkSandboxCheckpoint", "runSandboxPulse", "considerOriginalPublication", "recordPreferenceEvidence", "askPresenceToReply", "askPresenceToIgnore"].includes(parsed.type);
   const session = usesPlaygroundSession && candidate.sessionId ? state.playgroundSessions.find((item) => item.id === candidate.sessionId) : undefined;
   if (usesPlaygroundSession && candidate.sessionId && !session) throw new Error("That Playground session does not belong to the requested Agent workspace.");
   if (session && candidate.presenceId && session.presenceId !== candidate.presenceId) throw new Error("The Playground session and Presence do not share the same durable scope.");
@@ -6721,6 +6723,11 @@ export async function POST(request: Request) {
     }
     if (parsed.type === "scheduleSandboxRetry") {
       const next = scheduleSandboxRetry(current, parsed.sessionId, parsed.operationId, parsed.maxAttempts, parsed.initialDelayMinutes);
+      writeState(next);
+      return stateResponse(request, next);
+    }
+    if (parsed.type === "cancelSandboxRetry") {
+      const next = cancelSandboxRetry(current, parsed.sessionId, parsed.operationId);
       writeState(next);
       return stateResponse(request, next);
     }

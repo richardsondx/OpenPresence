@@ -27,6 +27,7 @@ Playground commands:
   resume      Resume Sandbox virtual-time processing
   stage-outcome  Stage hidden world truth for later virtual-time release
   retry        Schedule a deterministic retryable Sandbox transport failure
+  cancel-retry  Cancel a pending Sandbox retry and fence its queued attempts
   checkpoint  Persist a portable full-world Sandbox checkpoint
   restore     Restore a persisted Sandbox checkpoint by id
   fork        Fork a new isolated Playground session from a checkpoint
@@ -685,6 +686,12 @@ async function executePlayground(baseUrl, command, options, positionals) {
     const maxAttempts = parseInteger(options["max-attempts"] ?? positionals[0] ?? 2, "max-attempts");
     const initialDelayMinutes = parseInteger(options["initial-delay"] ?? positionals[1] ?? 1, "initial-delay");
     return projectState(await postOperation(baseUrl, { type: "scheduleSandboxRetry", sessionId: session.id, operationId, maxAttempts, initialDelayMinutes }), session.id, command);
+  }
+  if (command === "cancel-retry") {
+    const current = await getState(baseUrl);
+    const session = sessionForOperation(current, options);
+    const operationId = required(options, "operation");
+    return projectState(await postOperation(baseUrl, { type: "cancelSandboxRetry", sessionId: session.id, operationId }), session.id, command);
   }
   if (command === "checkpoint") {
     const current = await getState(baseUrl);

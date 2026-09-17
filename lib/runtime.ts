@@ -3577,6 +3577,20 @@ export function scheduleSandboxRetry(source: OpenPresenceState, sessionId: strin
   return state;
 }
 
+/** Cancel a still-pending public Sandbox retry and fence all of its queued
+ * descendants before they can become another attempt. */
+export function cancelSandboxRetry(source: OpenPresenceState, sessionId: string, operationId: string) {
+  const state = cloneState(source);
+  const session = sandboxSessionFor(state, sessionId);
+  const kernel = temporalKernelForSession(session);
+  if (!kernel.retries.some((retry) => retry.operationId === operationId)) throw new Error(`Sandbox retry operation ${operationId} was not found.`);
+  kernel.cancelRetry(operationId, "cancelled through public Sandbox control");
+  session.temporalSnapshot = kernel.snapshot();
+  session.virtualTimeMode = "manual";
+  session.updatedAt = now();
+  return state;
+}
+
 export function createSandboxCheckpoint(source: OpenPresenceState, sessionId: string, label?: string) {
   const state = cloneState(source);
   const snapshot = captureSandboxWorld(state, sessionId);
