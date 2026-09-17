@@ -126,6 +126,7 @@ import type {
   OpenPresenceState,
   OperatorConversationMessage,
   OperatorNudgeStatus,
+  LiveEvent,
   PublicHistoryItem,
   PublicDisclosurePosture,
   PublicSelf,
@@ -1809,7 +1810,7 @@ function AgentPortfolio({
   );
 }
 
-type InspectorPanel = "attention" | "settings";
+type InspectorPanel = "today" | "needs_you" | "settings";
 
 function ContextInspector({ panel, state, presence, onClose, onPanelChange, onNavigate }: {
   panel: InspectorPanel;
@@ -1830,11 +1831,37 @@ function ContextInspector({ panel, state, presence, onClose, onPanelChange, onNa
   const working = assignments.filter((task) => assignmentIsOpen(task) && (getAssignmentProcessingState(task, state.assignmentRuns).isProcessing || ["working", "awaiting_execution"].includes(task.status)));
   const approvals = state.executions.filter((execution) => execution.presenceId === presence.id && execution.status === "awaiting-review");
   const proposals = state.proposals.filter((proposal) => proposal.status === "pending");
+  const [selectedEvent, setSelectedEvent] = useState<LiveEvent | null>(null);
+  const todayKey = new Date().toLocaleDateString("en-CA");
+  const todayEvents = state.events
+    .filter((event) => event.presenceId === presence.id && new Date(event.time).toLocaleDateString("en-CA") === todayKey)
+    .sort((left, right) => right.time.localeCompare(left.time));
+  const eventDetails = selectedEvent
+    ? state.events
+      .filter((event) => {
+        if (event.id === selectedEvent.id) return true;
+        if (selectedEvent.runId && event.runId === selectedEvent.runId) return true;
+        if (selectedEvent.executionId && event.executionId === selectedEvent.executionId) return true;
+        if (selectedEvent.invocationId && event.invocationId === selectedEvent.invocationId) return true;
+        return false;
+      })
+      .sort((left, right) => left.time.localeCompare(right.time))
+    : [];
   const taskRow = (task: Assignment, label: string) => <button type="button" className="inspector-list-row" key={task.id} onClick={() => onNavigate("schedule", task.id)}><span className={`inspector-status-dot ${label === "Working" ? "is-live" : "is-warn"}`} /><span><strong>{task.title ?? task.instruction}</strong><small>{label}</small></span><ChevronRight size={16} /></button>;
-  return <aside ref={inspectorRef} className="workspace-context-inspector agent-activity-inspector" aria-label={`${panel === "settings" ? "About" : "Activity"} inspector`}>
+  return <>
+  <aside ref={inspectorRef} className="workspace-context-inspector agent-activity-inspector" aria-label={`${panel === "settings" ? "About" : panel === "needs_you" ? "Needs you" : "Today"} inspector`}>
     <div className="inspector-heading"><div className="inspector-identity"><PresenceGlyph accent={agent.accent} name={agent.name} avatarVariant={agent.avatarVariant} /><h2>{agent.name}</h2></div><button type="button" className="inspector-close" aria-label="Close inspector" onClick={onClose}><X size={20} /></button></div>
-    <nav className="inspector-view-nav" aria-label="Agent details"><button type="button" aria-pressed={panel === "attention"} onClick={() => onPanelChange("attention")}><Activity size={20} /> Activity</button><button type="button" aria-pressed={panel === "settings"} onClick={() => onPanelChange("settings")}><Settings2 size={20} /> About</button></nav>
-    {panel === "attention" ? <>
+    <nav className="inspector-view-nav" aria-label="Agent details">
+      <button type="button" aria-label="Today" title="Today" aria-pressed={panel === "today"} onClick={() => onPanelChange("today")}><Activity size={20} /></button>
+      <button type="button" aria-label="Needs you" title="Needs you" aria-pressed={panel === "needs_you"} onClick={() => onPanelChange("needs_you")}><ShieldCheck size={20} />{approvals.length + proposals.length + blocked.length > 0 && <b aria-label={`${approvals.length + proposals.length + blocked.length} items`}>{Math.min(9, approvals.length + proposals.length + blocked.length)}</b>}</button>
+      <button type="button" aria-label="About" title="About" aria-pressed={panel === "settings"} onClick={() => onPanelChange("settings")}><Settings2 size={20} /></button>
+    </nav>
+    {panel === "today" ? <>
+      <section className="inspector-section inspector-today-section"><div className="inspector-section-heading"><div><h3>Today</h3><p>What {agent.name} has done so far.</p></div><span className="inspector-count">{todayEvents.length}</span></div>
+        {todayEvents.length > 0 ? <div className="inspector-today-list">{todayEvents.slice(0, 12).map((event) => <button type="button" className="inspector-today-row" key={event.id} onClick={() => setSelectedEvent(event)}><span className={`inspector-event-icon inspector-event-icon-${event.type}`} aria-hidden="true">{event.type === "execution" ? <Globe2 size={16} /> : event.type === "decision" ? <Brain size={16} /> : event.type === "learning" ? <Sparkles size={16} /> : event.type === "memory" ? <BookOpen size={16} /> : <Terminal size={16} />}</span><span><strong>{event.title}</strong><small>{event.detail}</small><time dateTime={event.time}>{formatTime(event.time)}</time></span><ChevronRight size={15} /></button>)}</div> : <div className="inspector-quiet"><Activity size={24} /><h3>No work recorded yet</h3><p>When {agent.name} observes, decides, or acts, the receipt will appear here.</p></div>}
+      </section>
+      <div className="inspector-shortcuts"><button onClick={() => onNavigate("live")}><ArrowUpRight size={18} /> Open full activity <ChevronRight size={16} /></button></div>
+    </> : panel === "needs_you" ? <>
       {(approvals.length > 0 || proposals.length > 0 || blocked.length > 0) && <section className="inspector-section"><h3>Needs you</h3>
         {approvals.length > 0 && <button type="button" className="inspector-list-row" onClick={() => onNavigate("review")}><ShieldCheck size={20} /><span><strong>{approvals.length} public {approvals.length === 1 ? "action" : "actions"} to review</strong><small>Review the exact content before approving</small></span><ChevronRight size={16} /></button>}
         {proposals.length > 0 && <button type="button" className="inspector-list-row" onClick={() => onNavigate("brain")}><Brain size={20} /><span><strong>{proposals.length} proposed Agent {proposals.length === 1 ? "change" : "changes"}</strong><small>Review changes to identity and preferences</small></span></button>}
@@ -1848,7 +1875,24 @@ function ContextInspector({ panel, state, presence, onClose, onPanelChange, onNa
       <section className="inspector-section"><h3>{channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle}</h3><p>{presence.status === "paused" ? "Public activity is paused. Private Chat is available." : presence.environment === "sandbox" ? "Rehearsal account. Actions stay in the Sandbox." : "Social account for this Agent."}</p></section>
       <div className="inspector-shortcuts"><button onClick={() => onNavigate("brain")}><Settings2 size={18} /> Agent settings <ChevronRight size={16} /></button><button onClick={() => onNavigate("knowledge")}><BookOpen size={18} /> Knowledge <ChevronRight size={16} /></button><button onClick={() => onNavigate("rehearsal")}><FlaskConical size={18} /> Test agent <ChevronRight size={16} /></button><button onClick={() => onNavigate("usage")}><BarChart3 size={18} /> Usage <ChevronRight size={16} /></button></div>
     </>}
-  </aside>;
+  </aside>
+  {selectedEvent && <AgentActivityDetailDialog agentName={agent.name} event={selectedEvent} details={eventDetails} onClose={() => setSelectedEvent(null)} />}
+  </>;
+}
+
+function AgentActivityDetailDialog({ agentName, event, details, onClose }: { agentName: string; event: LiveEvent; details: LiveEvent[]; onClose: () => void }) {
+  useEffect(() => {
+    const onKeyDown = (keyEvent: KeyboardEvent) => { if (keyEvent.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+  return <div className="modal-backdrop agent-activity-detail-backdrop" role="presentation" onMouseDown={(mouseEvent) => { if (mouseEvent.target === mouseEvent.currentTarget) onClose(); }}>
+    <section className="agent-activity-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-activity-detail-title">
+      <header><div><span className="inspector-detail-status">Recorded activity</span><h2 id="agent-activity-detail-title">{event.title}</h2><p>{agentName} · {formatDateTime(event.time)}</p></div><button type="button" className="icon-button" aria-label="Close activity details" onClick={onClose}><X size={18} /></button></header>
+      <section className="agent-activity-detail-summary"><span className="inspector-event-icon inspector-event-icon-system"><Terminal size={16} /></span><div><strong>Summary</strong><p>{event.detail || "No additional summary was recorded."}</p></div></section>
+      <div className="agent-activity-detail-timeline" aria-label="Activity evidence"><strong>Evidence</strong>{details.map((item) => <div className="agent-activity-detail-row" key={item.id}><span className={`inspector-event-icon inspector-event-icon-${item.type}`} aria-hidden="true"><Circle size={8} /></span><div><strong>{item.title}</strong><p>{item.detail}</p><time dateTime={item.time}>{formatDateTime(item.time)}</time></div></div>)}</div>
+    </section>
+  </div>;
 }
 
 function AgentAvatarEditorDialog({
@@ -2473,9 +2517,9 @@ function AgentWorkspaceShell({
       <section className={`${view === "chat" || view === "teach" || view === "rehearsal" ? "workspace workspace-chat" : "workspace"} ${view === "knowledge" ? "workspace-knowledge" : ""} ${inspector ? "has-inspector" : ""}`}>
         <header className="topbar">
           <button type="button" className="mobile-agent-menu-button" aria-label="Switch agent or open settings" aria-expanded={agentMenuOpen} onClick={() => setAgentMenuOpen((open) => !open)}><PanelLeft size={21} /></button>
-          <button type="button" className="workspace-agent-heading" aria-label={`About ${agent.name}`} onClick={() => setInspector((current) => current ? null : "attention")}><PresenceGlyph accent={agent.accent} name={agent.name} avatarVariant={agent.avatarVariant} /><span><strong>{agent.name}</strong><small role={foregroundStatus ? "status" : undefined}>{foregroundStatus ?? `${presence.handle} · ${channelLabel(presence.channel, state.channelDefinitions)}`}</small>{(view !== "chat" || presence.environment === "sandbox" || presence.connectionMode !== "native") && <small className={`workspace-agent-environment workspace-agent-environment-${presence.environment}`}>{environmentLabel}</small>}</span></button>
+          <button type="button" className="workspace-agent-heading" aria-label={`About ${agent.name}`} onClick={() => setInspector((current) => current ? null : "today")}><PresenceGlyph accent={agent.accent} name={agent.name} avatarVariant={agent.avatarVariant} /><span><strong>{agent.name}</strong><small role={foregroundStatus ? "status" : undefined}>{foregroundStatus ?? `${presence.handle} · ${channelLabel(presence.channel, state.channelDefinitions)}`}</small>{(view !== "chat" || presence.environment === "sandbox" || presence.connectionMode !== "native") && <small className={`workspace-agent-environment workspace-agent-environment-${presence.environment}`}>{environmentLabel}</small>}</span></button>
           <div className="topbar-actions context-controls" aria-label="Workspace controls">
-            <button type="button" className="context-control context-sidebar-toggle" aria-label={inspector ? "Collapse context sidebar" : "Open context sidebar"} aria-pressed={Boolean(inspector)} title={inspector ? "Collapse context sidebar" : "Open context sidebar"} onClick={() => setInspector((current) => current ? null : "attention")}>{inspector ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}</button>
+            <button type="button" className="context-control context-sidebar-toggle" aria-label={inspector ? "Collapse context sidebar" : "Open context sidebar"} aria-pressed={Boolean(inspector)} title={inspector ? "Collapse context sidebar" : "Open context sidebar"} onClick={() => setInspector((current) => current ? null : "today")}>{inspector ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}</button>
           </div>
         </header>
         {navigation("mobile-navigation")}
