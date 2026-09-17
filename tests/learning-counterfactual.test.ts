@@ -11,6 +11,7 @@ import { createAgent, createSandboxCheckpoint, forkSandboxCheckpoint, initialSta
 import { compileSocialStrategyContext } from "../lib/social-strategy";
 import { learningAdjustmentForPattern } from "../lib/learning-runtime";
 import { captureLearningCheckpoint, learningStateForPresence } from "../lib/learning-runtime";
+import { captureSandboxWorld } from "../lib/sandbox-replay";
 
 afterEach(() => {
   writeState(initialState());
@@ -155,13 +156,26 @@ describe("runtime learning boundary", () => {
     const checkpoint = state.sandboxCheckpoints?.[0]!;
     state = forkSandboxCheckpoint(state, source.id, checkpoint.id);
     const fork = state.playgroundSessions.find((item) => item.id !== source.id && item.source === "replay")!;
-    const branchLearning = learningStateForPresence(state, presence);
-    const learningCheckpoint = captureLearningCheckpoint(state, presence, "2026-09-16T12:30:00.000Z").checkpoint;
+    const worldA = structuredClone(state);
+    const worldB = structuredClone(state);
+    worldA.playgroundSessions = worldA.playgroundSessions.filter((item) => item.id === fork.id);
+    worldB.playgroundSessions = worldB.playgroundSessions.filter((item) => item.id === fork.id);
+    worldB.growthHypotheses = [];
+    worldB.growthEvidenceRecords = [];
+    worldB.learningCheckpoints = [];
+    worldB.learningCounterfactuals = [];
+    const branchSnapshotA = captureSandboxWorld(worldA, fork.id);
+    const branchSnapshotB = captureSandboxWorld(worldB, fork.id);
+    const branchLearning = learningStateForPresence(worldA, presence);
+    const removedLearning = learningStateForPresence(worldB, presence);
+    const learningCheckpoint = captureLearningCheckpoint(worldA, presence, "2026-09-16T12:30:00.000Z").checkpoint;
     const situation: LearningDecisionSituation = { id: `paired:${fork.id}`, scope: presence.id, candidates: [{ id: "reply", action: "reply", baseScore: 1, strategyId }, { id: "repost", action: "repost", baseScore: 2, strategyId: "social.x.v1.selective-amplification" }] };
-    const replay = projectLearningCounterfactual({ checkpoint: learningCheckpoint, situation, altered: { label: "World B without retained learning", hypotheses: [], evidence: [] } });
+    const replay = projectLearningCounterfactual({ checkpoint: learningCheckpoint, situation, altered: { label: "World B without retained learning", hypotheses: removedLearning.hypotheses, evidence: removedLearning.evidence } });
 
     expect(fork).toBeDefined();
+    expect(branchSnapshotB).toEqual(branchSnapshotA);
     expect(branchLearning.hypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ id: hypothesisId })]));
+    expect(removedLearning).toEqual({ hypotheses: [], evidence: [] });
     expect(replay.learningClaim.status).toBe("demonstrated");
     expect(replay.projections.present.decision.action).toBe("reply");
     expect(replay.projections.removed.decision.action).toBe("repost");
