@@ -415,3 +415,28 @@ Final audit question:
 
 > What important behavior do we currently assume works without having actually
 > proven it?
+
+## Current candidate reassessment — `c02d7c2` — 2026-09-17
+
+The focused Slice A closure passed independently on the current candidate:
+the verifier-owned native external-side-effect oracle observed one request and
+one receipt after in-flight authority revocation, and the public causal
+verifier resolved typed permission and retry-backoff cancellation edges. The
+source change and hard pass/fail oracle are recorded in
+`qa-learnings/release-candidate-c02d7c2-2026-09-17.md`.
+
+The existing Slice B ablations passed 4 files / 38 tests, the clean Slice C
+responsive run passed 8/8 across desktop/mobile, all three composed public
+trajectories passed, and exact-candidate release health passed (typecheck,
+lint with 0 errors / 157 existing warnings, production build, and 132 files /
+1,236 tests). The contaminated responsive fixture and missing-release-fixture
+setup failures remain preserved.
+
+No `PARTIAL` row is promoted from this checkpoint. LEARN-002/003/004 still
+lack independent public ablation evidence; SIM-001 lacks an exact-candidate
+independent migration ablation; SBX-008 still lacks one independently
+reconstructed complete composed causal cone; and the remaining AUT/EVAL/UX
+rows retain their named independent adversarial gates. SBX-004's focused native
+oracle is closed, but its declared canonical composed native retry-backoff
+race gate remains explicit. Replay-specific hardening remains closed absent a
+new material defect.
