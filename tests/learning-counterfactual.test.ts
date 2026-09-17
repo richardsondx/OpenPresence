@@ -251,6 +251,16 @@ describe("runtime learning boundary", () => {
     expect(learningAdjustmentForPattern(state, presence, "social.x.v1.proof-led-original")).toBe(0);
   });
 
+  it("does not retrieve a supported hypothesis after all of its evidence ages out", () => {
+    const state = createAgent({ name: "Stale retrieval", description: "Keep old strategy evidence out of current decisions.", audience: "AI builders", mode: "agent", handle: "@stale_retrieval", accent: "#7c3aed" });
+    const presence = state.presence!;
+    state.growthEvidenceRecords = [{ id: "old-evidence", agentId: state.agent!.id, presenceId: presence.id, kind: "WORLD_OUTCOME", claimScope: "presence", statement: "Old verified outcome", sourceRefs: [], verified: true, causalDecisionIds: ["old-decision"], createdAt: "2024-01-01T00:00:00.000Z" }];
+    state.growthHypotheses = [{ id: "stale-hypothesis", agentId: state.agent!.id, originatingPresenceId: presence.id, scope: "presence", statement: "Proof-led originals help AI builders", status: "supported", confidence: "high", patternIds: ["social.x.v1.proof-led-original"], supportingEvidenceIds: ["old-evidence"], contradictingEvidenceIds: [], derivedFrom: [], reviewHistory: [], createdAt: "2024-01-01T00:00:00.000Z", updatedAt: "2024-01-01T00:00:00.000Z" }];
+    const context = compileSocialStrategyContext(state, presence, { invocation: "stale strategy check", objective: "proof-led originals for AI builders", availableActions: ["post"] });
+    expect(context.retrievalRun.relevantGrowthHypothesisIds).not.toContain("stale-hypothesis");
+    expect(state.growthHypotheses[0]?.status).toBe("supported");
+  });
+
   it("applies Agent-scoped learning across Presences owned by that Agent", () => {
     const state = createAgent({ name: "Shared learning", description: "Teach builders useful agent ideas.", audience: "AI builders", mode: "agent", handle: "@shared_learning", accent: "#7c3aed" });
     const first = state.presence!;

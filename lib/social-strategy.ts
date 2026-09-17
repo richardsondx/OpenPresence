@@ -399,6 +399,12 @@ function strategyPerformanceContext(state: OpenPresenceState, presenceId: string
 
 const knownPatternIds = new Set(patterns.map((pattern) => pattern.id));
 const confidenceRank: Record<SocialDecisionConfidence, number> = { low: 0, medium: 1, high: 2 };
+const LEARNING_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
+
+function evidenceIsCurrent(record: GrowthEvidenceRecord, nowMs = Date.now()) {
+  const observedAt = Date.parse(record.createdAt);
+  return Number.isFinite(observedAt) && nowMs - observedAt <= LEARNING_MAX_AGE_MS;
+}
 
 function attributedWorldOutcome(state: OpenPresenceState, record: GrowthEvidenceRecord, hypothesis: GrowthHypothesis) {
   if (record.kind !== "WORLD_OUTCOME" || !record.verified || !record.causalDecisionIds?.length || !hypothesis.decisionTargets?.length) return false;
@@ -562,6 +568,19 @@ function relevantHypotheses(state: OpenPresenceState, presence: Presence, object
   return (state.growthHypotheses ?? [])
     .filter((hypothesis) => hypothesis.status !== "retired" && hypothesis.status !== "disfavored")
     .filter((hypothesis) => !sandboxSessionId || (hypothesis as GrowthHypothesis & { sandboxSessionId?: string }).sandboxSessionId === sandboxSessionId)
+    // A historical hypothesis remains durable evidence, but it must not keep
+    // steering current cognition once every linked outcome has aged out.
+    .filter((hypothesis) => {
+      const evidenceIds = [...hypothesis.supportingEvidenceIds, ...hypothesis.contradictingEvidenceIds];
+      if (!evidenceIds.length) return true;
+      const records = new Map((state.growthEvidenceRecords ?? []).map((record) => [record.id, record]));
+      const linkedRecords = evidenceIds.map((evidenceId) => records.get(evidenceId)).filter((record): record is GrowthEvidenceRecord => Boolean(record));
+      // Older hypotheses may point directly at metric snapshots rather than
+      // GrowthEvidenceRecords. Preserve that legacy retrieval behavior until
+      // the evidence is migrated; only suppress when we can inspect a wholly
+      // stale linked evidence set.
+      return !linkedRecords.length || linkedRecords.some((record) => evidenceIsCurrent(record));
+    })
     .filter((hypothesis) => hypothesis.scope === "agent"
       || (hypothesis.scope === "channel" && hypothesis.channelId === presence.channel)
       || (hypothesis.scope === "presence" && hypothesis.originatingPresenceId === presence.id))
