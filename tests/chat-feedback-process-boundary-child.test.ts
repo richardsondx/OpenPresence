@@ -6,6 +6,7 @@ import { applyOperation, createAgent, recordOperatorPreference } from "../lib/ru
 
 test(`Chat feedback process phase ${process.env.CHAT_FEEDBACK_PHASE ?? "unknown"}`, async () => {
   const phase = process.env.CHAT_FEEDBACK_PHASE;
+  if (!phase) return;
   if (phase === "A") {
     let state = createAgent({ name: "Process Boundary Agent", description: "Prove durable supervisory feedback", audience: "builders", mode: "agent", handle: "@process_boundary_agent", accent: "#aa7744" });
     state = applyOperation(state, { type: "setPresence", patch: { environment: "sandbox", connectionMode: "sandbox" } });
