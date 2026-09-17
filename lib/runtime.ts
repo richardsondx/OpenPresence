@@ -4319,7 +4319,11 @@ function deduplicateMirrorObjects(mirrors: MirrorObject[]) {
   const canonicalOrder: string[] = [];
   for (const object of mirrors) {
     if (object.environment === "sandbox") {
-      const key = `sandbox:${object.id}`;
+      // Sandbox branches intentionally retain the source object's semantic
+      // identity, but their records still need to coexist in one workspace.
+      // Keying only by object id lets normalization erase the source row when
+      // a fork carries the same deterministic id.
+      const key = `sandbox:${object.sessionId ?? "unscoped"}:${object.id}`;
       canonicalByKey.set(key, object);
       canonicalOrder.push(key);
       continue;

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { captureSandboxWorld, restoreSandboxWorld, sandboxWorldDigest } from "../lib/sandbox-replay";
 import { SandboxTemporalKernel } from "../lib/sandbox-temporal";
-import { addSandboxEvent, applyOperation, createAgent, startPlaygroundSession } from "../lib/runtime";
+import { addSandboxEvent, applyOperation, createAgent, normalizeState, startPlaygroundSession } from "../lib/runtime";
 
 describe("Workstream A deterministic replay contract", () => {
   it("does not expose delayed truth before its causal event", () => {
@@ -113,5 +113,16 @@ describe("Workstream A deterministic replay contract", () => {
     expect(firstObject.author!.externalRef!.id).not.toBe(secondObject.author!.externalRef!.id);
     expect(state.assignments.filter((item) => item.sessionId === firstSession.id)).toHaveLength(1);
     expect(state.assignments.filter((item) => item.sessionId === secondSession.id)).toHaveLength(1);
+  });
+
+  it("keeps identical deterministic mirror ids isolated across a fork", () => {
+    const source = startPlaygroundSession(createAgent({ name: "Fork Agent", description: "Fork proofs", audience: "builders", mode: "agent", handle: "@fork_agent_2", accent: "#4477aa" }), undefined, "fresh", "same-seed-fork");
+    const sourceSession = source.playgroundSessions[0]!;
+    const forked = { ...source, mirrorObjects: [
+      { id: "mirror_same", sessionId: sourceSession.id, environment: "sandbox", externalRef: { type: "x.reply", id: "object_same" }, content: { text: "source" } },
+      { id: "mirror_same", sessionId: "session_fork", environment: "sandbox", externalRef: { type: "x.reply", id: "object_same" }, content: { text: "fork" } },
+    ] } as typeof source;
+    const normalized = normalizeState(forked);
+    expect(normalized.mirrorObjects.filter((item) => item.id === "mirror_same")).toHaveLength(2);
   });
 });
