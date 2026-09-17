@@ -78,6 +78,37 @@ test("an explicit ownership request becomes a recurring Agent-owned goal", async
   await expect(page.getByText("Sandbox · no public delivery", { exact: true })).toBeVisible();
 });
 
+test("Calendar intervention updates Agent-owned work and survives reload", async ({ page, request }) => {
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Jenny");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+
+  const requestText = "Own an ongoing daily responsibility to find and publish useful agent-building insights without asking me to create tasks.";
+  await page.getByLabel("Message Jenny").fill(requestText);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText("Assignment queued", { exact: true })).toBeVisible();
+  const state = await request.get("/api/state").then((response) => response.json());
+  const assignment = state.assignments.find((item: { instruction?: string; createdBy?: string; status?: string }) => item.instruction?.includes(requestText) && item.createdBy === "agent" && item.status === "active");
+  expect(assignment?.id).toBeTruthy();
+
+  await page.getByRole("button", { name: "Tasks", exact: true }).click();
+  await page.getByRole("region", { name: "Goals" }).getByRole("button", { name: /Open goal/i }).click();
+  await expect(page.getByLabel("Tell Jenny something about this")).toBeVisible();
+  await page.getByLabel("Tell Jenny something about this").fill("Focus this on developers and never use generic motivational visuals.");
+  await page.getByRole("button", { name: "Send guidance", exact: true }).click();
+  await expect.poll(async () => {
+    const next = await request.get("/api/state").then((response) => response.json());
+    return next.assignments.find((item: { id?: string }) => item.id === assignment.id)?.instruction ?? "";
+  }).toContain("generic motivational visuals");
+
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Goals" })).toContainText("Agent-owned goal");
+  await page.getByRole("region", { name: "Goals" }).getByRole("button", { name: /Open goal/i }).click();
+  await page.getByText("Instructions and constraints", { exact: true }).click();
+  await expect(page.getByText("generic motivational visuals", { exact: false })).toBeVisible();
+  await expect(page.getByLabel("Tell Jenny something about this")).toHaveValue("");
+});
+
 test("Context sidebar owns its view controls and the workspace theme toggles", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");

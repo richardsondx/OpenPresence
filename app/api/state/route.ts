@@ -5879,6 +5879,23 @@ export async function POST(request: Request) {
       return stateResponse(request, next);
     }
     if (parsed.type === "sendPresenceNudge") {
+      // Guidance sent from a planned-item inspector is already scoped to an
+      // existing Agent-owned responsibility. Treat it as a plan intervention
+      // instead of routing it through general Chat cognition, so the user's
+      // feedback changes durable work immediately and does not become a
+      // disconnected conversational receipt.
+      if (parsed.assignmentId) {
+        const assignment = current.assignments.find((item) => item.id === parsed.assignmentId && item.presenceId === parsed.presenceId);
+        if (!assignment) throw new Error("That planned item is no longer available in this Presence.");
+        const note = parsed.content.trim();
+        const lowered = note.toLocaleLowerCase();
+        const action = /\b(cancel|remove|don't do|do not do)\b/.test(lowered) ? "cancel" : /\b(pause|hold)\b/.test(lowered) ? "pause" : "constrain";
+        let next = recordOperatorConversationMessage(current, { presenceId: parsed.presenceId, threadId: parsed.threadId, content: note, assignmentId: assignment.id, clientRequestId: parsed.clientRequestId });
+        next = applyOperation(next, { type: "planIntervention", assignmentId: assignment.id, action, note, ...(action === "constrain" ? { instruction: note } : {}) });
+        next = recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, threadId: parsed.threadId, role: "presence", content: action === "cancel" ? "Got it. I closed that responsibility and will keep the rest of the plan coherent." : action === "pause" ? "Got it. I paused that responsibility; I’ll keep it available until you want it resumed." : "Got it. I updated the responsibility with that guidance and will carry it into the next step." });
+        writeState(next);
+        return stateResponse(request, next);
+      }
       const conversationPresence = current.presences.find((item) => item.id === parsed.presenceId) ?? current.presence;
       const existingOperatorMessage = parsed.clientRequestId
         ? current.operatorConversations?.find((item) => item.presenceId === parsed.presenceId && (!parsed.threadId || item.threadId === parsed.threadId || item.id === parsed.threadId || (!item.threadId && `thread:${item.id}` === parsed.threadId)))?.messages.find((item) => item.role === "operator" && item.clientRequestId === parsed.clientRequestId)
