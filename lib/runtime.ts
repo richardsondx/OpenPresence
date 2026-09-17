@@ -7819,6 +7819,7 @@ export function completeNativeExecution(source: OpenPresenceState, executionId: 
     }
   }
   execution.status = "succeeded";
+  execution.retryAt = undefined;
   execution.attempts += 1;
   execution.externalRef = externalRef;
   execution.executedAt = now();
@@ -7887,6 +7888,7 @@ export function recordVerifiedXReply(source: OpenPresenceState, executionId: str
 
   const verifiedAt = now();
   execution.status = "succeeded";
+  execution.retryAt = undefined;
   execution.externalRef = externalRef;
   execution.attempts += 1;
   execution.executedAt = execution.executedAt ?? verifiedAt;
@@ -8001,6 +8003,15 @@ export function failNativeExecution(source: OpenPresenceState, executionId: stri
   if (action) action.outcomeId = outcome.id;
   state.events.unshift(event("execution", "X delivery failed", `${message} No external artifact was counted.`, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
   return state;
+}
+
+/** Native retries are durable worker work, not an immediate operator-triggered write. */
+export function nativeRetryBackoffMs(execution: Execution) {
+  return Math.min(15 * 60_000, 30_000 * (2 ** Math.min(execution.attempts, 4)));
+}
+
+export function nativeRetryIsDue(execution: Execution, at = Date.now()) {
+  return !execution.retryAt || new Date(execution.retryAt).getTime() <= at;
 }
 
 function executionMatchesCapability(execution: Execution, presence: Presence, capability: string) {
@@ -8253,6 +8264,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     for (const execution of state.executions.filter((item) => item.capabilityTrialId === trial.id || (trial.assignmentId && item.assignmentId === trial.assignmentId))) {
       if (stopStatuses.includes(execution.status)) {
         execution.status = "cancelled";
+        execution.retryAt = undefined;
         execution.lease = undefined;
         execution.updatedAt = trial.updatedAt;
         const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
@@ -9216,6 +9228,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       const action = state.actions.find((item) => item.executionId === execution.id);
       if (cancellable.includes(execution.status)) {
         execution.status = "cancelled";
+        execution.retryAt = undefined;
         execution.lease = undefined;
         execution.updatedAt = now();
         if (intent && intent.state === "active") { intent.state = "withdrawn"; intent.updatedAt = execution.updatedAt; }
@@ -9667,6 +9680,9 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       const nextStatus = execution.mode === "auto" ? (execution.connector ? "queued" : "awaiting-connector") : execution.mode === "review" ? "awaiting-review" : "awaiting-manual";
       execution.status = nextStatus;
       execution.failure = undefined;
+      execution.retryAt = execution.connector === "native" && execution.mode === "auto"
+        ? new Date(Date.now() + nativeRetryBackoffMs(execution)).toISOString()
+        : undefined;
       execution.reviewReason = undefined;
       execution.lease = undefined;
       execution.executedAt = undefined;
@@ -9686,7 +9702,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       execution.updatedAt = now();
       const action = state.actions.find((item) => item.executionId === execution.id);
       if (action) action.status = nextStatus === "queued" ? "queued" : nextStatus === "awaiting-review" ? "review" : "skipped";
-      state.events.unshift(event("execution", "Retry requested", "The operator asked OpenPresence to retry this same social action. No new Social Intent was created.", "positive", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
+      state.events.unshift(event("execution", "Retry requested", execution.retryAt ? `The same social action is queued for a durable retry after backoff (${execution.retryAt}). No connector write will occur before then.` : "The operator asked OpenPresence to retry this same social action. No new Social Intent was created.", "positive", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
       return state;
     }
     case "executeIntent": { const intent = state.socialIntents.find((item) => item.id === operation.id); if (!intent) return state; const execution = state.executions.find((item) => item.socialIntentId === intent.id); if (!execution || intent.state !== "active") return state; if (["awaiting-review", "awaiting-manual", "awaiting-connector", "claimed", "executing", "succeeded"].includes(execution.status)) { if (execution.status === "approved" && execution.bridgeId) execution.status = "queued"; else return state; } if (intent.validity.expiresAt && new Date(intent.validity.expiresAt).getTime() <= Date.now()) { intent.state = "expired"; execution.status = "expired"; execution.updatedAt = now(); state.events.unshift(event("decision", "Intent expired", "The social moment passed before execution.", "quiet", { intentId: intent.id, executionId: execution.id })); return state; } if (execution.environment === "live" && execution.connector === "native") { execution.status = "blocked"; execution.failure = { code: "PUBLICATION_SECURITY_REQUIRED", message: "Live native execution must cross the sealed Public Expression writer boundary.", retryable: false }; execution.reviewReason = "Use the isolated native writer; direct application completion is forbidden."; execution.updatedAt = now(); state.events.unshift(event("execution", "Live execution blocked", "The runtime refused to complete a live native action outside the sealed Public Expression writer.", "warning", { intentId: intent.id, executionId: execution.id })); return state; } if (execution.bridgeId) { execution.status = "queued"; execution.updatedAt = now(); state.events.unshift(event("execution", "Queued for Bridge", "The execution is ready for an external executor.", "positive", { intentId: intent.id, executionId: execution.id })); return state; } execution.status = "succeeded"; execution.attempts += 1; execution.updatedAt = now(); execution.executedAt = now(); const outcome = { id: id("outcome"), socialIntentId: intent.id, executionId: execution.id, presenceId: intent.presenceId, status: "succeeded" as const, observedAt: now(), metrics: {} }; state.outcomes.unshift(outcome); state.events.unshift(event("execution", "Execution completed", "The simulated channel accepted the action.", "positive", { intentId: intent.id, executionId: execution.id, outcomeId: outcome.id })); return state; }

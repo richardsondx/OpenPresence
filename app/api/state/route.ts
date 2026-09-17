@@ -17,6 +17,7 @@ import { validateScenarioFidelity } from "@/lib/scenarios";
 import { addSandboxEvent, advanceSandboxTimeWithTemporalEvents, applyOperation, approveSandboxIntroduction, assertRuntimeScope, assignmentIsSatisfied, beginOriginalPostRehearsal, cleanSandboxDraft, compileAgendaWork, completeOriginalPostRehearsal, confirmAutoMode, createRuntimeScope, declineSandboxIntroduction, deleteScenario, deliverSandboxExecution, derivePresenceCapabilityManifest, derivePublishingProgress, derivePublicHistory, deriveSelfDirectedDiscoveryPlan, duePublishingPlanWindows, ensureCapabilityRequests, expireSandboxIntents, finishExplorationSession, finishPulse, formAssignmentPostIntent, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, formXDeleteIntent, formXActionIntent, createScenarioFromPrompt, generateMissingScenarioEvents, identityLeakageReason, importScenarioDefinition, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, markCalendarSlotEvaluated, markInboundJudged, markScenarioStimulus, nativeDeliveryFailureIsConnectionScoped, openAgentRequest, publicSelfGuidance, publishingInitiativeGuidance, recordAttentionTestDecision, recordImportedXMirror, recordNativeMirror, recordNativeMirrorDeletion, recordPreferenceEvidence, recordPublishingPlanFailure, recordPublishingPlanWork, recordResourceUsageEvent, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, recordScenarioEvaluation, recordScenarioReview, renameScenario, replacePublishingPlan, resetPlaygroundSession, settleCapabilityTrialNoOpportunity, startAttentionTest, failAttentionTest, startExplorationSession, startScenarioRunState, completeScenarioRunState, stopScenarioRunState, stateForContext, structuralScenarioEvaluation, startPlaygroundSession, syncPlaygroundTime, syncPublishingInitiativeAssignment, targetIsBlockedByPerson, targetLanguageValidationForAction, unblockNativeExecutions, updateScenarioEvents, updateScenarioRequirements, recordVerifiedXReply, externalUrlForMirror } from "@/lib/runtime";
 import { recordSocialDecision, nativeConnectionCanObserve, recordNativeObservation, resumePresenceAfterNativeRecovery } from "@/lib/runtime";
 import { xQuoteTargetHasAvailableRoute } from "@/lib/runtime";
+import { nativeRetryIsDue } from "@/lib/runtime";
 import { defaultSelfDirectedAttentionPolicy } from "@/lib/runtime";
 import { setSandboxAcceleration, setSandboxPaused } from "@/lib/runtime";
 import { stageSandboxOutcome } from "@/lib/runtime";
@@ -2676,7 +2677,7 @@ function scheduleNextExecutionCheck(source: OpenPresenceState, presenceId: strin
 
 function nextNativeQueuedExecution(source: OpenPresenceState, presenceId: string) {
   return source.executions
-    .filter((item) => item.presenceId === presenceId && item.environment !== "sandbox" && item.connector === "native" && item.status === "queued" && item.mode === "auto")
+    .filter((item) => item.presenceId === presenceId && item.environment !== "sandbox" && item.connector === "native" && item.status === "queued" && item.mode === "auto" && nativeRetryIsDue(item))
     .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())[0];
 }
 

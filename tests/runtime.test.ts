@@ -1295,6 +1295,24 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.events[0]?.title).toBe("Retry requested");
   });
 
+  it("keeps a native retry behind durable backoff and cancellation fences it", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state = formChatPostIntent(state, "A retry that must wait before another connector attempt.");
+    const execution = state.executions[0]!;
+    state = failNativeExecution(state, execution.id, "Temporary connector failure.");
+    state = applyOperation(state, { type: "retryExecution", id: execution.id });
+
+    const queued = state.executions.find((item) => item.id === execution.id)!;
+    expect(queued.status).toBe("queued");
+    expect(queued.retryAt).toEqual(expect.any(String));
+    expect(new Date(queued.retryAt!).getTime()).toBeGreaterThan(Date.now());
+
+    state = applyOperation(state, { type: "cancelExecution", id: execution.id });
+    expect(state.executions.find((item) => item.id === execution.id)).toMatchObject({ status: "cancelled", retryAt: undefined });
+  });
+
   it("keeps operator wake state when native delivery is blocked by X billing", () => {
     let state = createAgent(input);
     state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];

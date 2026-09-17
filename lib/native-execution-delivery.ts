@@ -19,6 +19,7 @@ import {
   targetLanguageValidationForExecution,
   isWatchPausedForExecution,
   browserBridgeFor,
+  nativeRetryIsDue,
 } from "./runtime";
 import { deleteXPost, followXUser, likeXPost, publishSealedXPost, readNativeXCredentials, repostXPost } from "./x";
 import { isTestRuntime } from "./test-runtime";
@@ -90,7 +91,7 @@ function recordMidFlightAuthorityChange(source: OpenPresenceState, execution: Op
  */
 export async function deliverNativeExecutions(source: OpenPresenceState, executionIds: Set<string>) {
   let next = source;
-  for (const execution of next.executions.filter((item) => executionIds.has(item.id) && item.environment === "live" && item.connector === "native" && ((item.status === "queued" && item.mode === "auto") || item.status === "approved"))) {
+  for (const execution of next.executions.filter((item) => executionIds.has(item.id) && item.environment === "live" && item.connector === "native" && nativeRetryIsDue(item) && ((item.status === "queued" && item.mode === "auto") || item.status === "approved"))) {
     // A long provider/model pass can outlive its original snapshot. Re-read
     // the durable target ledger immediately before crossing the external write
     // boundary so a restarted worker cannot replay an action already verified
