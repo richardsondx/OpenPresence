@@ -479,9 +479,15 @@ three-slice certification (3/3), independent replay/cross-rate/safety verifier
 typecheck, lint with 0 errors / 157 warnings, production build, broad Vitest
 (132 files / 1,238 tests), and diff checks.
 
-No PARTIAL row is promoted. Public learning now has a real action surface, but
-the independent trajectory still has no later allocation difference caused by
-learned state; LEARN-002/003/004 retain their public ablation gate. Exact
+No PARTIAL row is promoted. Public learning now has a real action surface.
+An independent public transfer run on this exact candidate also passed: session
+`session_g1lsh4xl` produced two independent measured decisions, and a later
+benchmark-like decision reported `learningClaim.status=demonstrated`,
+`presentVsRemoved.decisionsDiffer=true`, and `scoreDelta=0.28125`. The artifact
+is `/tmp/openpresence-candidate-9df4085/data/public-learning-transfer.db`.
+This satisfies the independent public later-allocation/transfer sub-gate for
+LEARN-002, but does not promote it; the full LEARN-002/003/004 ablation gates
+remain open. Exact
 candidate legacy migration and the named autonomy/interruption/complete-causal
 cone independent reviews also remain open. Evidence is recorded in
 `qa-learnings/release-candidate-9df4085-2026-09-17.md`.
