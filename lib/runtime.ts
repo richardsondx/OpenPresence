@@ -4083,6 +4083,7 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
       causalDecisionIds: [causalDecision.id],
       causalMirrorObjectIds: [object.id],
       sandboxSessionId: session.id,
+      mediaProfile: { mode: object.assetRefs?.length ? "media" : "text_only", fit: "unknown", relationship: "unknown" },
       createdAt: outcome.observedAt,
     };
     state.growthEvidenceRecords = [learningEvidence, ...(state.growthEvidenceRecords ?? [])].slice(0, 500);

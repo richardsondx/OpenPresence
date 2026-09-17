@@ -969,6 +969,17 @@ export interface GrowthEvidenceRecord {
   causalMirrorObjectIds?: string[];
   /** Replay-only scope; absent for normal Presence-global learning. */
   sandboxSessionId?: string;
+  /** Normalized media/text-only features observed with the outcome. */
+  mediaProfile?: MediaEvidenceProfile;
+}
+
+export interface MediaEvidenceProfile {
+  mode: "media" | "text_only";
+  semanticKind?: AssetSemanticKind;
+  visualRole?: VisualRole;
+  decorative?: boolean;
+  fit: "relevant" | "irrelevant" | "unknown";
+  relationship: "proof" | "context" | "decorative" | "unknown";
 }
 
 export interface GrowthHypothesis {
@@ -991,6 +1002,8 @@ export interface GrowthHypothesis {
   updatedAt: string;
   /** Replay-only scope; absent for normal Presence-global learning. */
   sandboxSessionId?: string;
+  /** Media features retained with the hypothesis for later visual decisions. */
+  mediaProfiles?: MediaEvidenceProfile[];
   /** Optional reusable structure attached to the same evidence lifecycle. */
   template?: SocialTemplate;
 }

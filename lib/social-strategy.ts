@@ -2,6 +2,7 @@ import type {
   ChannelDefinition,
   GrowthEvidenceRecord,
   GrowthHypothesis,
+  MediaEvidenceProfile,
   LegacyChannelStrategyGuidance,
   OpenPresenceState,
   Presence,
@@ -416,6 +417,21 @@ function attributedWorldOutcome(state: OpenPresenceState, record: GrowthEvidence
   });
 }
 
+/** Reduce observed Asset/Perception metadata to a safe, durable learning feature. */
+function mediaProfileForMirror(state: OpenPresenceState, mirror: OpenPresenceState["mirrorObjects"][number] | undefined): MediaEvidenceProfile {
+  const assetRef = mirror?.assetRefs?.[0];
+  if (!assetRef) return { mode: "text_only", fit: "unknown", relationship: "unknown" };
+  const asset = state.assets.find((item) => item.id === assetRef.assetId);
+  const perception = [...(state.perceptions ?? [])]
+    .filter((item) => item.assetId === assetRef.assetId && (!item.socialObjectId || item.socialObjectId === mirror?.id))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]?.result;
+  const visualRole = perception?.visualRole;
+  const decorative = perception?.decorative;
+  const fit = decorative || visualRole === "atmosphere" ? "irrelevant" : visualRole ? "relevant" : "unknown";
+  const relationship = decorative || visualRole === "atmosphere" ? "decorative" : visualRole === "evidence" ? "proof" : visualRole === "context" || visualRole === "subject" ? "context" : "unknown";
+  return { mode: "media", semanticKind: perception?.visualForm ?? asset?.semanticKind, visualRole, decorative, fit, relationship };
+}
+
 /**
  * Materialize typed evidence from observations already present in the runtime.
  * This deliberately does not infer causality: world outcomes are observations,
@@ -470,6 +486,7 @@ export function ensureGrowthEvidenceRecords(state: OpenPresenceState, presenceId
       sourceRefs: [{ kind: "publication_metric", id: metric.id, sourcePresenceId: presenceId, observedAt: metric.observedAt }],
       verified: true,
       createdAt: metric.observedAt || createdAt,
+      mediaProfile: mediaProfileForMirror(state, metricMirror),
       ...(metricDecision ? { causalDecisionIds: [metricDecision.id], causalMirrorObjectIds: [metric.mirrorObjectId] } : {}),
       ...(metricMirror?.environment === "sandbox" && metricMirror.sessionId ? { sandboxSessionId: metricMirror.sessionId } : {}),
     });
@@ -761,7 +778,7 @@ export function compileSocialStrategyContext(state: OpenPresenceState, presence:
   const skillText = skills.length ? skills.flatMap((skill) => (skill.strategyContributions ?? []).map((contribution) => `- ${skill.id}/${contribution.id}: ${contribution.guidance}`)).join("\n") : "- No specialized strategy Skill applies.";
   const visualText = visualAssetContext(state, presence.id);
   const preferenceText = durablePreferenceContext(state, presence);
-  const growthText = `${hypotheses.length ? hypotheses.map((hypothesis) => `- ${hypothesis.id} · ${hypothesis.scope} · ${hypothesis.status} · ${hypothesis.statement}`).join("\n") : "- No applicable structured Growth hypothesis."}\n\n${preferenceText}`;
+  const growthText = `${hypotheses.length ? hypotheses.map((hypothesis) => `- ${hypothesis.id} · ${hypothesis.scope} · ${hypothesis.status} · ${hypothesis.statement}${hypothesis.mediaProfiles?.length ? ` · media evidence: ${hypothesis.mediaProfiles.map((profile) => `${profile.mode}/${profile.fit}/${profile.relationship}${profile.semanticKind ? `/${profile.semanticKind}` : ""}`).join(", ")}` : ""}`).join("\n") : "- No applicable structured Growth hypothesis."}\n\n${preferenceText}`;
   const growthProfile = deriveGrowthProfile(state, presence.id);
   const growthProfileText = growthProfile ? `GROWTH PROFILE (derived from the selected Presence brief, active Growth plan, reusable formats, and typed evidence):\n- audience: ${growthProfile.audience}\n- primary territory: ${growthProfile.primaryTerritory.join(", ") || "not specified"}\n- adjacent territory: ${growthProfile.adjacentTerritory.join(", ") || "not specified"}\n- qualified outcome: ${growthProfile.qualifiedOutcome}\n- relationship focus: ${growthProfile.relationshipFocus.join(", ") || "not specified"}\n- active approach: ${growthProfile.activeApproach.join("; ")}\n- reusable formats: ${growthProfile.reusableFormats.join(", ") || "none saved yet"}\n- media approach: ${growthProfile.mediaApproach}\n- exclusions: ${growthProfile.exclusions.join("; ")}\n- evidence confidence: ${growthProfile.confidence}` : "No derived Growth profile is available; keep audience claims conservative.";
   const recentText = Object.entries(recent).filter(([, count]) => count > 0).map(([mechanism, count]) => `${mechanism} ${count} of last ${Math.max(1, Object.values(recent).reduce((sum, value) => sum + value, 0))}`).join(", ") || "no selected strategy shape recorded";
@@ -829,11 +846,16 @@ export function materializeSandboxOutcomeLearning(source: OpenPresenceState, pre
     if (!pattern) continue;
     const evidenceIds = [...decisionIds].flatMap((decisionId) => (evidenceByDecision.get(decisionId) ?? []).map((record) => record.id));
     if (evidenceIds.length < 2) continue;
+    const mediaProfiles = [...new Map(evidenceIds
+      .map((evidenceId) => state.growthEvidenceRecords?.find((record) => record.id === evidenceId)?.mediaProfile)
+      .filter((profile): profile is MediaEvidenceProfile => Boolean(profile))
+      .map((profile) => [JSON.stringify(profile), profile] as const)).values()];
     const id = `sandbox-learning:${sessionId}:${patternId}`;
     const existing = (state.growthHypotheses ?? []).find((hypothesis) => hypothesis.id === id);
     if (existing) {
       if (["retired", "disfavored"].includes(existing.status)) continue;
       existing.supportingEvidenceIds = [...new Set([...existing.supportingEvidenceIds, ...evidenceIds])];
+      existing.mediaProfiles = [...new Map([...(existing.mediaProfiles ?? []), ...mediaProfiles].map((profile) => [JSON.stringify(profile), profile] as const)).values()];
       existing.updatedAt = observedAt;
       continue;
     }
@@ -856,6 +878,7 @@ export function materializeSandboxOutcomeLearning(source: OpenPresenceState, pre
       createdAt: observedAt,
       updatedAt: observedAt,
       sandboxSessionId: sessionId,
+      ...(mediaProfiles.length ? { mediaProfiles } : {}),
     }, ...(state.growthHypotheses ?? [])].slice(0, 500);
   }
   return state;
