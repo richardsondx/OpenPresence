@@ -54,6 +54,15 @@ describe("importance-thresholded Agent-initiated communication", () => {
     expect(messages[0]!.content).not.toContain("Social Mirror");
   });
 
+  it("does not interrupt Chat again when a degraded X observation is retried", () => {
+    const source = createAgent({ name: "Genny", description: "Build useful things", audience: "builders", mode: "agent", handle: "genny", accent: "#000000" });
+    const presenceId = source.presence!.id;
+    const first = recordRuntimeEvent(source, presenceId, "X activity partly available", "I can still see your recent public posts, but mentions aren't available right now.", "warning", { communicationDedupeKey: "native-x-observation:partial" });
+    const second = recordRuntimeEvent(first, presenceId, "X activity partly available", "I can still see your recent public posts, but mentions aren't available right now.", "warning", { communicationDedupeKey: "native-x-observation:partial" });
+    const messages = second.operatorConversations?.flatMap((conversation) => conversation.messages) ?? [];
+    expect(messages.filter((message) => message.agentInitiated?.dedupeKey === "native-x-observation:partial")).toHaveLength(1);
+  });
+
   it.each([
     ["breakthrough", { kind: "breakthrough" as const, title: "A real breakthrough", detail: "A repeated conversation pattern finally became clear." }],
     ["problem", { kind: "problem" as const, title: "A responsibility is blocked", detail: "The channel needs an operator decision." }],

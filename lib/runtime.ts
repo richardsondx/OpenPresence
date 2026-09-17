@@ -1863,7 +1863,7 @@ export function derivePublicHistory(source: OpenPresenceState, presenceId?: stri
   });
 }
 
-export function recordRuntimeEvent(source: OpenPresenceState, presenceId: string, title: string, detail: string, tone: LiveEvent["tone"] = "neutral", lineage?: Pick<LiveEvent, "intentId" | "executionId" | "outcomeId" | "decisionId" | "sessionId" | "invocationId" | "runId" | "sourceObjectId" | "attentionEpisodeId">) {
+export function recordRuntimeEvent(source: OpenPresenceState, presenceId: string, title: string, detail: string, tone: LiveEvent["tone"] = "neutral", lineage?: Pick<LiveEvent, "intentId" | "executionId" | "outcomeId" | "decisionId" | "sessionId" | "invocationId" | "runId" | "sourceObjectId" | "attentionEpisodeId"> & { communicationDedupeKey?: string }) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const runtimeEvent = event("system", title, detail, tone, { presenceId, ...lineage });
   state.events.unshift(runtimeEvent);
@@ -1895,6 +1895,7 @@ export function recordRuntimeEvent(source: OpenPresenceState, presenceId: string
     tone,
     importance: title === "Social plan formed" ? "routine" : undefined,
     operatorActionRequired: tone === "warning",
+    dedupeKey: lineage?.communicationDedupeKey,
   });
   return communication.recorded ? communication.state : state;
 }
