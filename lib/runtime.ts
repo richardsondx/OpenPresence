@@ -3637,10 +3637,25 @@ export function forkSandboxCheckpoint(source: OpenPresenceState, sessionId: stri
   const original = checkpoint.snapshot as SandboxWorldSnapshot;
   assertSandboxWorldSnapshot(original);
   const forkedSessionId = id("session");
+  const forkedAssignments = new Map(
+    (original.collections.assignments ?? []).flatMap((value) => {
+      if (!value || typeof value !== "object" || typeof (value as { id?: unknown }).id !== "string") return [];
+      const originalId = (value as { id: string }).id;
+      return [[originalId, `${originalId}:sandbox:${forkedSessionId}`] as const];
+    }),
+  );
   const forked: SandboxWorldSnapshot = {
     ...structuredClone(original),
     session: { ...structuredClone(original.session), id: forkedSessionId, source: "replay", status: "active", updatedAt: now() },
-    collections: Object.fromEntries(Object.entries(original.collections).map(([key, values]) => [key, values.map((value) => value && typeof value === "object" ? { ...(value as Record<string, unknown>), sessionId: forkedSessionId, sandboxSessionId: forkedSessionId } : value)])),
+    collections: Object.fromEntries(Object.entries(original.collections).map(([key, values]) => [key, values.map((value) => {
+      if (!value || typeof value !== "object") return value;
+      const record: Record<string, unknown> = { ...(value as Record<string, unknown>), sessionId: forkedSessionId, sandboxSessionId: forkedSessionId };
+      if (key === "assignments" && typeof record.id === "string") record.id = forkedAssignments.get(record.id) ?? record.id;
+      for (const field of ["assignmentId", "parentAssignmentId"] as const) {
+        if (typeof record[field] === "string") record[field] = forkedAssignments.get(record[field]) ?? record[field];
+      }
+      return record;
+    })])),
   };
   forked.digest = sandboxWorldDigest(forked);
   return restoreSandboxWorld(source, forked, { restoreLearning: true, learningSessionId: forkedSessionId, namespaceUnscopedLearning: true });
