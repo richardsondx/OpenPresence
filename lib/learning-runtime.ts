@@ -120,18 +120,21 @@ export function captureLearningCheckpoint(state: OpenPresenceState, presence: Pr
   return { checkpoint, record };
 }
 
-function situationForStrategyRun(run: SocialStrategyRetrievalRun, presence: Presence, situationId: string): LearningDecisionSituation {
+function situationForStrategyRun(run: SocialStrategyRetrievalRun, presence: Presence, situationId: string, availableActions: string[] = ["original_post"]): LearningDecisionSituation {
+  const actions = [...new Set(availableActions.filter(Boolean))];
   const candidates = run.consideredPatterns.length
-    ? run.consideredPatterns.map((pattern) => ({ id: pattern.id, action: "original_post", baseScore: 0, strategyId: pattern.id, format: pattern.supportedFormats[0] }))
+    ? run.consideredPatterns.flatMap((pattern) => actions
+      .filter((action) => action === "original_post" || pattern.supportedActs.includes(action))
+      .map((action) => ({ id: action === "original_post" ? pattern.id : `${action}:${pattern.id}`, action, baseScore: 0, strategyId: pattern.id, format: pattern.supportedFormats[0] })))
     : [{ id: "no-strategy", action: "no_op", baseScore: 0 }];
   return { id: situationId, scope: presence.id, candidates };
 }
 
 /** Persist a checkpoint/fork comparison alongside the real Social Decision that created it. */
-export function recordLearningCounterfactualInPlace(state: OpenPresenceState, presence: Presence, run: SocialStrategyRetrievalRun, capturedAt: string, sourceReviewId?: string, sandboxSessionId?: string) {
+export function recordLearningCounterfactualInPlace(state: OpenPresenceState, presence: Presence, run: SocialStrategyRetrievalRun, capturedAt: string, sourceReviewId?: string, sandboxSessionId?: string, availableActions?: string[]) {
   if (!state.agent) return undefined;
   const { checkpoint, record: checkpointRecord } = captureLearningCheckpoint(state, presence, capturedAt, sourceReviewId, sandboxSessionId);
-  const situation = situationForStrategyRun(run, presence, `strategy-situation:${run.id}`);
+  const situation = situationForStrategyRun(run, presence, `strategy-situation:${run.id}`, availableActions);
   const unchangedDecisionExplanation = "The present and removed projections selected the same next act, so this checkpoint does not claim that learning changed the decision.";
   const result = projectLearningCounterfactual({ checkpoint, situation, altered: { label: "all-learning-disfavored", hypotheses: checkpoint.hypotheses.map((hypothesis) => ({ ...hypothesis, status: "disfavored" as const })), evidence: checkpoint.evidence }, unchangedDecisionExplanation });
   const counterfactual: LearningCounterfactualRecord = { id: `learning-counterfactual:${run.id}`, agentId: state.agent.id, presenceId: presence.id, checkpointId: checkpoint.id, situationId: situation.id, result, createdAt: capturedAt, ...(sandboxSessionId ? { sandboxSessionId } : {}) };

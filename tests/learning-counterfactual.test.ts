@@ -141,6 +141,23 @@ describe("pure learning counterfactual", () => {
 });
 
 describe("runtime learning boundary", () => {
+  it("keeps the real multi-action decision surface in the persisted counterfactual", () => {
+    let state = startPlaygroundSession(createAgent({ name: "Action-faithful learning", description: "Preserve action choices in learning evidence.", audience: "AI builders", mode: "agent", handle: "@action_faithful", accent: "#7c3aed" }));
+    const presence = state.presence!;
+    const session = state.playgroundSessions[0]!;
+    state = recordSocialDecision(state, {
+      presenceId: presence.id,
+      sessionId: session.id,
+      decision: "quote",
+      acts: [{ decision: "repost" }, { decision: "follow" }],
+      summary: "Choose among several justified actions for this research post.",
+      origin: { kind: "publishing_initiative" },
+    });
+    const candidates = state.learningCounterfactuals?.[0]?.result.projections.present.rankedCandidates ?? [];
+    expect(candidates.map((candidate) => candidate.action)).toEqual(expect.arrayContaining(["quote", "repost", "follow"]));
+    expect(candidates.every((candidate) => candidate.action !== "original_post")).toBe(true);
+  });
+
   it("replays a persisted Sandbox checkpoint with learning retained versus removed", () => {
     let state = startPlaygroundSession(createAgent({ name: "Sandbox learning replay", description: "A paired-world learning fixture.", audience: "AI builders", mode: "agent", handle: "@sandbox_learning_replay", accent: "#7c3aed" }));
     const source = state.playgroundSessions[0]!;

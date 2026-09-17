@@ -811,7 +811,7 @@ function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInp
   const strategyRun = sandboxSessionId
     ? compileSocialStrategyContext(state, presence, { invocation: input.origin?.kind ?? "social_decision", objective: input.summary ?? input.decision, availableActions: input.acts?.map((act) => act.decision) ?? [input.decision], strategyTemplateId: assignmentTemplateId, sandboxSessionId }).retrievalRun
     : input.socialStrategy?.retrievalRun ?? compileSocialStrategyContext(state, presence, { invocation: input.origin?.kind ?? "social_decision", objective: input.summary ?? input.decision, availableActions: input.acts?.map((act) => act.decision) ?? [input.decision], strategyTemplateId: assignmentTemplateId }).retrievalRun;
-  const learningCounterfactual = recordLearningCounterfactualInPlace(state, presence, strategyRun, now(), undefined, sandboxSessionId);
+  const learningCounterfactual = recordLearningCounterfactualInPlace(state, presence, strategyRun, now(), undefined, sandboxSessionId, [input.decision, ...(input.acts?.map((act) => act.decision) ?? [])]);
   if (learningCounterfactual) strategyRun.learningCounterfactual = {
     checkpointId: learningCounterfactual.checkpoint.id,
     checkpointHash: learningCounterfactual.checkpoint.hash,
