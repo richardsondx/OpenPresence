@@ -706,3 +706,19 @@ LEARN-002, LEARN-003, LEARN-004, AUT-001, EVAL-004, EVAL-005, and UX-004 remain
 PARTIAL. The next gate is a positive, independently reconstructed
 retained-versus-removed counterfactual on a supported artifact; do not promote
 from the disfavored run.
+
+## 2026-09-17 autonomous learning canary delta — positive-signal attempt
+
+The public scenario was rerun with an explicit Sandbox audience observation of
+12 followers (+7 over the preserved baseline), in addition to two measured
+source-backed variations. The model Growth Review still left the extracted
+template `testing`: it recognized the follower increase and high surface reach,
+but no verified qualified conversation or author response was present.
+
+Evidence: `/tmp/openpresence-learning-canary-real-1789685862-positive-signal.json`
+and `/tmp/openpresence-learning-canary-real-1789685862-positive-signal.db`.
+Projected counterfactuals were present but unchanged (`decisionsDiffer=false`,
+`scoresDiffer=false`), so no transfer claim was made. This is protected
+negative evidence; LEARN-002/003/004 and dependent capabilities remain
+PARTIAL pending a supported artifact and independent retained-vs-removed
+transfer.

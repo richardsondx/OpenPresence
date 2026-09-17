@@ -271,6 +271,12 @@ async function runScenario(scenarioPath, presenceId) {
       const mirrorId = resolveValue(options.object, previous);
       const updated = await postOperation({ type: "recordPublicationMetricSnapshot", presenceId: sessionFor(state, sessionId).presenceId, mirrorObjectId: mirrorId, publicationAgeSeconds: Number(options.publicationAgeSeconds ?? 3600), metrics: options.metrics ?? { impressions: 100, likes: 10, replies: 4, reposts: 2, quotes: 1 }, source: "sandbox", observationStatus: "observed" });
       result = projectedState(updated, sessionId, "metric");
+    } else if (step.command === "audience") {
+      if (!sessionId) throw new Error(`Scenario step ${index + 1} records audience data before a session starts.`);
+      const current = await getState();
+      const session = sessionFor(current, sessionId);
+      const updated = await postOperation({ type: "recordAudienceSnapshot", presenceId: session.presenceId, followers: Number(options.followers), following: options.following === undefined ? undefined : Number(options.following), source: "sandbox", observationStatus: "observed", observedAt: session.virtualNow });
+      result = projectedState(updated, sessionId, "audience");
     } else if (step.command === "review") {
       if (!sessionId) throw new Error(`Scenario step ${index + 1} reviews before a session starts.`);
       const current = await getState();
