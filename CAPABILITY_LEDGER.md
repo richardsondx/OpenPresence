@@ -468,3 +468,20 @@ No PARTIAL row is promoted. Remaining exact gates are recorded in
 release health, public learning transfer/retirement/media ablations, exact
 candidate legacy migration, and independent composed/adversarial review for
 the affected rows.
+
+## Current candidate reassessment — `9df4085` — 2026-09-17
+
+The runtime now carries the actual allowed action surface into Sandbox learning
+counterfactuals, closing the prior selected-act-only implementation defect.
+The exact candidate passed its focused regression (65 tests), composed public
+three-slice certification (3/3), independent replay/cross-rate/safety verifier
+(9 files / 92 tests), independent causal trace (1/1), and release health:
+typecheck, lint with 0 errors / 157 warnings, production build, broad Vitest
+(132 files / 1,238 tests), and diff checks.
+
+No PARTIAL row is promoted. Public learning now has a real action surface, but
+the independent trajectory still has no later allocation difference caused by
+learned state; LEARN-002/003/004 retain their public ablation gate. Exact
+candidate legacy migration and the named autonomy/interruption/complete-causal
+cone independent reviews also remain open. Evidence is recorded in
+`qa-learnings/release-candidate-9df4085-2026-09-17.md`.
