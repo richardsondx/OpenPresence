@@ -2475,7 +2475,13 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
   const sameAgentWrite = stateCache?.state.activeAgentId === normalized.activeAgentId
     && stateCache?.state.agent?.id === normalized.agent?.id;
   stateCache = sameAgentWrite ? { updatedAt: appStateUpdatedAt, state: normalized } : undefined;
-  if (syncNormalized) scheduleNormalizedSync(normalized);
+  if (syncNormalized) {
+    // Explicit maintenance/certification writes must be durable across an
+    // immediate process restart; scheduling here leaves a window where a
+    // cold reader can rehydrate the previous normalized Sandbox projection.
+    normalizedSyncPending = normalized;
+    flushNormalizedSync();
+  }
 }
 
 function hashBridgeKey(key: string) { return crypto.createHash("sha256").update(key).digest("hex"); }
