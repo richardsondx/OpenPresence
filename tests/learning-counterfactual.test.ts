@@ -318,6 +318,22 @@ describe("runtime learning boundary", () => {
     expect(candidates.every((candidate) => candidate.action !== "original_post")).toBe(true);
   });
 
+  it("uses the actual allowed action surface when the selected act is singular", () => {
+    let state = startPlaygroundSession(createAgent({ name: "Allowed action surface", description: "Keep public learning ablations honest.", audience: "AI builders", mode: "agent", handle: "@allowed_action_surface", accent: "#7c3aed" }));
+    const presence = state.presence!;
+    const session = state.playgroundSessions[0]!;
+    state = recordSocialDecision(state, {
+      presenceId: presence.id,
+      sessionId: session.id,
+      decision: "repost",
+      summary: "Evaluate this high-signal architecture post.",
+      counterfactualActions: ["repost", "quote", "follow"],
+      origin: { kind: "self_directed_discovery", refId: session.id },
+    });
+    const candidates = state.learningCounterfactuals?.[0]?.result.projections.present.rankedCandidates ?? [];
+    expect(candidates.map((candidate) => candidate.action)).toEqual(expect.arrayContaining(["repost", "quote", "follow"]));
+  });
+
   it("replays a persisted Sandbox checkpoint with learning retained versus removed", () => {
     let state = startPlaygroundSession(createAgent({ name: "Sandbox learning replay", description: "A paired-world learning fixture.", audience: "AI builders", mode: "agent", handle: "@sandbox_learning_replay", accent: "#7c3aed" }));
     const source = state.playgroundSessions[0]!;
