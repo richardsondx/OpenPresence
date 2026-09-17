@@ -15,21 +15,19 @@ test.beforeEach(async ({ request }) => {
   expect(response.ok()).toBeTruthy();
 });
 
-test("Calendar Week mode visualizes dated Assignment timing", async ({ page }) => {
+test("Calendar Week mode visualizes dated Agent-owned Assignment timing", async ({ page, request }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
   await expect(page).toHaveURL(/chat/);
   await page.goto("/schedule");
-  await page.getByRole("button", { name: "Week", exact: true }).click();
-  await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
-  await page.getByLabel("What should Jenny accomplish?").fill("Teach one useful idea about persistent agents.");
-  await page.getByLabel("Assignment date").fill(torontoDate());
-  await page.getByRole("textbox", { name: "Time" }).fill("08:00");
-  await expect(page.getByText("One time only", { exact: true })).toBeVisible();
+  const base = await request.get("/api/state").then(response => response.json());
+  const created = await request.post("/api/state", { data: { type: "createAssignment", presenceId: base.presence.id, environment: "sandbox", createdBy: "agent", origin: "publishing_initiative", title: "Teach one useful idea", instruction: "Teach one useful idea about persistent agents.", schedule: { date: torontoDate(), day: torontoWeekday(), time: "08:00", executionWindow: "08:00–11:00" } } });
+  expect(created.ok()).toBeTruthy();
+  await page.goto("/schedule");
+  await page.getByRole("button", { name: "Calendar", exact: true }).click();
   await expect(page.getByText("Objective", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Flexible", { exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "Create assignment", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Week", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Calendar", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("region", { name: "Weekly schedule" })).toBeVisible();
   await expect(page.getByText("When Jenny can notice and act")).toBeVisible();
   const assignmentCard = page.getByRole("button", { name: /Open one-time Assignment Teach one useful idea.*at 08:00/ });
@@ -87,7 +85,7 @@ test("Calendar Week marks the current occurrence of a weekly Assignment as proce
 
   await page.reload();
   await page.goto("/schedule");
-  await page.getByRole("button", { name: "Week", exact: true }).click();
+  await page.getByRole("button", { name: "Calendar", exact: true }).click();
   const cards = page.locator(".compact-calendar-item-assignment").filter({ hasText: instruction });
   await expect(cards).toHaveCount(1);
   await expect(page.locator(".compact-calendar-item-assignment.is-processing").filter({ hasText: instruction })).toHaveCount(1);
@@ -129,7 +127,7 @@ test("Calendar keeps a verified weekly outcome visible as Done today", async ({ 
 
   await page.reload();
   await page.goto("/schedule");
-  await page.getByRole("button", { name: "Week", exact: true }).click();
+  await page.getByRole("button", { name: "Calendar", exact: true }).click();
   const card = page.locator(".compact-calendar-item-assignment").filter({ hasText: instruction }).first();
   await expect(card).toBeVisible();
   await expect(card).toHaveClass(/is-completed-today/);
@@ -147,7 +145,7 @@ test("Calendar does not render unscheduled on-demand work as a scheduled window"
   expect(created.ok()).toBeTruthy();
 
   await page.goto("/schedule");
-  await page.getByRole("button", { name: "Week", exact: true }).click();
+  await page.getByRole("button", { name: "Calendar", exact: true }).click();
   await expect(page.getByRole("region", { name: "Flexible assignment windows" })).toHaveCount(0);
   await expect(page.getByText(instruction, { exact: true })).toHaveCount(0);
 });

@@ -28,9 +28,9 @@ test("Feed is verified history and Calendar remains a view over it", async ({ pa
   await expect(page.getByText("No public activity on this day.", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Schedule", exact: true }).first().click();
-  await expect(page.getByRole("heading", { name: "Schedule", exact: true })).toBeVisible();
-  await expect(page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true })).toBeVisible();
-  await expect(page.getByText("what to accomplish", { exact: false })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
+  await expect(page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Back to Chat", exact: true })).toBeVisible();
 });
 
 test("Feed explains why a Sandbox expression has no live X destination", async ({ page }) => {

@@ -1838,7 +1838,7 @@ function ContextInspector({ panel, state, presence, onClose, onPanelChange, onNa
       {(approvals.length > 0 || proposals.length > 0 || blocked.length > 0) && <section className="inspector-section"><h3>Needs you</h3>
         {approvals.length > 0 && <button type="button" className="inspector-list-row" onClick={() => onNavigate("review")}><ShieldCheck size={20} /><span><strong>{approvals.length} public {approvals.length === 1 ? "action" : "actions"} to review</strong><small>Review the exact content before approving</small></span><ChevronRight size={16} /></button>}
         {proposals.length > 0 && <button type="button" className="inspector-list-row" onClick={() => onNavigate("brain")}><Brain size={20} /><span><strong>{proposals.length} proposed Agent {proposals.length === 1 ? "change" : "changes"}</strong><small>Review changes to identity and preferences</small></span></button>}
-        {blocked.slice(0, 4).map((task) => taskRow(task, task.status === "needs_operator" ? "Needs your input" : task.status === "expired_incomplete" ? "Attempt ended · choose a new time" : task.status === "failed" ? "Couldn’t finish · retry" : "Blocked · retry"))}
+        {blocked.slice(0, 4).map((task) => taskRow(task, task.status === "needs_operator" ? "Needs your input" : task.status === "expired_incomplete" ? "Attempt ended · tell Jenny if timing should change" : task.status === "failed" ? "Couldn’t finish · retry" : "Blocked · retry"))}
         {blocked.length > 4 && <button className="inspector-link-button" onClick={() => onNavigate("schedule")}>See all {blocked.length} tasks</button>}
       </section>}
       {working.length > 0 && <section className="inspector-section"><h3>Working now</h3>{working.slice(0, 3).map((task) => taskRow(task, "Working"))}</section>}
@@ -13895,7 +13895,7 @@ function ScheduleView({
               <small>
                 {selectedAssignment.status === "needs_operator"
                   ? "Fix the account or connector in Settings, then return here and retry the attempt. Any partial activity remains recorded; only verified outcomes count toward completion."
-                  : selectedAssignment.status === "expired_incomplete" ? "To try again, retry with a new start and finish time. Your previous results stay recorded." : selectedAssignment.status === "failed" ? "This attempt is terminal. Edit the task if you want to change its instructions or timeframe before starting a fresh attempt." : "Review the issue before retrying. Previous results stay recorded."}
+                  : selectedAssignment.status === "expired_incomplete" ? "Tell Jenny if this needs a new start and finish time. Your previous results stay recorded." : selectedAssignment.status === "failed" ? "This attempt is terminal. Tell Jenny what should change before starting a fresh attempt; previous results stay recorded." : "Review the issue before retrying. Previous results stay recorded."}
               </small>
             </section>
           )}
@@ -14024,7 +14024,7 @@ function ScheduleList({
           <div className="schedule-timezone" aria-label={`Schedule timezone: ${timezone}`}>Timezone · {timezone}</div>
         </div>
     </div>
-    {!hasItems ? <EmptyState title={dayFilter !== "all" ? `No responsibilities on ${selectedDayLabel}` : recurrenceFilter !== "all" ? `No ${recurrenceFilter} responsibilities` : "No tasks yet"} body={dayFilter !== "all" ? "Try another day or show all scheduled responsibilities." : recurrenceFilter !== "all" ? "Try another assignment type or show all scheduled responsibilities." : "Jenny will add work here when Chat or her autonomous plan calls for it."} action={dayFilter !== "all" ? <Button onClick={() => onDayFilterChange("all")} variant="secondary">Show all days</Button> : recurrenceFilter !== "all" ? <Button onClick={() => onRecurrenceFilterChange("all")} variant="secondary">Show all types</Button> : undefined} /> : <>
+      {!hasItems ? <EmptyState title={dayFilter !== "all" ? `No responsibilities on ${selectedDayLabel}` : recurrenceFilter !== "all" ? `No ${recurrenceFilter} responsibilities` : "No tasks yet"} body={dayFilter !== "all" ? "Try another day or show all scheduled responsibilities." : recurrenceFilter !== "all" ? "Try another assignment type or show all scheduled responsibilities." : "Jenny will add work here when Chat or her autonomous plan calls for it."} action={dayFilter !== "all" ? <Button onClick={() => onDayFilterChange("all")} variant="secondary">Show all days</Button> : recurrenceFilter !== "all" ? <Button onClick={() => onRecurrenceFilterChange("all")} variant="secondary">Show all types</Button> : undefined} /> : <>
       <div className="schedule-list-rows">
       {currentAssignments.map(renderAssignment)}
     </div></>}
@@ -14142,7 +14142,7 @@ function WeekCalendar({
   };
   return (
     <section className={compact ? "week-calendar week-calendar-compact-mode" : "week-calendar"} aria-label={`Weekly schedule showing ${calendarLabel || "no layers"}`}>
-      {unscheduledAssignments.length > 0 && <section className="calendar-flexible-tasks" aria-label="Tasks without a fixed start time"><h2>No fixed start time</h2><p>These tasks are still tracked here. Open one to see its deadline and progress.</p>{unscheduledAssignments.map(task => <button type="button" className="schedule-list-row" key={task.id} onClick={() => onAssignment(task)}><span><strong>{task.title ?? cleanUserFacingAssignmentInstruction(task.instruction)}</strong><small>{task.timeframe?.deadline ? `Due ${new Date(task.timeframe.deadline).toLocaleString()}` : "On demand"} · {task.status === "expired_incomplete" ? "Ended incomplete · choose a new time" : task.status === "failed" ? "Attempt failed · retry" : task.status.replaceAll("_", " ")}</small></span><ChevronRight size={16} /></button>)}</section>}
+      {unscheduledAssignments.length > 0 && <section className="calendar-flexible-tasks" aria-label="Tasks without a fixed start time"><h2>No fixed start time</h2><p>These tasks are still tracked here. Open one to see its deadline and progress.</p>{unscheduledAssignments.map(task => <button type="button" className="schedule-list-row" key={task.id} onClick={() => onAssignment(task)}><span><strong>{task.title ?? cleanUserFacingAssignmentInstruction(task.instruction)}</strong><small>{task.timeframe?.deadline ? `Due ${new Date(task.timeframe.deadline).toLocaleString()}` : "On demand"} · {task.status === "expired_incomplete" ? "Ended incomplete · tell Jenny if timing should change" : task.status === "failed" ? "Attempt failed · retry" : task.status.replaceAll("_", " ")}</small></span><ChevronRight size={16} /></button>)}</section>}
       <div className="week-calendar-toolbar">
         <div>
           <SectionEyebrow>This week</SectionEyebrow>

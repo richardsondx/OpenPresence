@@ -23,7 +23,7 @@ test("a Chat-style task without a calendar start survives projection, reload, an
   await expect(page.getByRole("region", { name: "Tasks without a fixed start time" }).getByRole("button").filter({ hasText: instruction })).toBeVisible();
 });
 
-test("a bounded task keeps its summary and window when edited", async ({ page, request }) => {
+test("a bounded task keeps its summary and window without a field editor", async ({ page, request }) => {
   expect((await request.post("/api/state", { data: { type: "reset" } })).ok()).toBeTruthy();
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Genny");
@@ -36,25 +36,22 @@ test("a bounded task keeps its summary and window when edited", async ({ page, r
   const saved = await response.json();
   const task = saved.assignments.find((item: { title: string }) => item.title === "Quote up to 3 useful posts");
   await page.goto(`/schedule?agentId=${state.agent.id}&presenceId=${state.presence.id}&assignmentId=${task.id}`);
-  await page.getByRole("button", { name: "Edit Assignment", exact: true }).click();
-  await expect(page.getByLabel("Task summary", { exact: true })).toHaveValue("Quote up to 3 useful posts");
-  await expect(page.getByLabel("Task window start")).not.toHaveValue("");
-  await expect(page.getByLabel("Task window end")).not.toHaveValue("");
-  await expect(page.getByLabel("Edit Assignment time", { exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(page.getByLabel("Task summary", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Task details", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit Assignment", exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Edit Assignment instruction")).toHaveCount(0);
+  await expect(page.getByLabel("Tell Jenny something about this", { exact: true })).toBeVisible();
   await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(page.locator(".assignment-inspector-instruction")).toHaveText("Quote up to 3 useful posts");
+  await expect(page.getByRole("heading", { name: "Task details", exact: true })).toBeVisible();
   const updated = await (await request.get("/api/state")).json();
-  const edited = updated.assignments.find((item: { id: string }) => item.id === task.id);
-  expect(edited.schedule).toBeUndefined();
-  expect(Date.parse(edited.timeframe.deadline)).toBeGreaterThan(Date.parse(edited.timeframe.startsAt));
+  const unchanged = updated.assignments.find((item: { id: string }) => item.id === task.id);
+  expect(unchanged).toMatchObject({ title: "Quote up to 3 useful posts", instruction: "Publish up to 3 quote posts about AI agents. Keep each quote useful." });
+  expect(Date.parse(unchanged.timeframe.deadline)).toBeGreaterThan(Date.parse(unchanged.timeframe.startsAt));
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Calendar", exact: true }).click();
   await expect(page.locator(".compact-calendar-item").filter({ hasText: "Quote up to 3 useful posts" })).toBeVisible();
 });
 
-test("an expired task retries through a new window and retains its identity after reload", async ({ page, request }) => {
+test("an expired task can be postponed conversationally and retains its identity after reload", async ({ page, request }) => {
   expect((await request.post("/api/state", { data: { type: "reset" } })).ok()).toBeTruthy();
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Genny");
@@ -67,17 +64,15 @@ test("an expired task retries through a new window and retains its identity afte
   await page.goto(`/schedule?agentId=${state.agent.id}&presenceId=${state.presence.id}&assignmentId=${task.id}`);
   await expect(page.getByRole("heading", { name: "Task details", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Cancel Assignment", exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "Retry with a new time", exact: true }).click();
-  const local = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-  await page.getByLabel("Task window start").fill(local(new Date(Date.now() + 3600000)));
-  await page.getByLabel("Task window end").fill(local(new Date(Date.now() + 7200000)));
-  await page.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(page.getByLabel("Task window start")).toHaveCount(0);
+  const newStart = new Date(Date.now() + 3600000);
+  const local = (date: Date) => date.toISOString().slice(0, 10);
+  const postponed = await request.post("/api/state", { data: { type: "planIntervention", assignmentId: task.id, action: "postpone", note: "Give this a new window tomorrow.", schedule: { date: local(newStart), day: newStart.toLocaleDateString("en-US", { weekday: "long" }), time: "08:00", executionWindow: "08:00–11:00" } } });
+  expect(postponed.ok()).toBeTruthy();
   await page.reload();
   const after = await request.get("/api/state").then(r => r.json());
   const retry = after.assignments.find((a: { id: string }) => a.id === task.id);
-  expect(retry.status).toBe("draft");
-  expect(Date.parse(retry.timeframe.deadline)).toBeGreaterThan(Date.now());
+  expect(retry.status).not.toBe("cancelled");
+  expect(retry.schedule).toMatchObject({ date: local(newStart), time: "08:00" });
   expect(after.assignments.filter((a: { title: string }) => a.title === "Private retry test")).toHaveLength(1);
   expect(after.executions.filter((e: { assignmentId: string }) => e.assignmentId === task.id)).toHaveLength(0);
 });

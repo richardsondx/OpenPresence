@@ -42,8 +42,7 @@ test("small desktop keeps each page task above the fold", async ({ page }) => {
   for (const view of ["Chat", "Activity", "Watching", "Feed", "Schedule", "Playground", "Teach", "Brain", "Presence settings"] as const) await inspectCompactPage(page, view);
 
   await page.goto("/schedule");
-  await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Create assignment", exact: true })).toBeVisible();
+  await expect(page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true })).toHaveCount(0);
 
   await page.locator(".sidebar").getByRole("button", { name: "Channels", exact: true }).click();
   const settingsScroll = await page.evaluate(() => ({
