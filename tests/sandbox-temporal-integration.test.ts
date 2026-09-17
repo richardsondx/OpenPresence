@@ -6,6 +6,7 @@ import {
   createSandboxCheckpoint,
   forkSandboxCheckpoint,
   resetPlaygroundSession,
+  scheduleSandboxRetry,
   setSandboxAcceleration,
   setSandboxPaused,
   stageSandboxOutcome,
@@ -51,6 +52,22 @@ describe("Playground temporal integration boundary", () => {
     const advanced = advanceSandboxTimeWithTemporalEvents(state, session.id, 3);
     expect(advanced.state.playgroundSessions[0]!.temporalSnapshot?.outcomes[0]).toMatchObject({ status: "recorded" });
     expect(advanced.state.playgroundSessions[0]!.temporalSnapshot?.trajectory.some((item) => item.kind === "outcome_recorded")).toBe(true);
+  });
+
+  it("exercises public retry failure, backoff, and exhaustion through persisted time", () => {
+    let state = startPlaygroundSession(fixtureState());
+    const session = state.playgroundSessions[0]!;
+    state = scheduleSandboxRetry(state, session.id, "integration:delivery", 2, 5);
+    const scheduled = state.playgroundSessions[0]!.temporalSnapshot!;
+    expect(scheduled.retries).toEqual([expect.objectContaining({ operationId: "integration:delivery", status: "pending", attempt: 1 })]);
+    const first = advanceSandboxTimeWithTemporalEvents(state, session.id, 5);
+    expect(first.state.playgroundSessions[0]!.temporalSnapshot?.retries[0]).toMatchObject({ operationId: "integration:delivery", status: "pending", attempt: 2 });
+    const second = advanceSandboxTimeWithTemporalEvents(first.state, session.id, 10);
+    expect(second.state.playgroundSessions[0]!.temporalSnapshot?.retries[0]).toMatchObject({ operationId: "integration:delivery", status: "exhausted", attempt: 2 });
+    expect(second.state.playgroundSessions[0]!.temporalSnapshot?.trajectory).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "retry_failed" }),
+      expect.objectContaining({ kind: "retry_exhausted" }),
+    ]));
   });
 
   it("round-trips a queued event and trajectory through the persisted session shape", () => {

@@ -26,6 +26,7 @@ Playground commands:
   pause       Pause Sandbox virtual-time processing
   resume      Resume Sandbox virtual-time processing
   stage-outcome  Stage hidden world truth for later virtual-time release
+  retry        Schedule a deterministic retryable Sandbox transport failure
   checkpoint  Persist a portable full-world Sandbox checkpoint
   restore     Restore a persisted Sandbox checkpoint by id
   fork        Fork a new isolated Playground session from a checkpoint
@@ -59,6 +60,9 @@ Common options:
   --factor <number>     Positive Sandbox acceleration factor (for rate)
   --cause-event <id>    Temporal cause event for stage-outcome
   --visible-after <n>   Minutes until staged outcome is observable
+  --operation <id>      Operation id for retry
+  --max-attempts <n>    Retry attempt limit
+  --initial-delay <n>   Retry delay in virtual minutes
   --value-json <json>   JSON value held until staged outcome release
   --label <text>        Optional checkpoint label
   --checkpoint <id>     Persisted checkpoint id for restore
@@ -673,6 +677,14 @@ async function executePlayground(baseUrl, command, options, positionals) {
     const visibleAfterMinutes = parseInteger(options["visible-after"] ?? positionals[0], "visible-after");
     const value = typeof options["value-json"] === "string" ? parseJsonOption(options["value-json"], "value-json") : undefined;
     return projectState(await postOperation(baseUrl, { type: "stageSandboxOutcome", sessionId: session.id, causeEventId, visibleAfterMinutes, value }), session.id, command);
+  }
+  if (command === "retry") {
+    const current = await getState(baseUrl);
+    const session = sessionForOperation(current, options);
+    const operationId = required(options, "operation");
+    const maxAttempts = parseInteger(options["max-attempts"] ?? positionals[0] ?? 2, "max-attempts");
+    const initialDelayMinutes = parseInteger(options["initial-delay"] ?? positionals[1] ?? 1, "initial-delay");
+    return projectState(await postOperation(baseUrl, { type: "scheduleSandboxRetry", sessionId: session.id, operationId, maxAttempts, initialDelayMinutes }), session.id, command);
   }
   if (command === "checkpoint") {
     const current = await getState(baseUrl);

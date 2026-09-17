@@ -3561,6 +3561,22 @@ export function stageSandboxOutcome(source: OpenPresenceState, sessionId: string
   return state;
 }
 
+/** Schedule a deterministic retryable transport failure for public Sandbox
+ * certification. The temporal adapter owns the retry/fence lifecycle; this
+ * control never creates a live execution or calls a connector. */
+export function scheduleSandboxRetry(source: OpenPresenceState, sessionId: string, operationId: string, maxAttempts: number, initialDelayMinutes: number) {
+  const state = cloneState(source);
+  const session = sandboxSessionFor(state, sessionId);
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 20) throw new Error("Sandbox retry max attempts must be an integer from 1 to 20.");
+  if (!Number.isInteger(initialDelayMinutes) || initialDelayMinutes < 0 || initialDelayMinutes > 43200) throw new Error("Sandbox retry delay must be a non-negative integer number of minutes.");
+  const kernel = temporalKernelForSession(session);
+  kernel.startRetry({ operationId, offsetMs: initialDelayMinutes * 60_000, policy: { maxAttempts, initialDelayMs: Math.max(1, initialDelayMinutes * 60_000) }, payload: { sandboxFailure: true, source: "public-sandbox-control" } });
+  session.temporalSnapshot = kernel.snapshot();
+  session.virtualTimeMode = "manual";
+  session.updatedAt = now();
+  return state;
+}
+
 export function createSandboxCheckpoint(source: OpenPresenceState, sessionId: string, label?: string) {
   const state = cloneState(source);
   const snapshot = captureSandboxWorld(state, sessionId);

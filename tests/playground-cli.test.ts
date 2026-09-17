@@ -65,6 +65,7 @@ describe("Playground CLI", () => {
     const pause = await runCli(server.url, ["pause", "--session", "session-1"]);
     const resume = await runCli(server.url, ["resume", "--session", "session-1"]);
     const staged = await runCli(server.url, ["stage-outcome", "--session", "session-1", "--cause-event", "cause-1", "--visible-after", "15", "--value-json", '{"score":7}']);
+    const retry = await runCli(server.url, ["retry", "--session", "session-1", "--operation", "publish-1", "--max-attempts", "3", "--initial-delay", "5"]);
     const checkpoint = await runCli(server.url, ["checkpoint", "--session", "session-1", "--label", "before-release"]);
     const restored = await runCli(server.url, ["restore", "--session", "session-1", "--checkpoint", "checkpoint-1"]);
     await server.close();
@@ -72,6 +73,7 @@ describe("Playground CLI", () => {
     expect(pause.code).toBe(0);
     expect(resume.code).toBe(0);
     expect(staged.code).toBe(0);
+    expect(retry.code).toBe(0);
     expect(checkpoint.code).toBe(0);
     expect(restored.code).toBe(0);
     expect(operations).toEqual([
@@ -79,6 +81,7 @@ describe("Playground CLI", () => {
       expect.objectContaining({ type: "setSandboxPaused", sessionId: "session-1", paused: true }),
       expect.objectContaining({ type: "setSandboxPaused", sessionId: "session-1", paused: false }),
       expect.objectContaining({ type: "stageSandboxOutcome", sessionId: "session-1", causeEventId: "cause-1", visibleAfterMinutes: 15, value: { score: 7 } }),
+      expect.objectContaining({ type: "scheduleSandboxRetry", sessionId: "session-1", operationId: "publish-1", maxAttempts: 3, initialDelayMinutes: 5 }),
       expect.objectContaining({ type: "createSandboxCheckpoint", sessionId: "session-1", label: "before-release" }),
       expect.objectContaining({ type: "restoreSandboxCheckpoint", sessionId: "session-1", checkpointId: "checkpoint-1" }),
     ]);
