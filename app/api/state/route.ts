@@ -6756,7 +6756,16 @@ export async function POST(request: Request) {
       }
     }
     if (parsed.type === "startPlayground") {
-      const next = startPlaygroundSession(current, parsed.presenceId, parsed.source ?? "fresh", parsed.seed);
+      let next = startPlaygroundSession(current, parsed.presenceId, parsed.source ?? "fresh", parsed.seed);
+      const startedPresence = next.presences.find((item) => item.id === (parsed.presenceId ?? next.activePresenceId)) ?? next.presence;
+      // A fresh Sandbox session is a public developer control for the real
+      // autonomous loop. If the Presence owns a publishing outcome, startup
+      // must materialize its first plan without a second harness-only
+      // `replanPublishing` command. Existing plans remain authoritative for
+      // checkpoint/replay restores.
+      if (startedPresence?.selfDirectedAttention?.enabled === true && startedPresence.publishingInitiative.mode !== "off" && !next.publishingPlans.some((plan) => plan.presenceId === startedPresence.id && plan.environment === "sandbox" && plan.status === "active")) {
+        next = await regeneratePublishingPlan(next, startedPresence.id);
+      }
       writeState(next);
       return stateResponse(request, next);
     }

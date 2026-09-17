@@ -312,12 +312,10 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     expect(sessionId).toBeTruthy();
     expect(startSession.seed).toBe(seed);
 
-    // Materialize the Agent-owned plan through the public state path so the
-    // breaking-world stimulus below can prove plan invalidation, successor
-    // creation, and continued Calendar/Assignment projection coherency.
-    const planResponse = await request.post("/api/state", { data: { type: "replanPublishing", presenceId } });
-    expect(planResponse.ok(), "The Agent-owned publishing plan was not materialized.").toBeTruthy();
-    const planned = record(await planResponse.json());
+    // Startup itself must materialize the first Agent-owned plan. The
+    // trajectory intentionally does not call the internal planning operation;
+    // this proves the real public Sandbox control owns autonomous startup.
+    const planned = record(await request.get("/api/state").then((response) => response.json()));
     expect(records(planned.publishingPlans).some((plan) => text(plan.status) === "active"), "The Agent-owned plan was not active before the breaking event.").toBe(true);
 
     const trajectory: TrajectoryStep[] = [];
