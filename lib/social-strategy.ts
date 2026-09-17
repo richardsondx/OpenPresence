@@ -856,6 +856,57 @@ export function materializeSandboxOutcomeLearning(source: OpenPresenceState, pre
   return state;
 }
 
+/**
+ * Reconcile Sandbox learning against measured alternatives. Delivery success
+ * is not enough: a supported pattern is weakened only when two independent
+ * measured decisions for it trail a comparable alternative by a material
+ * margin. Historical records stay intact and the hypothesis is never silently
+ * deleted.
+ */
+export function reconcileSandboxPerformanceLearning(source: OpenPresenceState, presenceId: string, sessionId: string, observedAt = new Date().toISOString()) {
+  const state = source;
+  const samplesByPattern = new Map<string, Array<{ decisionId: string; evidenceIds: string[]; signal: number }>>();
+  const snapshots = new Map((state.publicationMetricSnapshots ?? []).map((snapshot) => [snapshot.id, snapshot]));
+  for (const record of state.growthEvidenceRecords ?? []) {
+    if (record.sandboxSessionId !== sessionId || record.presenceId !== presenceId || record.kind !== "WORLD_OUTCOME" || !record.verified) continue;
+    const metricId = record.sourceRefs.find((source) => source.kind === "publication_metric")?.id;
+    const snapshot = metricId ? snapshots.get(metricId) : undefined;
+    if (!snapshot || record.causalDecisionIds?.length !== 1) continue;
+    const decisionId = record.causalDecisionIds[0]!;
+    const decision = state.socialDecisions.find((item) => item.id === decisionId && item.sessionId === sessionId);
+    const signal = (snapshot.impressions ?? 0) + (snapshot.likes ?? 0) * 4 + (snapshot.replies ?? 0) * 6 + (snapshot.reposts ?? 0) * 8 + (snapshot.quotes ?? 0) * 8;
+    for (const selected of decision?.socialStrategy?.selectedByAct ?? []) {
+      if (!selected.patternId || !knownPatternIds.has(selected.patternId)) continue;
+      const samples = samplesByPattern.get(selected.patternId) ?? [];
+      if (!samples.some((sample) => sample.decisionId === decisionId)) samples.push({ decisionId, evidenceIds: [record.id], signal });
+      samplesByPattern.set(selected.patternId, samples);
+    }
+  }
+  const averages = new Map<string, number>();
+  for (const [patternId, samples] of samplesByPattern) {
+    if (samples.length >= 2) averages.set(patternId, samples.reduce((sum, sample) => sum + sample.signal, 0) / samples.length);
+  }
+  for (const hypothesis of state.growthHypotheses ?? []) {
+    if (hypothesis.sandboxSessionId !== sessionId || hypothesis.originatingPresenceId !== presenceId || !["supported", "weakened"].includes(hypothesis.status)) continue;
+    const patternId = hypothesis.decisionTargets?.find((target) => target.strategyId)?.strategyId ?? hypothesis.patternIds[0];
+    const ownAverage = patternId ? averages.get(patternId) : undefined;
+    if (ownAverage === undefined) continue;
+    const alternativeAverage = [...averages.entries()].filter(([candidate]) => candidate !== patternId).map(([, value]) => value).sort((left, right) => right - left)[0];
+    if (alternativeAverage === undefined || ownAverage > alternativeAverage * 0.75) continue;
+    const samples = samplesByPattern.get(patternId) ?? [];
+    const newContradictions = samples.flatMap((sample) => sample.evidenceIds).filter((evidenceId) => !hypothesis.contradictingEvidenceIds.includes(evidenceId));
+    if (!newContradictions.length) continue;
+    hypothesis.contradictingEvidenceIds = [...new Set([...hypothesis.contradictingEvidenceIds, ...newContradictions])];
+    hypothesis.confidence = "low";
+    const contradictingDecisions = new Set(hypothesis.contradictingEvidenceIds.flatMap((evidenceId) => (state.growthEvidenceRecords ?? []).find((record) => record.id === evidenceId)?.causalDecisionIds ?? []));
+    const nextStatus = contradictingDecisions.size >= 3 ? "disfavored" as const : "weakened" as const;
+    hypothesis.status = nextStatus;
+    hypothesis.updatedAt = observedAt;
+    hypothesis.reviewHistory = [...hypothesis.reviewHistory, { reviewId: `sandbox-performance:${sessionId}:${patternId}:${hypothesis.contradictingEvidenceIds.length}`, status: nextStatus, at: observedAt }];
+  }
+  return state;
+}
+
 /** Store a source-backed interpretation; only later outcome review can support it. */
 export function learnObservedSocialPattern(source: OpenPresenceState, presenceId: string, input: { statement: string; mirrorObjectIds: string[] }) {
   const state = structuredClone(source);

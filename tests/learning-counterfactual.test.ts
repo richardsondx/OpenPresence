@@ -8,7 +8,7 @@ import {
   type LearningDecisionSituation,
 } from "../lib/learning-counterfactual";
 import { createAgent, createSandboxCheckpoint, forkSandboxCheckpoint, initialState, recordSocialDecision, restoreSandboxCheckpoint, startPlaygroundSession } from "../lib/runtime";
-import { compileSocialStrategyContext, materializeSandboxOutcomeLearning } from "../lib/social-strategy";
+import { compileSocialStrategyContext, materializeSandboxOutcomeLearning, reconcileSandboxPerformanceLearning } from "../lib/social-strategy";
 import { learningAdjustmentForPattern } from "../lib/learning-runtime";
 import { captureLearningCheckpoint, learningStateForPresence } from "../lib/learning-runtime";
 import { captureSandboxWorld, restoreSandboxWorld, sandboxWorldDigest } from "../lib/sandbox-replay";
@@ -87,6 +87,40 @@ describe("pure learning counterfactual", () => {
     const later = compileSocialStrategyContext(state, presence, { invocation: "later Sandbox decision", objective: "AI builder conversation", availableActions: ["reply", "repost"], sandboxSessionId: session.id });
     expect(later.retrievalRun.relevantGrowthHypothesisIds).toContain(hypothesis?.id);
     expect(learningAdjustmentForPattern(state, presence, strategyId, session.id)).toBeGreaterThan(0);
+  });
+
+  it("weakens a Sandbox hypothesis when a measured alternative materially wins", () => {
+    const state = startPlaygroundSession(createAgent({ name: "Contradictory learning", description: "Retire stale strategy confidence.", audience: "AI builders", mode: "agent", handle: "@contradictory_learning", accent: "#7c3aed" }));
+    const presence = state.presence!;
+    const session = state.playgroundSessions[0]!;
+    const patterns = ["social.x.v1.proof-led-original", "social.x.v1.selective-amplification"];
+    const decisions = patterns.flatMap((patternId, patternIndex) => [0, 1].map((sampleIndex) => ({
+      id: `decision-${patternIndex}-${sampleIndex}`,
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      environment: "sandbox" as const,
+      sessionId: session.id,
+      focalMirrorObjectIds: [],
+      decision: "original_post" as const,
+      summary: "Measured strategy decision.",
+      influences: [],
+      socialIntentId: `intent-${patternIndex}-${sampleIndex}`,
+      socialStrategy: { retrievalRunId: `run-${patternIndex}-${sampleIndex}`, consideredPatternIds: [patternId], selectedByAct: [{ act: "original_post", patternId }] },
+      createdAt: `2026-09-1${sampleIndex + 1}T12:00:00.000Z`,
+    })));
+    state.socialDecisions = decisions;
+    state.publicationMetricSnapshots = decisions.map((decision, index) => ({ id: `metric-${index}`, presenceId: presence.id, mirrorObjectId: `mirror-${index}`, observedAt: decision.createdAt, publicationAgeSeconds: 3600, impressions: index < 2 ? 100 : 800, likes: index < 2 ? 2 : 20, source: "sandbox" as const, observationStatus: "observed" as const }));
+    state.growthEvidenceRecords = state.publicationMetricSnapshots.map((snapshot, index) => ({ id: `evidence-${index}`, agentId: state.agent!.id, presenceId: presence.id, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Measured Sandbox performance.", sourceRefs: [{ kind: "publication_metric" as const, id: snapshot.id, sourcePresenceId: presence.id, observedAt: snapshot.observedAt }], verified: true, causalDecisionIds: [decisions[index]!.id], causalMirrorObjectIds: [], sandboxSessionId: session.id, createdAt: snapshot.observedAt }));
+    const hypothesisId = `sandbox-learning:${session.id}:${patterns[0]}`;
+    state.growthHypotheses = [{ id: hypothesisId, agentId: state.agent!.id, originatingPresenceId: presence.id, scope: "presence", statement: "Proof-led originals may work for this audience.", status: "supported", confidence: "high", patternIds: [patterns[0]!], supportingEvidenceIds: ["evidence-0", "evidence-1"], contradictingEvidenceIds: [], derivedFrom: [], decisionTargets: [{ strategyId: patterns[0], effect: 1.5 }], reviewHistory: [], createdAt: "2026-09-11T12:00:00.000Z", updatedAt: "2026-09-11T12:00:00.000Z", sandboxSessionId: session.id }];
+
+    reconcileSandboxPerformanceLearning(state, presence.id, session.id, "2026-09-17T12:00:00.000Z");
+    const hypothesis = state.growthHypotheses[0]!;
+    expect(hypothesis.status).toBe("weakened");
+    expect(hypothesis.confidence).toBe("low");
+    expect(hypothesis.contradictingEvidenceIds).toEqual(["evidence-0", "evidence-1"]);
+    expect(learningAdjustmentForPattern(state, presence, patterns[0]!, session.id)).toBe(0);
+    expect(learningStateForPresence(state, presence, session.id).hypotheses).toHaveLength(0);
   });
 
   it("projects present, removed, and altered learning deterministically", () => {

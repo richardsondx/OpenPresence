@@ -25,7 +25,7 @@ import { BUILTIN_CONVERSATION_STYLES, DEFAULT_CONVERSATION_STYLE_ID } from "./co
 import { AGENT_AVATAR_VARIANTS, defaultAvatarLook, defaultAvatarVariant } from "./avatars";
 import { autobiographicalExpressionSafetyReason, retrievePublicSafeAutobiographicalContext } from "./autobiographical-memory";
 import { growthEvidenceIsInPresenceScope, growthPublicationIsInPresenceScope, growthWindowStartAt, presenceGrowthBoundary } from "./growth-scope";
-import { applyGrowthHypothesisActions, compileSocialStrategyContext, ensureDefaultSocialTemplates, ensureGrowthEvidenceRecords, legacyChannelStrategyGuidance, materializeSandboxOutcomeLearning, strategyUseFromDecision } from "./social-strategy";
+import { applyGrowthHypothesisActions, compileSocialStrategyContext, ensureDefaultSocialTemplates, ensureGrowthEvidenceRecords, legacyChannelStrategyGuidance, materializeSandboxOutcomeLearning, reconcileSandboxPerformanceLearning, strategyUseFromDecision } from "./social-strategy";
 import { xPostIdFromUrl } from "./x-url";
 import { hasObservedOwnReplyForTarget } from "./duplicate-public-outcome";
 import { recordLearningCounterfactualInPlace } from "./learning-runtime";
@@ -505,6 +505,7 @@ function recordPublicationMetricSnapshotInPlace(state: OpenPresenceState, operat
   if (mirror.environment === "sandbox" && mirror.sessionId) {
     ensureGrowthEvidenceRecords(state, presence.id, snapshot.observedAt, [mirror.id]);
     materializeSandboxOutcomeLearning(state, presence.id, mirror.sessionId, snapshot.observedAt);
+    reconcileSandboxPerformanceLearning(state, presence.id, mirror.sessionId, snapshot.observedAt);
   }
   state.events.unshift(event("learning", "Publication performance observed", `Performance evidence for a verified ${presence.channel === "x" ? "X" : presence.name} publication is available for Growth review.`, "positive", { presenceId: presence.id, sourceObjectId: mirror.id }));
 }

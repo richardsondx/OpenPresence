@@ -305,6 +305,16 @@ tests. Evidence is in
 `qa-learnings/sandbox-performance-learning-integration-2026-09-17.md`.
 Broad release health remains a separate future candidate gate.
 
+The Sandbox learning path now also reconciles measured alternatives. A pattern
+that trails a comparable alternative by at least 25% across two independent
+metric-backed decisions retains its history but becomes `weakened` with low
+confidence and contributes no decision-relevant adjustment; three distinct
+contradictions produce `disfavored`. Focused proof: 2 files / 61 tests passed,
+with typecheck, changed-file lint, and diff checks passing. Evidence:
+`qa-learnings/sandbox-contradictory-learning-2026-09-17.md`. This strengthens
+LEARN-003 but does not promote it: stale-pattern retirement and independent
+adversarial learning review remain required.
+
 The natural-supervision trajectory was also rerun on `e4cc6de` and passed:
 seven realistic turns, 10,080 virtual minutes, five verified Sandbox
 outcomes, one deduplicated `strategy_change` update, durable correction
