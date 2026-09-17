@@ -13,7 +13,9 @@
       { "command": "consider" },
       { "command": "metric", "options": { "object": "$latest-object-id", "metrics": { "impressions": 4100, "likes": 140, "replies": 34, "reposts": 24, "quotes": 9 }, "publicationAgeSeconds": 3600 } },
       { "command": "advance", "options": { "minutes": 10080 } },
-    { "command": "consider" },
-    { "command": "timeline" }
+      { "command": "consider" },
+      { "command": "advance", "options": { "minutes": 1440 } },
+      { "command": "consider" },
+      { "command": "timeline" }
   ]
 }

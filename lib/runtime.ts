@@ -4127,6 +4127,11 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
   const learningEvidenceId = `growth-evidence:sandbox-outcome:${outcome.id}`;
   if (causalDecision && !state.growthEvidenceRecords?.some((record) => record.id === learningEvidenceId)) {
     const goal = presence.brief.purpose?.trim() || presence.brief.audience?.trim() || "the Presence's declared growth goal";
+    const learningHypothesisIds = [...new Set([
+      ...(causalDecision.learningHypothesisId ? [causalDecision.learningHypothesisId] : []),
+      ...causalDecision.acts?.map((act) => act.learningHypothesisId).filter((id): id is string => Boolean(id)) ?? [],
+      ...causalDecision.socialStrategy?.selectedByAct.map((selection) => selection.learningHypothesisId).filter((id): id is string => Boolean(id)) ?? [],
+    ])];
     const learningEvidence: GrowthEvidenceRecord = {
       id: learningEvidenceId,
       agentId: state.agent?.id ?? "unknown",
@@ -4140,6 +4145,7 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
       verified: true,
       causalDecisionIds: [causalDecision.id],
       causalMirrorObjectIds: [object.id],
+      ...(learningHypothesisIds.length ? { learningHypothesisIds } : {}),
       sandboxSessionId: session.id,
       mediaProfile: { mode: object.assetRefs?.length ? "media" : "text_only", fit: "unknown", relationship: "unknown" },
       createdAt: outcome.observedAt,

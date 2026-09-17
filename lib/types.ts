@@ -971,6 +971,8 @@ export interface GrowthEvidenceRecord {
   /** Optional explicit lineage used before an outcome can influence future allocation. */
   causalDecisionIds?: string[];
   causalMirrorObjectIds?: string[];
+  /** Exact Growth hypotheses/templates selected by the causal decision. */
+  learningHypothesisIds?: string[];
   /** Replay-only scope; absent for normal Presence-global learning. */
   sandboxSessionId?: string;
   /** Normalized media/text-only features observed with the outcome. */

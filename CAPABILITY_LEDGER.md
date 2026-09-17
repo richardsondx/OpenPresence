@@ -636,3 +636,46 @@ Next single highest-impact gate: produce one truthful real-model source-backed
 original that satisfies the selected-template contract, then measure its outcome
 and independently prove retained-versus-removed later decision transfer. Do not
 promote LEARN-002/003/004, AUT-001, EVAL-004/005, or UX-004 from this evidence.
+
+## 2026-09-17 autonomous learning canary delta — measured lineage boundary
+
+The first unresolved runtime defect was the missing durable link from a
+measured publication outcome to the exact selected Growth hypothesis/template.
+The decision already retained the hypothesis ID, but the generated
+`WORLD_OUTCOME` evidence only retained decision and mirror references. That
+made later review attribution depend on re-deriving selection from mutable
+decision shape and left source-backed templates invisible to the measured
+learning boundary.
+
+The smallest repair adds `learningHypothesisIds` to `GrowthEvidenceRecord`,
+populates it from the causal decision at Sandbox delivery and publication
+metric recording, and lets evidence-backed attribution recognize that exact
+ID. `materializeSandboxOutcomeLearning` records the outcome against the
+session-scoped hypothesis but deliberately leaves it `testing`; only a
+validated Growth Review action can produce keep/modify/retire state.
+
+Focused proof after the repair:
+
+- `pnpm exec vitest run tests/ai.test.ts tests/sandbox.test.ts tests/learning-counterfactual.test.ts tests/social-strategy.test.ts --no-file-parallelism --maxWorkers=1 --minWorkers=1 --reporter=dot` → 134/134 passed.
+- `pnpm build` → passed; only pre-existing lint warnings remained.
+- Public real-model command, OpenAI `gpt-5.6-luna` low, all action affordances
+  auto, isolated Sandbox: `/tmp/openpresence-learning-canary-real-1789684665-repaired.json`
+  with DB `/tmp/openpresence-learning-canary-real-1789684665-repaired.db`.
+
+The repaired canary selected the session template, generated a distinct
+grounded denominator/cohort variation, delivered it through the public
+runtime, recorded the external metric, and preserved the same hypothesis ID
+on both the Sandbox outcome and publication metric evidence. The exact
+artifact remains `testing` with supporting evidence attached and no model
+keep/modify/retire disposition, so this is valid partial evidence only.
+
+Existing failed evidence remains preserved, including the selected-template
+validator failure in `/tmp/openpresence-learning-canary-real-ff03a5c-rerun21.db`
+and the prior long trajectory Run 23. No capability is promoted. LEARN-002,
+LEARN-003, LEARN-004, AUT-001, EVAL-004, EVAL-005, and UX-004 remain PARTIAL.
+
+The next single highest-impact gate is the existing measured disposition and
+retained-vs-removed independent counterfactual: obtain a real Growth Review
+action for this exact hypothesis, then prove a later autonomous decision
+changes for that artifact and differs in an independently run artifact-removed
+counterfactual. Do not infer that gate from the new evidence linkage alone.

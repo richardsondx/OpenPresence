@@ -409,6 +409,7 @@ function evidenceIsCurrent(record: GrowthEvidenceRecord, nowMs = Date.now()) {
 
 function attributedWorldOutcome(state: OpenPresenceState, record: GrowthEvidenceRecord, hypothesis: GrowthHypothesis) {
   if (record.kind !== "WORLD_OUTCOME" || !record.verified || !record.causalDecisionIds?.length || !hypothesis.decisionTargets?.length) return false;
+  if (record.learningHypothesisIds?.includes(hypothesis.id)) return true;
   return record.causalDecisionIds.some((decisionId) => {
     const decision = state.socialDecisions.find((item) => item.id === decisionId && item.presenceId === hypothesis.originatingPresenceId);
     return Boolean(decision?.socialStrategy?.selectedByAct.some((selection) => hypothesis.decisionTargets!.some((target) =>
@@ -475,6 +476,13 @@ export function ensureGrowthEvidenceRecords(state: OpenPresenceState, presenceId
     const metricMirror = state.mirrorObjects.find((item) => item.id === metric.mirrorObjectId && item.presenceId === presenceId);
     const metricExecution = metricMirror?.originExecutionId ? state.executions.find((item) => item.id === metricMirror.originExecutionId) : undefined;
     const metricDecision = metricExecution?.socialIntentId ? state.socialDecisions.find((item) => item.socialIntentId === metricExecution.socialIntentId && item.presenceId === presenceId) : undefined;
+    const selectedLearningHypothesisIds = metricDecision
+      ? [...new Set([
+        ...(metricDecision.learningHypothesisId ? [metricDecision.learningHypothesisId] : []),
+        ...metricDecision.acts?.map((act) => act.learningHypothesisId).filter((id): id is string => Boolean(id)) ?? [],
+        ...metricDecision.socialStrategy?.selectedByAct.map((selection) => selection.learningHypothesisId).filter((id): id is string => Boolean(id)) ?? [],
+      ])]
+      : [];
     upsert({
       id: `growth-evidence:publication:${metric.id}`,
       agentId,
@@ -488,6 +496,7 @@ export function ensureGrowthEvidenceRecords(state: OpenPresenceState, presenceId
       createdAt: metric.observedAt || createdAt,
       mediaProfile: mediaProfileForMirror(state, metricMirror),
       ...(metricDecision ? { causalDecisionIds: [metricDecision.id], causalMirrorObjectIds: [metric.mirrorObjectId] } : {}),
+      ...(selectedLearningHypothesisIds.length ? { learningHypothesisIds: selectedLearningHypothesisIds } : {}),
       ...(metricMirror?.environment === "sandbox" && metricMirror.sessionId ? { sandboxSessionId: metricMirror.sessionId } : {}),
     });
   }
@@ -831,6 +840,21 @@ export function materializeSandboxOutcomeLearning(source: OpenPresenceState, pre
       const records = evidenceByDecision.get(decisionId) ?? [];
       records.push(record);
       evidenceByDecision.set(decisionId, records);
+    }
+  }
+  // Preserve exact attribution for source-backed templates. The template is
+  // still only a hypothesis; measured evidence makes it reviewable, never
+  // automatically supported or promoted.
+  const hypothesesById = new Map((state.growthHypotheses ?? [])
+    .filter((hypothesis) => hypothesis.sandboxSessionId === sessionId && hypothesis.originatingPresenceId === presenceId)
+    .map((hypothesis) => [hypothesis.id, hypothesis] as const));
+  for (const record of state.growthEvidenceRecords ?? []) {
+    if (record.sandboxSessionId !== sessionId || record.kind !== "WORLD_OUTCOME" || !record.verified) continue;
+    for (const hypothesisId of record.learningHypothesisIds ?? []) {
+      const hypothesis = hypothesesById.get(hypothesisId);
+      if (!hypothesis || ["retired", "disfavored"].includes(hypothesis.status)) continue;
+      hypothesis.supportingEvidenceIds = [...new Set([...hypothesis.supportingEvidenceIds, record.id])];
+      hypothesis.updatedAt = observedAt;
     }
   }
   const decisionIdsByPattern = new Map<string, Set<string>>();

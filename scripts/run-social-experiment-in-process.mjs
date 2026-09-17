@@ -173,6 +173,9 @@ function projectedState(state, explicitSessionId, command = "inspect") {
       sourceObjectId: item.sourceObjectId,
     })),
     learning,
+    growthReviews: (state.growthReviews ?? []).filter((item) => item.presenceId === presence.id && item.assignmentId),
+    growthEvidence: (state.growthEvidenceRecords ?? []).filter((item) => item.presenceId === presence.id && item.sandboxSessionId === session.id),
+    publicationMetrics: (state.publicationMetricSnapshots ?? []).filter((item) => item.presenceId === presence.id && state.mirrorObjects.some((object) => object.id === item.mirrorObjectId && object.sessionId === session.id)),
   };
   if (command === "timeline") {
     result.timeline = [
