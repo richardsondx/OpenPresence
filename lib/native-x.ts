@@ -175,6 +175,7 @@ function sharedWatchQueries(watches: OpenPresenceState["watches"]) {
 
 export async function reconcileNativeX(source: OpenPresenceState, presenceId: string, options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string; inboundOnly?: boolean }): Promise<OpenPresenceState> {
   const previousObservation = source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x")?.observation;
+  const wasPartiallyAvailable = previousObservation?.status === "degraded";
   let next = recordNativeObservationInPlace(source, presenceId, {
     ...(previousObservation ?? {}),
     status: "syncing",
@@ -357,13 +358,18 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
       zeroDeltaStreak,
       error,
     });
-    if (partial || hasMirrorDelta || deletedOwnPostIds.length) {
+    // A degraded observation is a state, not a new operator event. The
+    // attention worker may retry every few minutes; only announce the
+    // transition into limited coverage (and the recovery) so Chat remains a
+    // supervisory conversation instead of a connector log.
+    const coverageTransitioned = partial !== wasPartiallyAvailable;
+    if ((!partial && (hasMirrorDelta || deletedOwnPostIds.length)) || coverageTransitioned) {
       next = recordRuntimeEvent(
         next,
         presenceId,
-        partial ? "Social Mirror partially updated" : "Social Mirror updated",
+        partial ? "X activity partly available" : wasPartiallyAvailable ? "X activity available again" : "X activity updated",
         partial
-          ? `Observed ${posts.length} public post${posts.length === 1 ? "" : "s"}${deletedOwnPostIds.length ? ` and reconciled ${deletedOwnPostIds.length} deleted post${deletedOwnPostIds.length === 1 ? "" : "s"}` : ""}; inbound mentions were unavailable. The last known Mirror remains available.`
+          ? `I can still see your recent public posts, but mentions aren't available right now. I'll keep using the last known conversations and retry automatically.`
           : posts.length || mentions.length
             ? `Observed ${posts.length} public post${posts.length === 1 ? "" : "s"} and ${mentions.length} inbound mention${mentions.length === 1 ? "" : "s"}${deletedOwnPostIds.length ? `; reconciled ${deletedOwnPostIds.length} deleted post${deletedOwnPostIds.length === 1 ? "" : "s"}` : ""}.`
             : "X is up to date. No recent posts, mentions, or conversations were found.",

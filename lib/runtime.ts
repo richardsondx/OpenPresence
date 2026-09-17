@@ -4813,6 +4813,26 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   });
   const activeAssignmentRunStatuses = new Set<AssignmentRun["status"]>(["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"]);
   const planningOnlyAssignmentIds = new Set<string>();
+  // Older native observation cycles promoted every repeated partial-coverage
+  // retry into Chat. Collapse those persisted connector receipts at the read
+  // boundary so existing users stop seeing the spam immediately, while the
+  // underlying Activity/runtime history remains intact.
+  normalized.operatorConversations = normalized.operatorConversations.map((conversation) => {
+    let keptPartialCoverageNotice = false;
+    return {
+      ...conversation,
+      messages: conversation.messages.flatMap((message) => {
+        if (message.role !== "presence" || !/^Social Mirror partially updated: Observed .*inbound mentions were unavailable\./i.test(message.content)) return [message];
+        if (keptPartialCoverageNotice) return [];
+        keptPartialCoverageNotice = true;
+        return [{
+          ...message,
+          content: "X activity is partly available: I can still see recent public posts, but mentions aren't available right now. I'll keep using the last known conversations and retry automatically.",
+          agentInitiated: message.agentInitiated ? { ...message.agentInitiated, dedupeKey: "native-x-observation:partial" } : undefined,
+        }];
+      }),
+    };
+  });
   normalized.assignments = normalized.assignments.map((assignment) => {
     // Only an explicit persisted flag is legacy planning-only data. Never
     // infer it from new instruction wording during normalization.

@@ -7,7 +7,7 @@ import {
   shouldSendProactiveUpdate,
 } from "../lib/operator-initiated-communication";
 import { resolveProactiveUpdate } from "../lib/attention-coordinator";
-import { createAgent, recordRuntimeEvent } from "../lib/runtime";
+import { createAgent, normalizeState, recordRuntimeEvent } from "../lib/runtime";
 
 describe("importance-thresholded Agent-initiated communication", () => {
   it("writes one unsolicited update to the durable Presence conversation and dedupes retries", () => {
@@ -33,6 +33,25 @@ describe("importance-thresholded Agent-initiated communication", () => {
     const next = recordRuntimeEvent(source, presenceId, "X connection needs attention", "The connected account is unavailable.", "warning");
     expect(next.events[0]?.title).toBe("X connection needs attention");
     expect(next.operatorConversations?.flatMap((conversation) => conversation.messages).some((message) => message.agentInitiated?.kind === "problem")).toBe(true);
+  });
+
+  it("collapses persisted partial X coverage spam into one plain-language notice", () => {
+    const source = createAgent({ name: "Genny", description: "Build useful things", audience: "builders", mode: "agent", handle: "genny", accent: "#000000" });
+    const conversation = source.operatorConversations![0]!;
+    const oldNotice = {
+      id: "old-notice",
+      role: "presence" as const,
+      content: "Social Mirror partially updated: Observed 100 public posts; inbound mentions were unavailable. The last known Mirror remains available.",
+      timestamp: "2026-09-17T09:20:00.000Z",
+    };
+    const next = normalizeState({
+      ...source,
+      operatorConversations: [{ ...conversation, messages: [oldNotice, { ...oldNotice, id: "duplicate-notice" } as never] }],
+    });
+    const messages = next.operatorConversations![0]!.messages;
+    expect(messages).toHaveLength(1);
+    expect(messages[0]!.content).toContain("X activity is partly available");
+    expect(messages[0]!.content).not.toContain("Social Mirror");
   });
 
   it.each([
