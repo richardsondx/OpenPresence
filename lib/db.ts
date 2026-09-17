@@ -337,8 +337,15 @@ function hydrateMirrorObjects<T extends Pick<OpenPresenceState, "agent" | "mirro
   });
   const current = state.mirrorObjects;
   const seen = new Set(current.map((item) => item.id));
+  const authoritativeSandboxSessions = new Set(current
+    .filter((item) => item.environment === "sandbox" && item.sessionId)
+    .map((item) => item.sessionId));
   const merged = [...current];
   for (const item of projected) {
+    // A restored Sandbox session carries its authoritative mirror snapshot in
+    // the compatibility state. Older normalized rows for that same session
+    // are stale and must not be rehydrated into the replay world.
+    if (item.environment === "sandbox" && item.sessionId && authoritativeSandboxSessions.has(item.sessionId)) continue;
     if (seen.has(item.id)) continue;
     seen.add(item.id);
     merged.push(item);
