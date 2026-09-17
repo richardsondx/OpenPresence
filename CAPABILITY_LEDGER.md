@@ -88,6 +88,19 @@ behavioral gate, including independent research/delivery, dependent-work
 reconsideration, complete causal reconstruction, media interpretation, and
 full independent natural-supervision/adversarial review.
 
+Current autonomy/learning delta: commits `e9c2a8a`, `86cdd8a`, `d470aa0`, and
+`d48193e` close concrete implementation gaps without changing the declared
+status of the remaining capabilities. Supervisory intervention now creates a
+durable Agent plan revision and keeps active Publishing Plan windows aligned;
+Agent-created Publishing Plans initialize the linked Assignment plan;
+Growth evidence carries optional Assignment/plan-revision lineage; stale
+evidence-backed hypotheses are withheld from current retrieval; and persisted
+counterfactuals preserve the actual available action surface. Focused evidence
+and the post-fix canonical trajectory are recorded in
+`qa-learnings/autonomy-learning-closure-2026-09-17.md`. LEARN-001/002/003/004,
+EVAL-004, AUT-003/004/006, and UX-005 remain PARTIAL pending their full
+trajectory-level gates; replay-specific proof remains closed.
+
 ## Current ledger
 
 Proof-gate shorthand used in the closure manifest: `I` implemented, `P`
