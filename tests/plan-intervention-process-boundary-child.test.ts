@@ -34,7 +34,7 @@ test(`plan intervention process phase ${process.env.PLAN_INTERVENTION_PHASE ?? "
     expect(cancelResponse.status).toBe(200);
     const saved = await cancelResponse.json();
     writeState(saved, { force: true });
-    const savedAssignment = saved.assignments.find((item) => item.id === assignment.id)!;
+    const savedAssignment = saved.assignments.find((item: { id: string }) => item.id === assignment.id)!;
     expect(savedAssignment).toMatchObject({ createdBy: "agent", status: "active" });
     expect(savedAssignment.planningOnly).not.toBe(true);
     expect(savedAssignment.instruction).toContain("inspected, grounded evidence");

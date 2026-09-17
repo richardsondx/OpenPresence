@@ -8446,10 +8446,12 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
           if (!remainingWindows.length) {
             const nextStart = new Date(new Date(timestamp).getTime() + 60 * 60_000);
             remainingWindows.push({
+              id: id("publishing-window"),
               startAt: nextStart.toISOString(),
               endAt: new Date(nextStart.getTime() + 60 * 60_000).toISOString(),
               purpose: "reassess",
               desiredContribution: { min: 0, max: 1 },
+              status: "future",
               summary: "Reconsider the next useful publishing opportunity after the canceled item.",
             });
           }
