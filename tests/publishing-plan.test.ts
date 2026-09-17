@@ -90,6 +90,28 @@ describe("Publishing Plan", () => {
     expect(state.executions).toHaveLength(0);
   });
 
+  it("replans the active Sandbox responsibility when a breaking observation invalidates it", async () => {
+    const fixture = publishingFixture("Develop a useful post about the benchmark release.");
+    const initialPlan = fixture.state.publishingPlans[0]!;
+
+    const ordinary = await stateOperation({ type: "addSandboxEvent", sessionId: fixture.sessionId, actionId: "post", actorName: "Audience", content: "A thoughtful question about agents." });
+    expect(ordinary.publishingPlans.filter((plan: { status: string }) => plan.status === "active")).toHaveLength(1);
+    expect(ordinary.publishingPlans).toHaveLength(1);
+
+    const changed = await stateOperation({ type: "addSandboxEvent", sessionId: fixture.sessionId, actionId: "post", actorName: "Breaking News", content: "The benchmark release was withdrawn after a reproducibility issue. Re-check plans that depend on it." });
+    const successor = changed.publishingPlans.find((plan: { status: string }) => plan.status === "active");
+    const prior = changed.publishingPlans.find((plan: { id: string }) => plan.id === initialPlan.id);
+    const observed = changed.mirrorObjects.find((item: { content?: { text?: string } }) => item.content?.text?.includes("benchmark release was withdrawn"));
+    const session = changed.playgroundSessions.find((item: { id: string }) => item.id === fixture.sessionId);
+    const replans = session?.temporalSnapshot?.trajectory.filter((record: { kind: string; data?: unknown }) => record.kind === "replan") ?? [];
+
+    expect(successor).toMatchObject({ status: "active", revision: 2 });
+    expect(prior).toMatchObject({ status: "superseded", supersededBy: successor.id });
+    expect(changed.events.some((event: { title: string; sourceObjectId?: string }) => event.title === "Plan invalidation reviewed" && event.sourceObjectId === observed?.id)).toBe(true);
+    expect(replans.some((record: { data?: unknown }) => record.data && typeof record.data === "object" && (record.data as { causeMirrorObjectId?: string }).causeMirrorObjectId === observed?.id)).toBe(true);
+    expect(changed.assignments.find((assignment: { id: string }) => assignment.id === changed.presence.publishingInitiative.assignmentId)).toMatchObject({ origin: "publishing_initiative", createdBy: "agent", status: "active" });
+  });
+
   it("supersedes prior revisions and never projects a plan into another Presence", () => {
     let state = createAgent(input);
     const firstPresenceId = state.presence!.id;

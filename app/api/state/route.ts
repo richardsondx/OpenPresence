@@ -3947,6 +3947,37 @@ async function runVisualAssignmentCycle(source: OpenPresenceState, sessionId: st
   return next;
 }
 
+/**
+ * A material world change can invalidate the Agent's current publishing plan
+ * before the next scheduled planning checkpoint. Keep the decision narrow and
+ * evidence-based: ordinary conversation is not a replan trigger, while an
+ * explicit withdrawal/retraction/deprecation/security signal is. The planner
+ * still owns the successor plan; this bridge only makes the observation
+ * visible to that existing planning path and preserves the causal link.
+ */
+async function reviewSandboxPlanAfterObservedEvent(source: OpenPresenceState, sessionId: string) {
+  const session = source.playgroundSessions.find((item) => item.id === sessionId);
+  const observed = source.mirrorObjects.find((item) => item.sessionId === sessionId);
+  if (!session || !observed) return source;
+  const presence = source.presences.find((item) => item.id === session.presenceId) ?? source.presence;
+  const plan = source.publishingPlans
+    .filter((item) => item.presenceId === presence?.id && item.environment === "sandbox" && item.status === "active")
+    .sort((left, right) => right.revision - left.revision)[0];
+  if (!presence || !plan) return source;
+  const content = observed.content?.text ?? "";
+  const materialChange = /\b(withdrawn|withdrawal|retracted|retraction|deprecated|deprecation|invalidated|invalidate|security incident|critical flaw|no longer available|breaking change|cancelled|canceled)\b/i.test(content);
+  if (!materialChange) return source;
+  const priorReview = session.temporalSnapshot?.trajectory.some((record) => record.kind === "replan" && record.data && typeof record.data === "object" && (record.data as { causeMirrorObjectId?: unknown }).causeMirrorObjectId === observed.id);
+  if (priorReview) return source;
+  const reviewed = recordRuntimeEvent(source, presence.id, "Plan invalidation reviewed", `${presence.name} recognized a material change in the simulated world and is reassessing the active publishing plan.`, "neutral", { sessionId, sourceObjectId: observed.id });
+  const next = await reassessPublishingPlan(reviewed, presence.id, { expectedPlanId: plan.id, expectedRevision: plan.revision });
+  const successor = next.publishingPlans.find((item) => item.presenceId === presence.id && item.environment === "sandbox" && item.status === "active");
+  if (!successor || successor.id === plan.id) return next;
+  const withProjection = syncPublishingInitiativeAssignment(next, presence.id, sessionId);
+  recordSandboxTrajectoryInPlace(withProjection, sessionId, "replan", { previousPlanId: plan.id, planId: successor.id, planRevision: successor.revision, causeMirrorObjectId: observed.id, reason: "A material world event invalidated the active publishing plan and caused the Agent to create a successor plan.", causal: { parentIds: [observed.id, ...(observed.sourceTemporalEventId ? [observed.sourceTemporalEventId] : [])] } }, session.virtualNow);
+  return withProjection;
+}
+
 async function runSandboxAgentCycle(source: OpenPresenceState, sessionId: string, attentionInstruction?: string, networkResult?: NetworkSearchResult, rehearsal?: { attemptId: string; inspiration?: string }, assignmentContext?: { id: string; researchContext?: string; assignmentRunId?: string; onProgress?: (phase: "researching" | "visual_research" | "publishing") => Promise<void> }, publishingContext?: { planId: string; planRevision: number; windowId: string }, causalTemporalEventId?: string) {
   const scope = createRuntimeScope(source, { sessionId, assignmentId: assignmentContext?.id });
   assertRuntimeScope(source, scope);
@@ -4765,6 +4796,7 @@ async function applySandboxTemporalEvents(source: OpenPresenceState, sessionId: 
         session.virtualNow = new Date(event.at).toISOString();
         session.virtualTimeMode = "manual";
         next = addSandboxEvent(next, { sessionId, actionId: stimulus.type, kind: stimulus.type, actorName: actor?.displayName ?? stimulus.actorRef, actorHandle: actor?.handle, profile: actor?.profile, content: stimulus.content, language: stimulus.language ?? "en", assets: stimulus.assets, targetExternalRef: target, source: "scenario", trust: "untrusted_world_content", scenarioStimulusId: stimulus.id, temporalEventId: event.id });
+        next = await reviewSandboxPlanAfterObservedEvent(next, sessionId);
         next = await runSandboxAgentCycle(next, sessionId, undefined, undefined, undefined, undefined, undefined, event.id);
         next = markScenarioStimulus(next, run.id, stimulusIndex + 1);
         continue;
@@ -6846,6 +6878,7 @@ export async function POST(request: Request) {
     }
     if (parsed.type === "addSandboxEvent") {
       let next = addSandboxEvent(current, parsed);
+      if (!parsed.observeOnly) next = await reviewSandboxPlanAfterObservedEvent(next, parsed.sessionId);
       if (!parsed.observeOnly) next = await runSandboxAgentCycle(next, parsed.sessionId);
       writeState(next);
       return stateResponse(request, next);
