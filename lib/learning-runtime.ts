@@ -127,7 +127,7 @@ function situationForStrategyRun(run: SocialStrategyRetrievalRun, presence: Pres
       .filter((action) => action === "original_post" || pattern.supportedActs.includes(action))
       .map((action) => ({ id: action === "original_post" ? pattern.id : `${action}:${pattern.id}`, action, baseScore: 0, strategyId: pattern.id, format: pattern.supportedFormats[0] })))
     : [];
-  if (!candidates.length) candidates.push({ id: "no-strategy", action: "no_op", baseScore: 0 });
+  if (!candidates.length) candidates.push({ id: "no-strategy", action: "no_op", baseScore: 0, strategyId: "no-strategy", format: "none" });
   return { id: situationId, scope: presence.id, candidates };
 }
 
