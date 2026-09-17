@@ -5486,7 +5486,13 @@ export async function POST(request: Request) {
     const scopedAgentId = (parsed.type === "pausePresence" || parsed.type === "wakePresence") && "agentId" in parsed
       ? parsed.agentId ?? context.agentId
       : context.agentId;
-    const current = parsed.type === "selectAgent"
+    const current = ["createSandboxCheckpoint", "restoreSandboxCheckpoint", "forkSandboxCheckpoint"].includes(parsed.type)
+      // Checkpoint/fork controls need the durable checkpoint collection after
+      // a process restart. The scoped hot path can be a compatibility view
+      // that omits or lags that collection while the full workspace remains
+      // persisted and authoritative.
+      ? readState()
+      : parsed.type === "selectAgent"
       // Ignore the outgoing URL's Presence while resolving a new Agent. In
       // legacy databases those Presences share one compatibility directory;
       // carrying the old Presence into the switch can select the right Agent
