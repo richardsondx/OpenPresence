@@ -110,6 +110,35 @@ describe("private operator Chat harness", () => {
     expect(saved.operatorConversations!.flatMap((item) => item.messages)).toContainEqual(expect.objectContaining({ content: "The Sandbox post is verified.", replyToMessageId: original.message.id }));
   });
 
+  it("turns natural supervisory guidance into an Agent-owned plan mutation", async () => {
+    const original = fixture("There isn't much scheduled tomorrow. Push the benchmark post to Thursday and keep the evidence requirement.");
+    let state = applyOperation(original.state, {
+      type: "createAssignment",
+      presenceId: original.presenceId,
+      environment: "sandbox",
+      createdBy: "agent",
+      instruction: "Maintain one evidence-backed publishing opportunity.",
+      title: "Maintain evidence-backed publishing",
+      schedule: { day: "Wednesday", time: "10:00", executionWindow: "10:00–13:00" },
+    });
+    const assignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "activateAssignment", id: assignment.id });
+    writeState(state);
+    const steps = [
+      { kind: "plan_intervention", assignmentId: assignment.id, action: "postpone", note: "Move the benchmark post to Thursday and keep the evidence requirement.", schedule: { day: "Thursday", time: "10:00", executionWindow: "10:00–13:00" } },
+      { kind: "answer", text: "Yep — I moved it to Thursday and kept the evidence requirement." },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => modelResponse(steps.shift() ?? { kind: "answer", text: "The plan is updated." })));
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+    const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
+    expect(getOperationalRun(run.id)?.state).toBe("succeeded");
+    expect(saved.assignments).toHaveLength(1);
+    expect(saved.assignments[0]).toMatchObject({ id: assignment.id, createdBy: "agent", status: "active", schedule: { day: "Thursday", time: "10:00" } });
+    expect(saved.assignments[0]?.instruction).toContain("evidence-backed");
+    expect(saved.operatorConversations!.flatMap((item) => item.messages)).toContainEqual(expect.objectContaining({ role: "presence", replyToMessageId: original.message.id, content: "The plan is updated." }));
+  });
+
   it("feeds checks back as tool turns and does not repeat identical external probes", async () => {
     vi.stubEnv("OPENPRESENCE_X_API_MOCK", "0");
     const original = fixture("Check my connection now, read-only.");
