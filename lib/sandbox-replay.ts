@@ -10,6 +10,16 @@ export interface SandboxWorldSnapshot {
   version: 1;
   session: PlaygroundSession;
   collections: Record<string, unknown[]>;
+  /** Presence-scoped learned state captured with the world for isolated
+   * counterfactual replay. It is intentionally separate from session records
+   * because live learning is normally Presence-scoped. */
+  learning?: {
+    presenceId: string;
+    growthHypotheses: unknown[];
+    growthEvidenceRecords: unknown[];
+    learningCheckpoints: unknown[];
+    learningCounterfactuals: unknown[];
+  };
   digest: string;
 }
 
@@ -50,11 +60,28 @@ function sessionItems(state: OpenPresenceState, key: string, sessionId: string):
   return clone(values.filter((item) => Boolean(item && typeof item === "object" && (item as { sessionId?: string }).sessionId === sessionId)));
 }
 
+function learningItems(state: OpenPresenceState, key: string, presenceId: string): unknown[] {
+  const values = (state as unknown as Record<string, unknown>)[key];
+  if (!Array.isArray(values)) return [];
+  return clone(values.filter((item) => {
+    if (!item || typeof item !== "object") return false;
+    const record = item as { presenceId?: string; originatingPresenceId?: string };
+    return record.presenceId === presenceId || record.originatingPresenceId === presenceId;
+  }));
+}
+
 export function captureSandboxWorld(state: OpenPresenceState, sessionId: string): SandboxWorldSnapshot {
   const session = state.playgroundSessions.find((item) => item.id === sessionId);
   if (!session) throw new Error(`Sandbox session ${sessionId} was not found.`);
   const collections = Object.fromEntries(SESSION_COLLECTIONS.map((key) => [key, sessionItems(state, key, sessionId)]));
-  const base = { version: 1 as const, session: clone(session), collections };
+  const learning = {
+    presenceId: session.presenceId,
+    growthHypotheses: learningItems(state, "growthHypotheses", session.presenceId),
+    growthEvidenceRecords: learningItems(state, "growthEvidenceRecords", session.presenceId),
+    learningCheckpoints: learningItems(state, "learningCheckpoints", session.presenceId),
+    learningCounterfactuals: learningItems(state, "learningCounterfactuals", session.presenceId),
+  };
+  const base = { version: 1 as const, session: clone(session), collections, learning };
   return { ...base, digest: hash(canonical(base)) };
 }
 
@@ -65,7 +92,7 @@ export function sandboxWorldDigest(snapshot: Omit<SandboxWorldSnapshot, "digest"
 }
 
 /** Restore only one isolated world's records; other sessions remain untouched. */
-export function restoreSandboxWorld(source: OpenPresenceState, snapshot: SandboxWorldSnapshot): OpenPresenceState {
+export function restoreSandboxWorld(source: OpenPresenceState, snapshot: SandboxWorldSnapshot, options: { restoreLearning?: boolean } = {}): OpenPresenceState {
   if (snapshot.version !== 1) throw new Error(`Unsupported Sandbox replay version: ${snapshot.version}.`);
   const state = clone(source);
   const sessionId = snapshot.session.id;
@@ -80,6 +107,21 @@ export function restoreSandboxWorld(source: OpenPresenceState, snapshot: Sandbox
       ...values.filter((item) => !(item && typeof item === "object" && (item as { sessionId?: string }).sessionId === sessionId)),
       ...clone(restored),
     ];
+  }
+  if (options.restoreLearning && snapshot.learning) {
+    const learningKeys = ["growthHypotheses", "growthEvidenceRecords", "learningCheckpoints", "learningCounterfactuals"] as const;
+    for (const key of learningKeys) {
+      const values = (state as unknown as Record<string, unknown>)[key];
+      if (!Array.isArray(values)) continue;
+      (state as unknown as Record<string, unknown>)[key] = [
+        ...values.filter((item) => {
+          if (!item || typeof item !== "object") return true;
+          const record = item as { presenceId?: string; originatingPresenceId?: string };
+          return record.presenceId !== snapshot.learning!.presenceId && record.originatingPresenceId !== snapshot.learning!.presenceId;
+        }),
+        ...clone(snapshot.learning[key]),
+      ];
+    }
   }
   return state;
 }

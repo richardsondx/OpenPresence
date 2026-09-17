@@ -11,7 +11,7 @@ import { createAgent, createSandboxCheckpoint, forkSandboxCheckpoint, initialSta
 import { compileSocialStrategyContext } from "../lib/social-strategy";
 import { learningAdjustmentForPattern } from "../lib/learning-runtime";
 import { captureLearningCheckpoint, learningStateForPresence } from "../lib/learning-runtime";
-import { captureSandboxWorld } from "../lib/sandbox-replay";
+import { captureSandboxWorld, restoreSandboxWorld, sandboxWorldDigest } from "../lib/sandbox-replay";
 
 afterEach(() => {
   writeState(initialState());
@@ -160,19 +160,24 @@ describe("runtime learning boundary", () => {
     const worldB = structuredClone(state);
     worldA.playgroundSessions = worldA.playgroundSessions.filter((item) => item.id === fork.id);
     worldB.playgroundSessions = worldB.playgroundSessions.filter((item) => item.id === fork.id);
-    worldB.growthHypotheses = [];
-    worldB.growthEvidenceRecords = [];
-    worldB.learningCheckpoints = [];
-    worldB.learningCounterfactuals = [];
     const branchSnapshotA = captureSandboxWorld(worldA, fork.id);
     const branchSnapshotB = captureSandboxWorld(worldB, fork.id);
     const branchLearning = learningStateForPresence(worldA, presence);
-    const removedLearning = learningStateForPresence(worldB, presence);
-    const learningCheckpoint = captureLearningCheckpoint(worldA, presence, "2026-09-16T12:30:00.000Z").checkpoint;
+    const learningSnapshotB = { ...structuredClone(branchSnapshotA), learning: { ...structuredClone(branchSnapshotA.learning!), growthHypotheses: [], growthEvidenceRecords: [], learningCheckpoints: [], learningCounterfactuals: [] } };
+    learningSnapshotB.digest = sandboxWorldDigest(learningSnapshotB);
+    const emptyLearningState = structuredClone(worldB);
+    emptyLearningState.growthHypotheses = [];
+    emptyLearningState.growthEvidenceRecords = [];
+    emptyLearningState.learningCheckpoints = [];
+    emptyLearningState.learningCounterfactuals = [];
+    const restoredA = restoreSandboxWorld(structuredClone(worldA), JSON.parse(JSON.stringify(branchSnapshotA)), { restoreLearning: true });
+    const restoredB = restoreSandboxWorld(emptyLearningState, JSON.parse(JSON.stringify(learningSnapshotB)), { restoreLearning: true });
+    const removedLearning = learningStateForPresence(restoredB, presence);
+    const learningCheckpoint = captureLearningCheckpoint(restoredA, presence, "2026-09-16T12:30:00.000Z").checkpoint;
     const situation: LearningDecisionSituation = { id: `paired:${fork.id}`, scope: presence.id, candidates: [{ id: "reply", action: "reply", baseScore: 1, strategyId }, { id: "repost", action: "repost", baseScore: 2, strategyId: "social.x.v1.selective-amplification" }] };
     const replay = projectLearningCounterfactual({ checkpoint: learningCheckpoint, situation, altered: { label: "World B without retained learning", hypotheses: removedLearning.hypotheses, evidence: removedLearning.evidence } });
-    const runtimeA = compileSocialStrategyContext(worldA, presence, { invocation: "paired-world later decision", objective: "neutral situation", availableActions: ["reply"] });
-    const runtimeB = compileSocialStrategyContext(worldB, presence, { invocation: "paired-world later decision", objective: "neutral situation", availableActions: ["reply"] });
+    const runtimeA = compileSocialStrategyContext(restoredA, presence, { invocation: "paired-world later decision", objective: "neutral situation", availableActions: ["reply"] });
+    const runtimeB = compileSocialStrategyContext(restoredB, presence, { invocation: "paired-world later decision", objective: "neutral situation", availableActions: ["reply"] });
 
     expect(fork).toBeDefined();
     expect(branchSnapshotB).toEqual(branchSnapshotA);
