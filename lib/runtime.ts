@@ -25,7 +25,7 @@ import { BUILTIN_CONVERSATION_STYLES, DEFAULT_CONVERSATION_STYLE_ID } from "./co
 import { AGENT_AVATAR_VARIANTS, defaultAvatarLook, defaultAvatarVariant } from "./avatars";
 import { autobiographicalExpressionSafetyReason, retrievePublicSafeAutobiographicalContext } from "./autobiographical-memory";
 import { growthEvidenceIsInPresenceScope, growthPublicationIsInPresenceScope, growthWindowStartAt, presenceGrowthBoundary } from "./growth-scope";
-import { applyGrowthHypothesisActions, compileSocialStrategyContext, ensureDefaultSocialTemplates, ensureGrowthEvidenceRecords, legacyChannelStrategyGuidance, strategyUseFromDecision } from "./social-strategy";
+import { applyGrowthHypothesisActions, compileSocialStrategyContext, ensureDefaultSocialTemplates, ensureGrowthEvidenceRecords, legacyChannelStrategyGuidance, materializeSandboxOutcomeLearning, strategyUseFromDecision } from "./social-strategy";
 import { xPostIdFromUrl } from "./x-url";
 import { hasObservedOwnReplyForTarget } from "./duplicate-public-outcome";
 import { recordLearningCounterfactualInPlace } from "./learning-runtime";
@@ -4082,6 +4082,7 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
     };
     state.growthEvidenceRecords = [learningEvidence, ...(state.growthEvidenceRecords ?? [])].slice(0, 500);
   }
+  materializeSandboxOutcomeLearning(state, presence.id, session.id, outcome.observedAt);
   recordSandboxTrajectoryInPlace(state, session.id, "execution", { executionId: execution.id, intentId: execution.socialIntentId, connector: execution.connector, environment: execution.environment, status: execution.status, causal: { parentIds: [execution.socialIntentId] } }, execution.executedAt);
   recordSandboxTrajectoryInPlace(state, session.id, "result", { executionId: execution.id, externalRef, status: execution.status, causal: { parentIds: [execution.id] } }, execution.executedAt);
   recordSandboxTrajectoryInPlace(state, session.id, "outcome", { outcomeId: outcome.id, executionId: execution.id, intentId: outcome.socialIntentId, status: outcome.status, evidence: outcome.evidence, causal: { parentIds: [execution.id, outcome.socialIntentId] } }, outcome.observedAt);

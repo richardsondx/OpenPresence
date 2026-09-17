@@ -787,6 +787,76 @@ export function strategyUseFromDecision(run: SocialStrategyRetrievalRun | undefi
   return { retrievalRunId: run.id, playbookId: run.playbookId, playbookVersion: run.playbookVersion, consideredPatternIds: run.consideredPatterns.map((pattern) => pattern.id), selectedByAct, strategyTemplateId: run.selectedTemplateId };
 }
 
+/**
+ * Turn repeated, attributed Sandbox outcomes into a cautious session-scoped
+ * hypothesis. This is deliberately bounded: two independent verified
+ * decisions are enough to allocate a small amount of future exploration, but
+ * not enough to create a Presence-global rule or a high-confidence claim.
+ */
+export function materializeSandboxOutcomeLearning(source: OpenPresenceState, presenceId: string, sessionId: string, observedAt = new Date().toISOString()) {
+  const state = source;
+  const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+  if (!presence || !state.agent) return state;
+  const sessionOutcomes = state.outcomes.filter((outcome) => outcome.sessionId === sessionId && outcome.presenceId === presenceId && outcome.status === "succeeded" && outcome.environment === "sandbox");
+  const evidenceByDecision = new Map<string, GrowthEvidenceRecord[]>();
+  for (const record of state.growthEvidenceRecords ?? []) {
+    if (record.sandboxSessionId !== sessionId || record.presenceId !== presenceId || record.kind !== "WORLD_OUTCOME" || !record.verified) continue;
+    for (const decisionId of record.causalDecisionIds ?? []) {
+      const records = evidenceByDecision.get(decisionId) ?? [];
+      records.push(record);
+      evidenceByDecision.set(decisionId, records);
+    }
+  }
+  const decisionIdsByPattern = new Map<string, Set<string>>();
+  for (const outcome of sessionOutcomes) {
+    for (const decisionId of [outcome.socialIntentId, ...((state.socialDecisions.find((decision) => decision.socialIntentId === outcome.socialIntentId)?.id) ? [state.socialDecisions.find((decision) => decision.socialIntentId === outcome.socialIntentId)!.id] : [])]) {
+      const decision = state.socialDecisions.find((item) => item.id === decisionId || item.socialIntentId === decisionId);
+      if (!decision) continue;
+      for (const selected of decision?.socialStrategy?.selectedByAct ?? []) {
+        if (!selected.patternId || !knownPatternIds.has(selected.patternId)) continue;
+        const ids = decisionIdsByPattern.get(selected.patternId) ?? new Set<string>();
+        ids.add(decision.id);
+        decisionIdsByPattern.set(selected.patternId, ids);
+      }
+    }
+  }
+  for (const [patternId, decisionIds] of decisionIdsByPattern) {
+    if (decisionIds.size < 2) continue;
+    const pattern = patterns.find((item) => item.id === patternId);
+    if (!pattern) continue;
+    const evidenceIds = [...decisionIds].flatMap((decisionId) => (evidenceByDecision.get(decisionId) ?? []).map((record) => record.id));
+    if (evidenceIds.length < 2) continue;
+    const id = `sandbox-learning:${sessionId}:${patternId}`;
+    const existing = (state.growthHypotheses ?? []).find((hypothesis) => hypothesis.id === id);
+    if (existing) {
+      if (["retired", "disfavored"].includes(existing.status)) continue;
+      existing.supportingEvidenceIds = [...new Set([...existing.supportingEvidenceIds, ...evidenceIds])];
+      existing.updatedAt = observedAt;
+      continue;
+    }
+    const statement = `Repeated verified Sandbox outcomes support testing ${pattern.mechanism} for this Presence; compare it with alternatives before generalizing.`;
+    state.growthHypotheses = [{
+      id,
+      agentId: state.agent.id,
+      originatingPresenceId: presence.id,
+      scope: "presence" as const,
+      statement,
+      status: "supported" as const,
+      confidence: "low" as const,
+      patternIds: [pattern.id],
+      supportingEvidenceIds: [...new Set(evidenceIds)],
+      contradictingEvidenceIds: [],
+      derivedFrom: [],
+      decisionTargets: [{ strategyId: pattern.id, effect: 0.75 }],
+      reviewHistory: [{ reviewId: `sandbox-runtime:${sessionId}`, status: "supported" as const, at: observedAt }],
+      createdAt: observedAt,
+      updatedAt: observedAt,
+      sandboxSessionId: sessionId,
+    }, ...(state.growthHypotheses ?? [])].slice(0, 500);
+  }
+  return state;
+}
+
 /** Store a source-backed interpretation; only later outcome review can support it. */
 export function learnObservedSocialPattern(source: OpenPresenceState, presenceId: string, input: { statement: string; mirrorObjectIds: string[] }) {
   const state = structuredClone(source);

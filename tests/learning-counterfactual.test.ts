@@ -8,7 +8,7 @@ import {
   type LearningDecisionSituation,
 } from "../lib/learning-counterfactual";
 import { createAgent, createSandboxCheckpoint, forkSandboxCheckpoint, initialState, recordSocialDecision, restoreSandboxCheckpoint, startPlaygroundSession } from "../lib/runtime";
-import { compileSocialStrategyContext } from "../lib/social-strategy";
+import { compileSocialStrategyContext, materializeSandboxOutcomeLearning } from "../lib/social-strategy";
 import { learningAdjustmentForPattern } from "../lib/learning-runtime";
 import { captureLearningCheckpoint, learningStateForPresence } from "../lib/learning-runtime";
 import { captureSandboxWorld, restoreSandboxWorld, sandboxWorldDigest } from "../lib/sandbox-replay";
@@ -55,6 +55,40 @@ const altered = {
 };
 
 describe("pure learning counterfactual", () => {
+  it("materializes cautious session-scoped learning from two attributed Sandbox outcomes", () => {
+    const state = startPlaygroundSession(createAgent({ name: "Runtime learning", description: "Learn from verified Sandbox outcomes.", audience: "AI builders", mode: "agent", handle: "@runtime_learning", accent: "#7c3aed" }));
+    const presence = state.presence!;
+    const session = state.playgroundSessions[0]!;
+    const strategyId = "social.x.v1.useful-disagreement";
+    const decisions = ["intent-a", "intent-b"].map((socialIntentId, index) => ({
+      id: `decision-${index + 1}`,
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      environment: "sandbox" as const,
+      sessionId: session.id,
+      focalMirrorObjectIds: [],
+      decision: "reply" as const,
+      summary: "A useful reply grounded in the observed conversation.",
+      influences: [],
+      socialIntentId,
+      sandboxSessionId: session.id,
+      socialStrategy: { retrievalRunId: `run-${index + 1}`, consideredPatternIds: [strategyId], selectedByAct: [{ act: "reply", patternId: strategyId, mechanismId: "useful disagreement" }] },
+      createdAt: `2026-09-1${index + 1}T12:00:00.000Z`,
+    }));
+    state.socialDecisions = decisions;
+    state.outcomes = decisions.map((decision, index) => ({ id: `outcome-${index + 1}`, socialIntentId: decision.socialIntentId!, executionId: `execution-${index + 1}`, presenceId: presence.id, status: "succeeded" as const, observedAt: decision.createdAt, metrics: {}, evidence: [], environment: "sandbox" as const, sessionId: session.id }));
+    state.growthEvidenceRecords = state.outcomes.map((outcome, index) => ({ id: `growth-evidence-${index + 1}`, agentId: state.agent!.id, presenceId: presence.id, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Verified simulated outcome.", sourceRefs: [], verified: true, causalDecisionIds: [decisions[index]!.id], causalMirrorObjectIds: [], sandboxSessionId: session.id, createdAt: outcome.observedAt }));
+
+    materializeSandboxOutcomeLearning(state, presence.id, session.id, "2026-09-17T12:00:00.000Z");
+    const hypothesis = state.growthHypotheses?.find((item) => item.id === `sandbox-learning:${session.id}:${strategyId}`);
+    expect(hypothesis).toMatchObject({ status: "supported", confidence: "low", sandboxSessionId: session.id, decisionTargets: [{ strategyId, effect: 0.75 }] });
+    expect(hypothesis?.supportingEvidenceIds).toHaveLength(2);
+
+    const later = compileSocialStrategyContext(state, presence, { invocation: "later Sandbox decision", objective: "AI builder conversation", availableActions: ["reply", "repost"], sandboxSessionId: session.id });
+    expect(later.retrievalRun.relevantGrowthHypothesisIds).toContain(hypothesis?.id);
+    expect(learningAdjustmentForPattern(state, presence, strategyId, session.id)).toBeGreaterThan(0);
+  });
+
   it("projects present, removed, and altered learning deterministically", () => {
     const result = projectLearningCounterfactual({ checkpoint, situation, altered });
 

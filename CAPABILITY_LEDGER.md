@@ -267,6 +267,24 @@ allocation difference, action-faithful ablation, stale-pattern retirement,
 relevant-media learning, adversarial natural-supervision review, and
 independent legacy-migration ablation. Replay closure remains complete.
 
+## Sandbox learning materialization delta — 2026-09-17
+
+The shared strategy/runtime path now materializes a low-confidence,
+session-scoped hypothesis after two distinct verified Sandbox decisions use
+the same known strategy pattern. The hypothesis is linked to the verified
+`WORLD_OUTCOME` evidence and is consumed by later retrieval through the
+bounded learning adjustment path. Focused proof: 2 files / 59 tests passed in
+`tests/learning-counterfactual.test.ts` and `tests/sandbox.test.ts`, with
+typecheck, changed-file lint, and diff checks passing. Durable evidence is in
+`qa-learnings/sandbox-learning-materialization-2026-09-17.md`.
+
+This strengthens LEARN-001 and LEARN-002 but does not promote them. The
+remaining proof gaps are still material: a persisted full-trajectory learning
+audit; action-faithful like/repost/quote/follow and other Assignment-family
+verification; confidence decrease, contradictory evidence, stale-pattern
+retirement, and independent learning-adversary review; and relevant-media
+learning.
+
 Latest integrated Sandbox evidence (2026-09-16): the real CLI-launched
 mandatory trajectory began with zero user Assignments, materialized one
 session-scoped Agent-owned Sandbox responsibility, ran for 10,080 virtual
