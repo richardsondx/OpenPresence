@@ -518,3 +518,12 @@ action-family/causal contract remains open. LEARN-003/004, SIM-001, and the
 remaining autonomy/interruption/causal-cone reviews retain their explicit
 gates. The migration evidence remains source-equivalent support, not a fresh
 candidate-bound run.
+
+The independent causal-cone audit for `9baca92` consumed the public trace and
+passed after correcting the verifier's `eventId` normalization: 1 session / 24
+entries, with permission→intent, execution→permission, result/outcome→execution,
+and retry→temporal-event links all resolved. The initial false failure and its
+correction are preserved in
+`qa-learnings/independent-causal-cone-9baca92-2026-09-17.md`. This is stronger
+support for SBX-008/EVAL-004, but not the complete composed trajectory proof,
+so neither row is promoted.
