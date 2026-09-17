@@ -43,7 +43,7 @@ describe("Sandbox and Playground boundaries", () => {
   });
 
   it("does not expose deferred Sandbox truth through the state response", async () => {
-    let state = startPlaygroundSession(createAgent(input), undefined, "replay", "hidden-truth-response");
+    const state = startPlaygroundSession(createAgent(input), undefined, "replay", "hidden-truth-response");
     const session = state.playgroundSessions[0]!;
     const kernel = SandboxTemporalKernel.fromSnapshot(session.temporalSnapshot!);
     const cause = kernel.scheduleEvent({ id: "hidden-response-cause", type: "world_cause", offsetMs: 60_000 });

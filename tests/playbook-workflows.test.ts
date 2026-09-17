@@ -5,7 +5,11 @@ import { POST, GET } from "../app/api/state/route";
 import { writeState } from "../lib/db";
 import { recordPlaybookMilestones } from "../lib/playbook-milestones";
 import { growthBrowserProjection } from "../lib/growth-browser-projection";
-import type { OpenPresenceState } from "../lib/types";
+import type { Assignment, Execution, MirrorObject, OpenPresenceState, PublicationMetricSnapshot } from "../lib/types";
+
+type TemplateHypothesisRecord = { id: string; template?: { title?: string } };
+type ScheduledAssignmentRecord = { id: string; strategyTemplateId?: string; title?: string; description?: string; instruction?: string };
+type ExecutionRecord = { assignmentId?: string };
 
 describe("Growth playbook workflows", () => {
   it("hydrates bounded starter templates as unproven private hypotheses", () => {
@@ -101,19 +105,21 @@ describe("Growth playbook workflows", () => {
     const post = await POST(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "saveSocialTemplate", presenceId: p.id, title: "API template", body: "Try [TOPIC]", }) }));
     expect(post.status).toBe(200);
     const saved = await post.json();
-    const id = saved.growthHypotheses.find((h: any) => h.template?.title === "API template").id;
+    const id = (saved.growthHypotheses as TemplateHypothesisRecord[]).find((h) => h.template?.title === "API template")!.id;
     const tomorrow = new Date(Date.now() + 86400000).toISOString();
     const scheduled = await POST(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "scheduleSocialTemplate", presenceId: p.id, hypothesisId: id, startsAt: tomorrow, deadline: new Date(Date.now() + 90000000).toISOString() }) }));
     expect(scheduled.status).toBe(200);
     const after = await scheduled.json();
-    expect(after.assignments.find((a: any) => a.strategyTemplateId === id)).toBeTruthy();
-    const scheduledAssignment = after.assignments.find((a: any) => a.strategyTemplateId === id);
+    expect((after.assignments as ScheduledAssignmentRecord[]).find((a) => a.strategyTemplateId === id)).toBeTruthy();
+    const scheduledAssignment = (after.assignments as ScheduledAssignmentRecord[]).find((a) => a.strategyTemplateId === id);
+    expect(scheduledAssignment).toBeDefined();
+    if (!scheduledAssignment) throw new Error("Expected the scheduled template Assignment.");
     expect(scheduledAssignment).toMatchObject({ title: "Use API template", description: "Apply API template to a current audience-relevant idea and verify the result.", strategyTemplateId: id });
     expect(scheduledAssignment.instruction).toContain("Compare media with text-only");
     expect(scheduledAssignment.instruction).not.toContain("abstracted from 0 observed source posts");
-    expect(after.executions.filter((e: any) => e.assignmentId && e.assignmentId === scheduledAssignment.id)).toHaveLength(0);
+    expect((after.executions as ExecutionRecord[]).filter((e) => e.assignmentId && e.assignmentId === scheduledAssignment.id)).toHaveLength(0);
     const fetched = await GET(new Request("http://localhost/api/state"));
-    expect((await fetched.json()).growthHypotheses.some((h: any) => h.id === id)).toBe(true);
+    expect((await fetched.json()).growthHypotheses.some((h: TemplateHypothesisRecord) => h.id === id)).toBe(true);
   });
 
   it("keeps Agent-created template work attributable and measurable", () => {
@@ -165,17 +171,17 @@ it("counts only verified live template deliveries and retains their latest measu
   const initial = createAgent({ name: "Measured", description: "Careful agent", mode: "agent", handle: "@measured", accent: "#123456" });
   const { state, hypothesis } = saveSocialTemplate(initial, initial.presence!.id, { title: "Measured format", body: "Try [TOPIC]", source: "operator" });
   const presenceId = state.presence!.id;
-  state.assignments.push({ id: "template-task", presenceId, strategyTemplateId: hypothesis.id } as any);
+  state.assignments.push({ id: "template-task", presenceId, strategyTemplateId: hypothesis.id } as Assignment);
   state.executions.push(...[
     { id: "delivered", status: "succeeded", environment: "live", externalRef: { type: "post", id: "123" } },
     { id: "draft", status: "awaiting-review", environment: "live", externalRef: { type: "post", id: "456" } },
     { id: "sandbox", status: "succeeded", environment: "sandbox", externalRef: { type: "post", id: "789" } },
-  ].map(item => ({ ...item, presenceId, assignmentId: "template-task" }) as any));
-  state.mirrorObjects.push({ id: "measured-post", presenceId, externalRef: { type: "post", id: "123" } } as any);
+  ].map(item => ({ ...item, presenceId, assignmentId: "template-task" }) as Execution));
+  state.mirrorObjects.push({ id: "measured-post", presenceId, externalRef: { type: "post", id: "123" } } as MirrorObject);
   state.publicationMetricSnapshots.push(...[
     { id: "old", observedAt: "2026-09-01T00:00:00Z", impressions: 10 },
     { id: "new", observedAt: "2026-09-02T00:00:00Z", impressions: 30 },
-  ].map(item => ({ ...item, presenceId, mirrorObjectId: "measured-post" }) as any));
+  ].map(item => ({ ...item, presenceId, mirrorObjectId: "measured-post" }) as PublicationMetricSnapshot));
   const full = socialPlaybookForPresence(state, presenceId)[0];
   expect(full).toMatchObject({ verifiedUses: 1, measuredPosts: 1, performance: { impressions: 30, likes: undefined } });
   const compact = socialPlaybookForPresence(agentLibraryBrowserProjection(state, "assets"), presenceId)[0];

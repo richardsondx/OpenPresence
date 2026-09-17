@@ -153,7 +153,9 @@ describe("runtime learning boundary", () => {
     state.growthHypotheses = [{ id: hypothesisId, agentId: state.agent!.id, originatingPresenceId: presence.id, scope: "presence", channelId: presence.channel, statement: "Useful disagreement helps this audience.", status: "supported", confidence: "high", patternIds: [strategyId], decisionTargets: [{ strategyId, action: "reply", effect: 10 }], supportingEvidenceIds: evidence.map((item) => item.id), contradictingEvidenceIds: [], derivedFrom: [], reviewHistory: [], createdAt: evidence[0]!.createdAt, updatedAt: evidence[1]!.createdAt }];
 
     state = createSandboxCheckpoint(state, source.id, "after learning event");
-    const checkpoint = state.sandboxCheckpoints?.[0]!;
+    const checkpoint = state.sandboxCheckpoints?.[0];
+    expect(checkpoint).toBeDefined();
+    if (!checkpoint) throw new Error("Expected a learning checkpoint.");
     state = forkSandboxCheckpoint(state, source.id, checkpoint.id);
     const fork = state.playgroundSessions.find((item) => item.id !== source.id && item.source === "replay")!;
     const forkLearning = learningStateForPresence(state, presence, fork.id);
@@ -165,7 +167,9 @@ describe("runtime learning boundary", () => {
     const restoredSource = restoreSandboxCheckpoint(state, source.id, checkpoint.id);
     expect(learningStateForPresence(restoredSource, presence, fork.id).hypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience." })]));
     const forkCheckpointState = createSandboxCheckpoint(state, fork.id, "fork replay checkpoint");
-    const forkCheckpoint = forkCheckpointState.sandboxCheckpoints?.find((item) => item.sessionId === fork.id && item.label === "fork replay checkpoint")!;
+    const forkCheckpoint = forkCheckpointState.sandboxCheckpoints?.find((item) => item.sessionId === fork.id && item.label === "fork replay checkpoint");
+    expect(forkCheckpoint).toBeDefined();
+    if (!forkCheckpoint) throw new Error("Expected a fork learning checkpoint.");
     const restoredFork = restoreSandboxCheckpoint(forkCheckpointState, fork.id, forkCheckpoint.id);
     const forkHypothesisIds = restoredFork.growthHypotheses?.filter((item) => (item as typeof item & { sandboxSessionId?: string }).sandboxSessionId === fork.id).map((item) => item.id) ?? [];
     expect(new Set(forkHypothesisIds).size).toBe(forkHypothesisIds.length);

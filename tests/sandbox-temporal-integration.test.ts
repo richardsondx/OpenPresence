@@ -152,7 +152,9 @@ describe("Playground temporal integration boundary", () => {
       events: [{ id: "integration:source-event", sessionId: source.id, type: "system", title: "Source marker", detail: "checkpoint isolation", time: source.virtualNow, tone: "neutral" }],
     };
     state = createSandboxCheckpoint(state, source.id, "branch point");
-    const checkpoint = state.sandboxCheckpoints?.[0]!;
+    const checkpoint = state.sandboxCheckpoints?.[0];
+    expect(checkpoint).toBeDefined();
+    if (!checkpoint) throw new Error("Expected a Sandbox checkpoint.");
     state = forkSandboxCheckpoint(state, source.id, checkpoint.id);
     const fork = state.playgroundSessions.find((item) => item.id !== source.id && item.source === "replay")!;
 
