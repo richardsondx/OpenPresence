@@ -2440,13 +2440,8 @@ function AgentWorkspaceShell({
   ];
   const foregroundRun = (state.operationalRuns ?? []).find((run) => run.presenceId === presence.id && run.kind === "operator_chat" && ["running", "queued", "recovering", "reconciling"].includes(run.state));
   const foregroundStatus = foregroundRun ? foregroundRun.state === "queued" ? "Message queued" : foregroundRun.state === "running" ? "Working on your request" : "Reconnecting to your task" : undefined;
-  const environmentLabel = presence.environment === "sandbox"
-    ? "Sandbox · no public delivery"
-    : presence.connectionMode === "native"
-      ? "Live · Native X"
-      : presence.connectionMode === "bridge"
-        ? "Live · Browser Bridge"
-        : "Live · disconnected";
+  const environmentState = environmentStateFor(state, presence);
+  const environmentLabel = environmentState.label;
   const navigation = (placement: string) => <nav className={`agent-navigation ${placement}`} aria-label={`${placement === "desktop-navigation" ? "Desktop" : "Mobile"} navigation`}>{destinations.map((destination) => <button key={destination.view} type="button" aria-current={view === destination.view || destination.view === "schedule" && view === "work" ? "page" : undefined} title={destination.label} onClick={() => { setView(destination.view); setAgentMenuOpen(false); }}>{destination.icon}<span>{destination.label}</span></button>)}</nav>;
   return (
     <main className={`app-shell theme-${theme} ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${agentMenuOpen ? "agent-menu-open" : ""}`}>
@@ -2473,7 +2468,7 @@ function AgentWorkspaceShell({
       <section className={`${view === "chat" || view === "teach" || view === "rehearsal" ? "workspace workspace-chat" : "workspace"} ${view === "knowledge" ? "workspace-knowledge" : ""} ${inspector ? "has-inspector" : ""}`}>
         <header className="topbar">
           <button type="button" className="mobile-agent-menu-button" aria-label="Switch agent or open settings" aria-expanded={agentMenuOpen} onClick={() => setAgentMenuOpen((open) => !open)}><PanelLeft size={21} /></button>
-          <button type="button" className="workspace-agent-heading" aria-label={`About ${agent.name}`} onClick={() => setInspector((current) => current ? null : "attention")}><PresenceGlyph accent={agent.accent} name={agent.name} avatarVariant={agent.avatarVariant} /><span><strong>{agent.name}</strong><small role={foregroundStatus ? "status" : undefined}>{foregroundStatus ?? `${presence.handle} · ${channelLabel(presence.channel, state.channelDefinitions)}`}</small>{(view !== "chat" || presence.environment === "sandbox" || presence.connectionMode !== "native") && <small className={`workspace-agent-environment workspace-agent-environment-${presence.environment}`}>{environmentLabel}</small>}</span></button>
+          <button type="button" className="workspace-agent-heading" aria-label={`About ${agent.name}`} onClick={() => setInspector((current) => current ? null : "attention")}><PresenceGlyph accent={agent.accent} name={agent.name} avatarVariant={agent.avatarVariant} /><span><strong>{agent.name}</strong><small role={foregroundStatus ? "status" : undefined}>{foregroundStatus ?? `${presence.handle} · ${channelLabel(presence.channel, state.channelDefinitions)}`}</small>{(view !== "chat" || environmentState.tone !== "healthy") && <small className={`workspace-agent-environment workspace-agent-environment-${environmentState.tone}`}>{environmentLabel}</small>}</span></button>
           <div className="topbar-actions context-controls" aria-label="Workspace controls">
             <button type="button" className="context-control context-sidebar-toggle" aria-label={inspector ? "Collapse context sidebar" : "Open context sidebar"} aria-pressed={Boolean(inspector)} title={inspector ? "Collapse context sidebar" : "Open context sidebar"} onClick={() => setInspector((current) => current ? null : "attention")}>{inspector ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}</button>
           </div>
@@ -8314,6 +8309,7 @@ function LiveView({
   setView: (view: View) => void;
 }) {
   const selected = state.presence;
+  const environmentState = environmentStateFor(state, selected);
   const presenceName = selected?.name ?? "this Presence";
   const publicRequests = selected ? (state.publicRequests ?? []).filter((request) => request.presenceId === selected.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt)) : [];
   const pendingPublicRequestCount = publicRequests.filter((request) => request.disposition === "needs_operator_review").length;
@@ -9398,7 +9394,7 @@ function LiveView({
         className="activity-heading"
         eyebrow="Activity"
         title={`${presenceName} at a glance`}
-        titleAdornment={<span className={`activity-live-state activity-live-state-${paused ? "paused" : runtimeUnavailable ? "unavailable" : operationalHealth?.status ?? "live"}`}><span aria-hidden="true">{paused ? "◐" : runtimeUnavailable ? "!" : operationalHealth?.status === "needs_you" || operationalHealth?.status === "degraded" ? "!" : operationalHealth?.status === "recovering" ? "◐" : "●"}</span> {paused ? "Paused" : runtimeUnavailable ? "OpenPresence unavailable" : operationalHealth?.status === "needs_you" ? "Needs you" : operationalHealth?.status === "degraded" ? "Degraded" : operationalHealth?.status === "recovering" ? "Recovering" : "Live"}</span>}
+        titleAdornment={<><span className={`activity-live-state activity-live-state-${paused ? "paused" : runtimeUnavailable ? "unavailable" : operationalHealth?.status ?? "live"}`}><span aria-hidden="true">{paused ? "◐" : runtimeUnavailable ? "!" : operationalHealth?.status === "needs_you" || operationalHealth?.status === "degraded" ? "!" : operationalHealth?.status === "recovering" ? "◐" : "●"}</span> {paused ? "Paused" : runtimeUnavailable ? "OpenPresence unavailable" : operationalHealth?.status === "needs_you" ? "Needs you" : operationalHealth?.status === "degraded" ? "Degraded" : operationalHealth?.status === "recovering" ? "Recovering" : "Live"}</span><span className={`activity-environment-state activity-environment-state-${environmentState.tone}`} data-testid="activity-environment-state">{environmentState.label}</span></>}
         description={`What ${presenceName} is doing, what needs you, and what actually happened.`}
         actionsClassName="heading-actions"
         actions={<>
@@ -13123,6 +13119,20 @@ function mirrorHealthFor(state: OpenPresenceState, presence: OpenPresenceState["
   }
   if (observation?.status === "stale" || observation?.status === "degraded") return { label: "STALE", detail: `Last observed ${formatMirrorDate(observation.lastObservedAt)} · Showing last known public history`, tone: "warning" };
   return { label: "DISCONNECTED", detail: "Showing last verified public history until the X Connector reconnects.", tone: "offline" };
+}
+
+type EnvironmentState = { label: string; tone: "healthy" | "warning" | "offline" | "sandbox" | "paused" | "review" };
+
+function environmentStateFor(state: OpenPresenceState, presence: OpenPresenceState["presence"]): EnvironmentState {
+  if (!presence) return { label: "Disconnected", tone: "offline" };
+  if (presence.environment === "sandbox") return { label: "Sandbox · simulated", tone: "sandbox" };
+  if (presence.status === "paused") return { label: "Live · paused", tone: "paused" };
+  const mirror = mirrorHealthFor(state, presence);
+  if (mirror.tone === "offline") return { label: "Live · disconnected", tone: "offline" };
+  if (state.executions.some((execution) => execution.presenceId === presence.id && execution.status === "awaiting-review")) return { label: "Live · approval required", tone: "review" };
+  if (mirror.label === "SYNCING") return { label: "Live · syncing", tone: "warning" };
+  if (mirror.label === "STALE") return { label: "Live · stale", tone: "warning" };
+  return { label: "Live · connected", tone: "healthy" };
 }
 
 function formatMirrorDate(value?: string) {

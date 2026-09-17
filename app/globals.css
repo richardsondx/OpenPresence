@@ -1343,6 +1343,11 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .activity-live-state span { font-size: 15px; line-height: 1; }
 .activity-live-state-paused, .activity-live-state-needs_you { color: #a45d3c; }
 .activity-live-state-recovering { color: #a56d29; }
+.activity-environment-state { display: inline-flex; align-items: center; min-height: 22px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font: 10px "DM Mono", monospace; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+.activity-environment-state-sandbox { border-color: #d9b69c; color: #9b5b36; }
+.activity-environment-state-review, .activity-environment-state-paused { border-color: #e2bfa8; color: #a45d3c; }
+.activity-environment-state-warning { border-color: #dec995; color: #946827; }
+.activity-environment-state-offline { border-color: #d6b8b4; color: #9b4f49; }
 .activity-pulse-summary { display: flex; align-items: center; gap: 10px; margin: 14px 0 24px; padding: 0 2px; color: var(--muted); font: 10px "DM Mono", monospace; }
 .activity-pending-mentions { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; margin: 0 0 24px; padding: 17px 19px; border: 1px solid #efd4c3; border-left: 4px solid #d68754; border-radius: 12px; background: linear-gradient(100deg, #fff8f2, #fffdfb); }
 .activity-pending-mentions-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; color: #a85e36; background: #fce6d8; }
@@ -7252,6 +7257,9 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .workspace-agent-heading small { color: var(--muted); font-size: 12px; }
 .workspace-agent-heading .workspace-agent-environment { font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
 .workspace-agent-environment-sandbox { color: #9b5b36 !important; }
+.workspace-agent-environment-review, .workspace-agent-environment-paused { color: #a45d3c !important; }
+.workspace-agent-environment-warning { color: #946827 !important; }
+.workspace-agent-environment-offline { color: #9b4f49 !important; }
 .workspace-agent-heading .presence-glyph { width: 40px; height: 40px; }
 .app-shell .operator-chat-page { height: calc(100dvh - 76px); min-height: 0; display: flex; flex-direction: column; }
 .app-shell .operator-chat-layout { flex: 1; min-height: 0; height: 100%; background: #fcfbfa; padding: 16px 28px 20px; }
