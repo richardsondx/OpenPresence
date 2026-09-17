@@ -3621,7 +3621,10 @@ export function restoreSandboxCheckpoint(source: OpenPresenceState, sessionId: s
   const snapshot = checkpoint.snapshot as SandboxWorldSnapshot;
   assertSandboxWorldSnapshot(snapshot);
   const session = source.playgroundSessions.find((item) => item.id === sessionId);
-  return restoreSandboxWorld(source, snapshot, { restoreLearning: true, ...(session?.source === "replay" ? { learningSessionId: sessionId } : {}) });
+  // Restore the checkpoint's own learning scope for both fresh and replay
+  // sessions. Omitting the scope on a fresh source preserves later Sandbox
+  // overlays and appends the checkpoint learning a second time after restart.
+  return restoreSandboxWorld(source, snapshot, { restoreLearning: true, learningSessionId: sessionId });
 }
 
 /** Create an isolated branch from a full-world checkpoint. Existing durable
@@ -3640,7 +3643,7 @@ export function forkSandboxCheckpoint(source: OpenPresenceState, sessionId: stri
     collections: Object.fromEntries(Object.entries(original.collections).map(([key, values]) => [key, values.map((value) => value && typeof value === "object" ? { ...(value as Record<string, unknown>), sessionId: forkedSessionId, sandboxSessionId: forkedSessionId } : value)])),
   };
   forked.digest = sandboxWorldDigest(forked);
-  return restoreSandboxWorld(source, forked, { restoreLearning: true, learningSessionId: forkedSessionId });
+  return restoreSandboxWorld(source, forked, { restoreLearning: true, learningSessionId: forkedSessionId, namespaceUnscopedLearning: true });
 }
 
 export function syncPlaygroundTime(source: OpenPresenceState, sessionId: string) {

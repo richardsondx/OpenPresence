@@ -54,10 +54,30 @@ function hash(value: string): string {
   return (result >>> 0).toString(16).padStart(8, "0");
 }
 
+function belongsToSession(item: unknown, sessionId: string): boolean {
+  if (!item || typeof item !== "object") return false;
+  const record = item as { sessionId?: string; sandboxSessionId?: string };
+  return record.sessionId === sessionId || record.sandboxSessionId === sessionId;
+}
+
+function uniqueById(values: unknown[]): unknown[] {
+  const result: unknown[] = [];
+  const seen = new Set<string>();
+  for (const item of values) {
+    const id = item && typeof item === "object" && typeof (item as { id?: unknown }).id === "string"
+      ? (item as { id: string }).id
+      : undefined;
+    if (id && seen.has(id)) continue;
+    if (id) seen.add(id);
+    result.push(item);
+  }
+  return result;
+}
+
 function sessionItems(state: OpenPresenceState, key: string, sessionId: string): unknown[] {
   const values = (state as unknown as Record<string, unknown>)[key];
   if (!Array.isArray(values)) return [];
-  return clone(values.filter((item) => Boolean(item && typeof item === "object" && (item as { sessionId?: string }).sessionId === sessionId)));
+  return clone(values.filter((item) => belongsToSession(item, sessionId)));
 }
 
 function learningItems(state: OpenPresenceState, key: string, presenceId: string, sandboxSessionId?: string): unknown[] {
@@ -74,10 +94,10 @@ function learningItems(state: OpenPresenceState, key: string, presenceId: string
   }));
 }
 
-function namespacedLearningRecord(value: unknown, key: string, sessionId: string, idMap: Map<string, string>): unknown {
+function namespacedLearningRecord(value: unknown, key: string, sessionId: string, idMap: Map<string, string>, namespaceUnscoped: boolean): unknown {
   if (!value || typeof value !== "object") return value;
   const record = clone(value) as Record<string, unknown>;
-  if (record.sandboxSessionId === sessionId) return record;
+  if (record.sandboxSessionId === sessionId || (!record.sandboxSessionId && !namespaceUnscoped)) return record;
   const originalId = typeof record.id === "string" ? record.id : undefined;
   if (originalId) {
     const nextId = `${originalId}:sandbox:${sessionId}`;
@@ -123,7 +143,7 @@ export function sandboxWorldDigest(snapshot: Omit<SandboxWorldSnapshot, "digest"
 }
 
 /** Restore only one isolated world's records; other sessions remain untouched. */
-export function restoreSandboxWorld(source: OpenPresenceState, snapshot: SandboxWorldSnapshot, options: { restoreLearning?: boolean; learningSessionId?: string } = {}): OpenPresenceState {
+export function restoreSandboxWorld(source: OpenPresenceState, snapshot: SandboxWorldSnapshot, options: { restoreLearning?: boolean; learningSessionId?: string; namespaceUnscopedLearning?: boolean } = {}): OpenPresenceState {
   if (snapshot.version !== 1) throw new Error(`Unsupported Sandbox replay version: ${snapshot.version}.`);
   const state = clone(source);
   const sessionId = snapshot.session.id;
@@ -135,8 +155,8 @@ export function restoreSandboxWorld(source: OpenPresenceState, snapshot: Sandbox
     if (!Array.isArray(values)) continue;
     const restored = snapshot.collections[key] ?? [];
     (state as unknown as Record<string, unknown>)[key] = [
-      ...values.filter((item) => !(item && typeof item === "object" && (item as { sessionId?: string }).sessionId === sessionId)),
-      ...clone(restored),
+      ...values.filter((item) => !belongsToSession(item, sessionId)),
+      ...uniqueById(clone(restored)),
     ];
   }
   if (options.restoreLearning && snapshot.learning) {
@@ -145,7 +165,7 @@ export function restoreSandboxWorld(source: OpenPresenceState, snapshot: Sandbox
     for (const key of learningKeys) for (const item of snapshot.learning[key]) {
       if (item && typeof item === "object" && typeof (item as { id?: unknown }).id === "string") {
         const originalId = (item as { id: string }).id;
-        idMap.set(originalId, (item as { sandboxSessionId?: string }).sandboxSessionId === options.learningSessionId
+        idMap.set(originalId, ((item as { sandboxSessionId?: string }).sandboxSessionId === options.learningSessionId || (!(item as { sandboxSessionId?: string }).sandboxSessionId && !options.namespaceUnscopedLearning))
           ? originalId
           : `${originalId}:sandbox:${options.learningSessionId}`);
       }
@@ -163,7 +183,7 @@ export function restoreSandboxWorld(source: OpenPresenceState, snapshot: Sandbox
             ? record.sandboxSessionId !== learningSessionId
             : Boolean(record.sandboxSessionId) || (record.presenceId !== snapshot.learning!.presenceId && record.originatingPresenceId !== snapshot.learning!.presenceId);
         }),
-        ...learningValues.map((item) => learningSessionId ? namespacedLearningRecord(item, key, learningSessionId, idMap) : item),
+        ...learningValues.map((item) => learningSessionId ? namespacedLearningRecord(item, key, learningSessionId, idMap, Boolean(options.namespaceUnscopedLearning)) : item),
       ];
     }
   }
