@@ -192,6 +192,26 @@ function autonomousResponsibilityFallback(message: string) {
   };
 }
 
+function missingGrowthContextQuestion(state: OpenPresenceState, message: string, stepIndex: number) {
+  const audience = state.agent?.audience?.trim();
+  const topics = state.agent?.topics?.filter(Boolean) ?? [];
+  const hasUserContext = Boolean(audience && audience !== "builders and curious operators")
+    || (topics.length > 0 && JSON.stringify(topics) !== JSON.stringify(["AI agents", "software", "useful ideas"]));
+  if (stepIndex !== 0 || !state.agent || hasUserContext) return undefined;
+  const text = message.trim();
+  const isGrowthGoal = /\b(?:grow|followers|audience|account)\b/i.test(text)
+    && /\b(?:followers|audience|account|reach)\b/i.test(text);
+  if (!isGrowthGoal) return undefined;
+  const namesAudience = /\b(?:among|target(?:ing)?|reach(?:ing)?|serv(?:e|ing))\s+(?!\d)[a-z][a-z0-9 ,&-]{2,80}/i.test(text)
+    || /\b(?:founders|builders|developers|engineers|operators|creators|designers|marketers|researchers|customers|students)\b/i.test(text);
+  if (namesAudience) return undefined;
+  // A growth number is not enough context for an Agent to choose a social
+  // direction. Ask for the user's audience/positioning, while leaving the
+  // strategy, plan, and execution choices to the Agent once that context is
+  // supplied. This is a durable onboarding boundary, not a task prompt.
+  return "I can take that on. Before I choose the direction, who are we trying to reach and what should this account be known for?";
+}
+
 /**
  * Keep provider/model work from competing with the operator UI in local
  * development. A queued durable run remains eligible for the next temporal
@@ -642,7 +662,8 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
       run.stage = "operator_chat.generating";
       run.lastProgressAt = new Date().toISOString();
       upsertOperationalRun(run);
-      const raw = await generateAgentReply(next, operatorMessage.content, undefined, {
+      const onboardingQuestion = missingGrowthContextQuestion(next, operatorMessage.content, stepIndex);
+      const raw = onboardingQuestion ?? await generateAgentReply(next, operatorMessage.content, undefined, {
         operatorConversation: true,
         operatorHarness: `${operatorChatHarnessInstructions}\n${strategy.prompt}\nOperator message timestamp: ${operatorMessage.timestamp}. Current time: ${new Date().toISOString()}.${operatorAttachmentContext}${scopedAssignmentContext}\nCurrent social capabilities: ${JSON.stringify(derivePresenceCapabilityManifest(next, run.presenceId))}\nEnabled Agent tools: ${JSON.stringify(next.toolBindings.filter((item) => item.agentId === next.agent?.id && item.enabled !== false).map((item) => item.toolId))}\n${stepIndex === 11 ? "Tool budget reached. Return an answer from the evidence already available." : ""}`,
         operatorHistory,
@@ -661,6 +682,10 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
       let step = isAiMockEnabled() && !raw.trim().startsWith("{") && !raw.trim().startsWith("[")
         ? { kind: "answer" as const, text: raw }
         : parseOperatorChatStep(raw);
+      if (onboardingQuestion) {
+        finalReply = onboardingQuestion;
+        break;
+      }
       // A clear outcome-ownership request must not degrade into ordinary
       // conversation just because a provider returned prose instead of the
       // structured assignment tool call. This fallback is deliberately

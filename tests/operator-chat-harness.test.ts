@@ -47,6 +47,18 @@ describe("private operator Chat harness", () => {
     expect(message?.causalTime).toEqual({ clock: "sandbox", at: session.virtualNow, sessionId: session.id });
   });
 
+  it("asks for missing audience context before choosing a growth direction", async () => {
+    const original = fixture("Grow my account toward 100,000 followers.");
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+    const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
+    const reply = saved.operatorConversations!.flatMap((item) => item.messages).find((item) => item.replyToMessageId === original.message.id && item.role === "presence");
+    expect(reply?.content).toContain("who are we trying to reach");
+    expect(reply?.content).toContain("what should this account be known for");
+    expect(saved.assignments).toHaveLength(0);
+    expect(getOperationalRun(run.id)?.state).toBe("succeeded");
+  });
+
   it("continues a promise-only answer into actual research before completing, and persists choices", async () => {
     const original = fixture("Find a current startup participation format and draft two options. Do not publish.");
     const steps = [
