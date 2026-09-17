@@ -34,6 +34,17 @@ gate missing from its contract.
 Statuses below remain PARTIAL wherever a declared behavioral contract still has
 an explicit missing gate; no row is promoted from a green test alone.
 
+Final candidate delta: immutable candidate `b1cd557` passed the canonical
+composed seven-day trajectory, detached exact-candidate independent verifier
+(including cross-process replay and cross-rate checks), detached public
+Chromium trajectories, and final broad release health (128 files / 1,204
+tests; lint 0 errors / 155 warnings; typecheck; build; runtime doctor). The
+candidate-bound bundle is recorded in
+`qa-learnings/release-candidate-b1cd557-2026-09-17.md`. The broad suite also
+caught and closed a test-harness child-process discovery defect. No capability
+is promoted merely because this composed run is green; each remaining PARTIAL
+row retains its exact missing behavioral gate.
+
 ## Current ledger
 
 Proof-gate shorthand used in the closure manifest: `I` implemented, `P`
