@@ -97,6 +97,27 @@ export interface TemporalTrajectoryRecord {
   data?: unknown;
 }
 
+/**
+ * Typed lineage retained inside the single durable Sandbox trajectory.
+ * `parentIds` remains the stable compatibility representation; `parentTypes`
+ * makes the causal edge meaningful to an independent verifier without having
+ * to infer semantics from an ID prefix or a neighboring domain collection.
+ */
+export type TemporalCausalParentType =
+  | "temporal_event"
+  | "mirror_object"
+  | "assignment"
+  | "social_intent"
+  | "execution"
+  | "outcome"
+  | "operator_directive"
+  | "unknown";
+
+export interface TemporalCausalParents {
+  parentIds: string[];
+  parentTypes: Record<string, TemporalCausalParentType>;
+}
+
 export interface SandboxTemporalBounds {
   /** Maximum event occurrences ever scheduled by this kernel. */
   maxEvents: number;

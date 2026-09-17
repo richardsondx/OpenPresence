@@ -219,6 +219,11 @@ describe("Sandbox and Playground boundaries", () => {
     expect(trajectory.find((item) => item.kind === "execution")?.data).toMatchObject({ causal: { parentIds: [intent.id] } });
     expect(trajectory.find((item) => item.kind === "result")?.data).toMatchObject({ causal: { parentIds: [execution.id] } });
     expect(trajectory.find((item) => item.kind === "outcome")?.data).toMatchObject({ causal: { parentIds: [execution.id, intent.id] } });
+    expect(trajectory.find((item) => item.kind === "observation")?.data).toMatchObject({ causal: { parentTypes: {} } });
+    expect(trajectory.find((item) => item.kind === "decision")?.data).toMatchObject({ causal: { parentTypes: { [target.id]: "mirror_object" } } });
+    expect(trajectory.find((item) => item.kind === "execution")?.data).toMatchObject({ causal: { parentTypes: { [intent.id]: "social_intent" } } });
+    expect(trajectory.find((item) => item.kind === "result")?.data).toMatchObject({ causal: { parentTypes: { [execution.id]: "execution" } } });
+    expect(trajectory.find((item) => item.kind === "outcome")?.data).toMatchObject({ causal: { parentTypes: { [execution.id]: "execution", [intent.id]: "social_intent" } } });
     expect(state.growthEvidenceRecords).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "WORLD_OUTCOME", verified: true, causalDecisionIds: [decision.id], causalMirrorObjectIds: [expect.any(String)], sandboxSessionId: session.id })]));
     expect(state.growthEvidenceRecords?.find((record) => record.causalDecisionIds?.includes(decision.id))?.statement).toContain(state.presence!.brief.purpose);
   });

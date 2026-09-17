@@ -31,7 +31,7 @@ import { hasObservedOwnReplyForTarget } from "./duplicate-public-outcome";
 import { recordLearningCounterfactualInPlace } from "./learning-runtime";
 import { recordAgentInitiatedUpdate } from "./operator-initiated-communication";
 import { SandboxTemporalKernel } from "./sandbox-temporal";
-import type { TemporalEvent } from "./sandbox-temporal";
+import type { TemporalCausalParentType, TemporalEvent } from "./sandbox-temporal";
 import { assertSandboxWorldSnapshot, captureSandboxWorld, restoreSandboxWorld, sandboxWorldDigest, type SandboxWorldSnapshot } from "./sandbox-replay";
 
 const now = () => new Date().toISOString();
@@ -3544,6 +3544,35 @@ export function recordSandboxTrajectoryInPlace(state: OpenPresenceState, session
     kernel = SandboxTemporalKernel.fromSnapshot({ ...snapshot, now: repairedNow, acceleration: { ...snapshot.acceleration, updatedAt: repairedNow } });
   }
   const requestedAt = at ? Date.parse(at) : kernel.now;
+  const causal = data.causal;
+  if (causal && typeof causal === "object" && Array.isArray((causal as { parentIds?: unknown }).parentIds)) {
+    const parentIds = [...new Set((causal as { parentIds: unknown[] }).parentIds.filter((value): value is string => typeof value === "string" && value.length > 0))];
+    const temporalEventIds = new Set(kernel.events.flatMap((item) => [item.id, item.rootId]));
+    const sessionCollection = (key: keyof OpenPresenceState) => {
+      const values = state[key];
+      return Array.isArray(values) ? values : [];
+    };
+    const parentTypes: Record<string, TemporalCausalParentType> = {};
+    for (const parentId of parentIds) {
+      const type: TemporalCausalParentType = temporalEventIds.has(parentId)
+        ? "temporal_event"
+        : sessionCollection("mirrorObjects").some((item) => item && typeof item === "object" && (item as { id?: string }).id === parentId && (item as { sessionId?: string }).sessionId === sessionId)
+          ? "mirror_object"
+          : sessionCollection("assignments").some((item) => item && typeof item === "object" && (item as { id?: string }).id === parentId && (item as { sessionId?: string }).sessionId === sessionId)
+            ? "assignment"
+            : sessionCollection("socialIntents").some((item) => item && typeof item === "object" && (item as { id?: string }).id === parentId && (item as { sessionId?: string }).sessionId === sessionId)
+              ? "social_intent"
+              : sessionCollection("executions").some((item) => item && typeof item === "object" && (item as { id?: string }).id === parentId && (item as { sessionId?: string }).sessionId === sessionId)
+                ? "execution"
+                : sessionCollection("outcomes").some((item) => item && typeof item === "object" && (item as { id?: string }).id === parentId && (item as { sessionId?: string }).sessionId === sessionId)
+                  ? "outcome"
+                  : sessionCollection("operatorDirectives").some((item) => item && typeof item === "object" && (item as { id?: string }).id === parentId)
+                    ? "operator_directive"
+                    : "unknown";
+      parentTypes[parentId] = type;
+    }
+    data = { ...data, causal: { parentIds, parentTypes } };
+  }
   // Domain persistence timestamps use wall time while Sandbox cognition uses
   // the session clock. A delayed wall-clock write must not invalidate an
   // otherwise valid virtual trajectory; retain causal ordering at the current
