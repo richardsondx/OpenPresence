@@ -3,7 +3,7 @@ import { readState, writeState } from "../lib/db";
 import { POST as statePost } from "../app/api/state/route";
 import { applyOperation, createAgent, startPlaygroundSession } from "../lib/runtime";
 import type { OpenPresenceState } from "../lib/types";
-import { SandboxTemporalKernel, type TemporalTrajectoryRecord } from "../lib/sandbox-temporal";
+import { type TemporalTrajectoryRecord } from "../lib/sandbox-temporal";
 
 const input = {
   name: "Multi-rate Eval",
@@ -70,15 +70,9 @@ function configureResponsibility() {
   });
   state = startPlaygroundSession(state, state.presence!.id, "fresh");
   const session = state.playgroundSessions[0]!;
-  // Seed a real delayed measurement and an explicitly injected transport
-  // failure. The runtime adapter must persist the delayed outcome and drive
-  // the kernel's bounded backoff/exhaustion path at every advance rate.
-  const temporal = SandboxTemporalKernel.fromSnapshot(session.temporalSnapshot!);
-  const startMs = Date.parse(session.virtualNow);
-  const cause = temporal.scheduleEvent({ id: "multi-rate-measurement-cause", type: "measurement_due", at: startMs + 15 * 60_000, payload: { metric: "qualified_followers" } });
-  temporal.scheduleDelayedOutcome({ id: "multi-rate-delayed-outcome", causeEventId: cause.id, at: startMs + 90 * 60_000, value: { qualifiedFollowers: 3 } });
-  temporal.startRetry({ id: "multi-rate-retry", operationId: "multi-rate-delivery", at: startMs + 30 * 60_000, policy: { maxAttempts: 2, initialDelayMs: 30 * 60_000 }, payload: { sandboxFailure: true } });
-  session.temporalSnapshot = temporal.snapshot();
+  // Delayed truth and transport failure are staged later through the public
+  // API after an injected observation, keeping the composed run on the same
+  // control plane a developer can exercise through the CLI.
   const nextDay = new Date(Date.parse(session.virtualNow) + 24 * 60 * 60 * 1000);
   state.calendar = [{
     id: "multi-rate-calendar-attention",
@@ -125,8 +119,8 @@ function assertPersistedGraphIsCoherent(state: OpenPresenceState, sessionId: str
   const calendarEvent = state.events.find((item) => item.sessionId === sessionId && item.title === "Calendar attention started");
   expect(calendarEvent?.time).toBeDefined();
   expect(calendarEvent?.sourceTemporalEventId).toMatch(/^calendar:/);
-  expect(session.temporalSnapshot?.outcomes.find((item) => item.id === "multi-rate-delayed-outcome")).toMatchObject({ status: "recorded", causeEventId: "multi-rate-measurement-cause" });
-  expect(session.temporalSnapshot?.retries.find((item) => item.id === "multi-rate-retry")).toMatchObject({ status: "exhausted", attempt: 2 });
+  expect(session.temporalSnapshot?.outcomes).toEqual(expect.arrayContaining([expect.objectContaining({ status: "recorded", causeEventId: expect.any(String) })]));
+  expect(session.temporalSnapshot?.retries).toEqual(expect.arrayContaining([expect.objectContaining({ operationId: "multi-rate-delivery", status: "exhausted", attempt: 2 })]));
   expect(trajectory.some((record) => record.kind === "retry_failed")).toBe(true);
   expect(trajectory.some((record) => record.kind === "retry_exhausted")).toBe(true);
   expect(trajectory.some((record) => record.kind === "outcome_recorded")).toBe(true);
@@ -138,10 +132,22 @@ async function runAtRate(rateMinutes: number): Promise<RunSummary> {
   const virtualStart = sessionFor(fixture.state, fixture.sessionId).virtualNow;
   let advancedMinutes = 0;
   let worldIndex = 0;
+  let outcomeStaged = false;
+  let retryScheduled = false;
   while (advancedMinutes < virtualMinutes) {
     const stimulus = worldStimuli[worldIndex];
     if (stimulus) {
-      await postState({ type: "addSandboxEvent", sessionId: fixture.sessionId, actorName: stimulus.actorName, actorHandle: stimulus.actorHandle, actionId: "post", content: stimulus.content, ...("assets" in stimulus && stimulus.assets ? { assets: stimulus.assets } : {}) });
+      const injected = await postState({ type: "addSandboxEvent", sessionId: fixture.sessionId, actorName: stimulus.actorName, actorHandle: stimulus.actorHandle, actionId: "post", content: stimulus.content, ...("assets" in stimulus && stimulus.assets ? { assets: stimulus.assets } : {}) });
+      if (!outcomeStaged) {
+        const causeEventId = injected.events.find((item) => item.sessionId === fixture.sessionId)?.id;
+        expect(causeEventId).toBeTruthy();
+        await postState({ type: "stageSandboxOutcome", sessionId: fixture.sessionId, causeEventId: causeEventId!, visibleAfterMinutes: 90, value: { qualifiedFollowers: 3 } });
+        outcomeStaged = true;
+      }
+      if (!retryScheduled) {
+        await postState({ type: "scheduleSandboxRetry", sessionId: fixture.sessionId, operationId: "multi-rate-delivery", maxAttempts: 2, initialDelayMinutes: 30 });
+        retryScheduled = true;
+      }
       worldIndex += 1;
     }
     const step = Math.min(rateMinutes, virtualMinutes - advancedMinutes);
