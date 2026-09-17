@@ -1863,9 +1863,10 @@ export function derivePublicHistory(source: OpenPresenceState, presenceId?: stri
   });
 }
 
-export function recordRuntimeEvent(source: OpenPresenceState, presenceId: string, title: string, detail: string, tone: LiveEvent["tone"] = "neutral", lineage?: Pick<LiveEvent, "intentId" | "executionId" | "outcomeId" | "decisionId" | "sessionId" | "invocationId" | "runId" | "sourceObjectId" | "attentionEpisodeId"> & { communicationDedupeKey?: string }) {
+export function recordRuntimeEvent(source: OpenPresenceState, presenceId: string, title: string, detail: string, tone: LiveEvent["tone"] = "neutral", lineage?: Pick<LiveEvent, "intentId" | "executionId" | "outcomeId" | "decisionId" | "sessionId" | "invocationId" | "runId" | "sourceObjectId" | "attentionEpisodeId"> & { communicationDedupeKey?: string; suppressCommunication?: boolean }) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
-  const runtimeEvent = event("system", title, detail, tone, { presenceId, ...lineage });
+  const { suppressCommunication, ...eventLineage } = lineage ?? {};
+  const runtimeEvent = event("system", title, detail, tone, { presenceId, ...eventLineage });
   state.events.unshift(runtimeEvent);
   // A social plan that explicitly chose silence is still a judgment. Keep
   // this invariant at the shared event boundary because Sandbox and live
@@ -1887,6 +1888,7 @@ export function recordRuntimeEvent(source: OpenPresenceState, presenceId: string
       }
     } catch { /* Runtime event detail is allowed to remain descriptive text. */ }
   }
+  if (suppressCommunication) return state;
   const communication = recordAgentInitiatedUpdate(state, presenceId, {
     id: runtimeEvent.id,
     title,
@@ -4859,22 +4861,16 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   // retry into Chat. Collapse those persisted connector receipts at the read
   // boundary so existing users stop seeing the spam immediately, while the
   // underlying Activity/runtime history remains intact.
-  normalized.operatorConversations = normalized.operatorConversations.map((conversation) => {
-    let keptPartialCoverageNotice = false;
-    return {
-      ...conversation,
-      messages: conversation.messages.flatMap((message) => {
-        if (message.role !== "presence" || !/^Social Mirror partially updated: Observed .*inbound mentions were unavailable\./i.test(message.content)) return [message];
-        if (keptPartialCoverageNotice) return [];
-        keptPartialCoverageNotice = true;
-        return [{
-          ...message,
-          content: "X activity is partly available: I can still see recent public posts, but mentions aren't available right now. I'll keep using the last known conversations and retry automatically.",
-          agentInitiated: message.agentInitiated ? { ...message.agentInitiated, dedupeKey: "native-x-observation:partial" } : undefined,
-        }];
-      }),
-    };
-  });
+  normalized.operatorConversations = normalized.operatorConversations.map((conversation) => ({
+    ...conversation,
+    // Partial mention coverage is operational state, not a Chat interruption.
+    // Remove receipts from both the old connector wording and the newer
+    // wording so persisted workspaces stop surfacing this retry noise.
+    messages: conversation.messages.filter((message) => message.role !== "presence" || !(
+      /^Social Mirror partially updated: Observed .*inbound mentions were unavailable\./i.test(message.content)
+      || /^X activity is partly available: .*mentions aren't available right now\./i.test(message.content)
+    )),
+  }));
   normalized.assignments = normalized.assignments.map((assignment) => {
     // Only an explicit persisted flag is legacy planning-only data. Never
     // infer it from new instruction wording during normalization.

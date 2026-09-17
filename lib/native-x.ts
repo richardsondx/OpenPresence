@@ -374,7 +374,7 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
             ? `Observed ${posts.length} public post${posts.length === 1 ? "" : "s"} and ${mentions.length} inbound mention${mentions.length === 1 ? "" : "s"}${deletedOwnPostIds.length ? `; reconciled ${deletedOwnPostIds.length} deleted post${deletedOwnPostIds.length === 1 ? "" : "s"}` : ""}.`
             : "X is up to date. No recent posts, mentions, or conversations were found.",
         partial ? "warning" : "positive",
-        partial ? { communicationDedupeKey: "native-x-observation:partial" } : undefined,
+        partial ? { communicationDedupeKey: "native-x-observation:partial", suppressCommunication: true } : undefined,
       );
     }
     return next;

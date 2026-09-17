@@ -35,7 +35,7 @@ describe("importance-thresholded Agent-initiated communication", () => {
     expect(next.operatorConversations?.flatMap((conversation) => conversation.messages).some((message) => message.agentInitiated?.kind === "problem")).toBe(true);
   });
 
-  it("collapses persisted partial X coverage spam into one plain-language notice", () => {
+  it("removes persisted partial X coverage spam from Chat", () => {
     const source = createAgent({ name: "Genny", description: "Build useful things", audience: "builders", mode: "agent", handle: "genny", accent: "#000000" });
     const conversation = source.operatorConversations![0]!;
     const oldNotice = {
@@ -49,18 +49,16 @@ describe("importance-thresholded Agent-initiated communication", () => {
       operatorConversations: [{ ...conversation, messages: [oldNotice, { ...oldNotice, id: "duplicate-notice" } as never] }],
     });
     const messages = next.operatorConversations![0]!.messages;
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.content).toContain("X activity is partly available");
-    expect(messages[0]!.content).not.toContain("Social Mirror");
+    expect(messages).toHaveLength(0);
   });
 
-  it("does not interrupt Chat again when a degraded X observation is retried", () => {
+  it("does not interrupt Chat when a degraded X observation is recorded", () => {
     const source = createAgent({ name: "Genny", description: "Build useful things", audience: "builders", mode: "agent", handle: "genny", accent: "#000000" });
     const presenceId = source.presence!.id;
-    const first = recordRuntimeEvent(source, presenceId, "X activity partly available", "I can still see your recent public posts, but mentions aren't available right now.", "warning", { communicationDedupeKey: "native-x-observation:partial" });
-    const second = recordRuntimeEvent(first, presenceId, "X activity partly available", "I can still see your recent public posts, but mentions aren't available right now.", "warning", { communicationDedupeKey: "native-x-observation:partial" });
+    const first = recordRuntimeEvent(source, presenceId, "X activity partly available", "I can still see your recent public posts, but mentions aren't available right now.", "warning", { communicationDedupeKey: "native-x-observation:partial", suppressCommunication: true });
+    const second = recordRuntimeEvent(first, presenceId, "X activity partly available", "I can still see your recent public posts, but mentions aren't available right now.", "warning", { communicationDedupeKey: "native-x-observation:partial", suppressCommunication: true });
     const messages = second.operatorConversations?.flatMap((conversation) => conversation.messages) ?? [];
-    expect(messages.filter((message) => message.agentInitiated?.dedupeKey === "native-x-observation:partial")).toHaveLength(1);
+    expect(messages.filter((message) => message.agentInitiated?.dedupeKey === "native-x-observation:partial")).toHaveLength(0);
   });
 
   it.each([
