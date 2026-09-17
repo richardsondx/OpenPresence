@@ -99,7 +99,7 @@ import { peopleForPresence, resolveCanonicalPerson, isPlaceholderIdentity } from
 import { readPeopleNote } from "@/lib/people-notes";
 import { autobiographicalEventsForPerson } from "@/lib/autobiographical-memory";
 import { duplicatePublicOutcomeEvidence } from "@/lib/duplicate-public-outcome";
-import { ASSIGNMENT_PURSUIT_SCALE_PRESETS, assignmentIsCurrentlyProcessing, assignmentIsOpen, assignmentProgressLabel, assignmentPursuitScaleForWindow, audienceDeltas, capabilityProviderLabel, cleanUserFacingAssignmentInstruction, collapseAudienceSnapshots, compileAgendaWork, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, intervalForPresence, isActivityDecisionEvent, isPromotionBurstWindow, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence, relationshipPolicyFromWatchPurpose, SELF_DIRECTED_ATTENTION_PRESETS } from "@/lib/runtime";
+import { ASSIGNMENT_PURSUIT_SCALE_PRESETS, assignmentIsCurrentlyProcessing, assignmentIsOpen, assignmentProgressLabel, assignmentPursuitScaleForWindow, audienceDeltas, capabilityProviderLabel, cleanUserFacingAssignmentInstruction, collapseAudienceSnapshots, compileAgendaWork, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, intervalForPresence, isActivityDecisionEvent, isPromotionBurstWindow, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence, relationshipPolicyFromWatchPurpose, SELF_DIRECTED_ATTENTION_PRESETS } from "@/lib/runtime";
 import { assignmentPursuitVerifiedCounts } from "@/lib/runtime";
 import type {
   CalendarSlot,
@@ -13761,6 +13761,9 @@ function ScheduleView({
   const goalAssignments = visibleAssignments.filter((assignment) => assignment.activation?.type === "continuous");
   const taskAssignments = visibleAssignments.filter((assignment) => assignment.activation?.type !== "continuous");
   const filteredVisibleAssignments = taskAssignments.filter((assignment) => assignmentMatchesRecurrenceFilter(assignment, scheduleRecurrenceFilter));
+  const projectedPublishingPlan = derivePublishingPlanProjection(state, presenceId);
+  const projectedPlanWindows = (projectedPublishingPlan?.windows ?? []).filter((window) => window.status === "future" || window.status === "active");
+  const publishingResponsibility = visibleAssignments.find((assignment) => assignment.id === selectedPresence?.publishingInitiative.assignmentId || assignment.origin === "publishing_initiative");
   const scheduleDecisionAssignment = visibleAssignments.find((assignment) => ["needs_operator", "blocked"].includes(assignment.status));
   const didAutoFocusDecision = useRef(false);
   useEffect(() => {
@@ -13856,6 +13859,27 @@ function ScheduleView({
           </div>
           {processingAssignments.length > 1 && <span className="schedule-banner-count">+{processingAssignments.length - 1} more</span>}
         </div>
+      )}
+      {projectedPlanWindows.length > 0 && (
+        <section className="schedule-plan-projection" aria-label="Agent publishing plan">
+          <div className="schedule-plan-projection-heading">
+            <div>
+              <SectionEyebrow>Agent plan</SectionEyebrow>
+              <h2>Flexible publishing windows</h2>
+            </div>
+            <span>Jenny decides in the moment</span>
+          </div>
+          <p className="schedule-plan-projection-note">These are opportunities Jenny is holding open—not guaranteed posts. Open the responsibility to give her context or change direction.</p>
+          <div className="schedule-plan-projection-list">
+            {projectedPlanWindows.map((window) => (
+              <button type="button" className="schedule-plan-projection-item" key={window.id} onClick={() => publishingResponsibility && openAssignment(publishingResponsibility)} disabled={!publishingResponsibility}>
+                <span className="schedule-plan-projection-time">{new Date(window.startAt).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} · {new Date(window.startAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
+                <strong>{window.summary}</strong>
+                <small>{window.status === "active" ? "Open now" : "Upcoming · Jenny will evaluate it"}</small>
+              </button>
+            ))}
+          </div>
+        </section>
       )}
       {false && showForm && (
         <form className="add-slot-form" onSubmit={add}>

@@ -387,6 +387,7 @@ Schedule is an Agent-owned projection: it shows what Genny decided to pursue and
 - `Run now` evaluates Standing Intent; it does not publish prewritten text automatically.
 - Assignment stages and terminal outcomes remain inspectable; expired, blocked, delivery-failed, candidate-rejected, and completed are not collapsed.
 - Scoped supervisory guidance updates the linked Assignment/plan state and survives reload; direct field-edit forms are not required for intervention.
+- Active and future Publishing Plan windows appear in Schedule as flexible Agent-plan opportunities and open the linked responsibility for guidance; they are not duplicated as executable Assignments.
 - Capability-level tests must prove legacy `planningOnly` records remain safe while new Agent-owned Assignments are executable without explicit user activation.
 
 ### 14. Expression, Assets, Perception, and editorial curation
