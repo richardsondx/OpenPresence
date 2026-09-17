@@ -1499,6 +1499,11 @@ function assignmentMockCandidates(state: OpenPresenceState, instruction: string)
   ];
 }
 
+function mockLibraryAssetId(instruction: string) {
+  return instruction.match(/(?:Eligible Agent Asset Library images|Authorized reusable visuals)[\s\S]*?"assetId"\s*:\s*"([^"]+)"/i)?.[1]
+    ?? instruction.match(/Authorized reusable visuals[\s\S]*?\n-\s*([^\s·]+)\s+·/i)?.[1];
+}
+
 function mockSocialDecision(state: OpenPresenceState, instruction: string, actions: string[]): AgentSocialDecision {
   const normalized = instruction.toLowerCase();
   const can = (action: string) => actions.includes(action);
@@ -1565,7 +1570,7 @@ function mockSocialDecision(state: OpenPresenceState, instruction: string, actio
     const candidates = assignmentMockCandidates(state, instruction);
     const requestedKinds = [...new Set((["image", "chart", "gif", "link", "video"] as const).filter((kind) => new RegExp(`\\b${kind}\\b`, "i").test(normalized)))];
     const assetKind = requestedKinds.length ? requestedKinds[progress % requestedKinds.length] : undefined;
-    const libraryAssetId = instruction.match(/Eligible Agent Asset Library images[\s\S]*?"assetId"\s*:\s*"([^"]+)"/i)?.[1];
+    const libraryAssetId = mockLibraryAssetId(instruction);
     return {
       action: "post",
       // A new Assignment can share the same Sandbox session as an earlier
@@ -1579,7 +1584,7 @@ function mockSocialDecision(state: OpenPresenceState, instruction: string, actio
     };
   }
   if ((normalized.includes("consider an original publication") || normalized.includes("fresh simulated")) && can("post")) {
-    const libraryAssetId = instruction.match(/Eligible Agent Asset Library images[\s\S]*?"assetId"\s*:\s*"([^"]+)"/i)?.[1];
+    const libraryAssetId = mockLibraryAssetId(instruction);
     return {
       action: "post",
       text: "A good memory keeps the decision and the evidence that made it useful, not every transcript.",

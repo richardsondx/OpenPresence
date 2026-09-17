@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { generateAgentSocialDecision } from "../lib/ai";
 import { applyOperation, createAgent, normalizeState, recordSocialDecision } from "../lib/runtime";
 import { compileSocialStrategyContext, saveSocialTemplate, socialPlaybookForPresence } from "../lib/social-strategy";
 import { POST, GET } from "../app/api/state/route";
@@ -44,6 +45,27 @@ describe("Growth playbook workflows", () => {
     expect(context.prompt).toContain("asset-chart");
     expect(context.prompt).not.toContain("asset-stock");
     expect(context.prompt).toContain("explicitly decorative or atmosphere-only media is excluded");
+  });
+
+  it("selects the relevant retained visual when the later post decision asks for media", async () => {
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    try {
+      const state = normalizeState(createAgent({ name: "Media decision", description: "Choose evidence that fits the idea.", mode: "agent", handle: "@media_decision", accent: "#123456" }));
+      const presence = state.presence!;
+      const now = new Date().toISOString();
+      const asset = (id: string, name: string): Asset => ({ id, agentId: state.agent!.id, presenceId: presence.id, type: "image", status: "ready", retention: "preserved", rights: { status: "owned" }, provenance: { origin: "sandbox", importedAt: now }, description: name, environment: "sandbox", visibility: "public", shareability: "presence-only", createdAt: now, updatedAt: now });
+      state.assets = [asset("asset-chart", "Relevant evidence chart"), asset("asset-stock", "Decorative stock photo")];
+      state.perceptions = [
+        { id: "perception-chart", assetId: "asset-chart", presenceId: presence.id, level: "inspect", result: { observation: "A chart is visible.", uncertainty: "low", visualForm: "chart", visualRole: "evidence", decorative: false }, sourceAssetVersion: now, createdAt: now, environment: "sandbox" },
+        { id: "perception-stock", assetId: "asset-stock", presenceId: presence.id, level: "inspect", result: { observation: "A generic office photo is visible.", uncertainty: "low", visualForm: "photo", visualRole: "atmosphere", decorative: true }, sourceAssetVersion: now, createdAt: now, environment: "sandbox" },
+      ];
+      const decision = await generateAgentSocialDecision(state, "Consider an original publication for the current simulated world.", ["post"], { presence });
+      expect(decision.action).toBe("post");
+      expect(decision.assets).toEqual([expect.objectContaining({ assetId: "asset-chart" })]);
+      expect(decision.assets?.some((item) => item.assetId === "asset-stock")).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("abstracts a bounded observed source set and carries it into Growth planning", () => {
