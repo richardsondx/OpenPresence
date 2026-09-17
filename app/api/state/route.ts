@@ -18,6 +18,7 @@ import { addSandboxEvent, advanceSandboxTimeWithTemporalEvents, applyOperation, 
 import { recordSocialDecision, nativeConnectionCanObserve, recordNativeObservation, resumePresenceAfterNativeRecovery } from "@/lib/runtime";
 import { xQuoteTargetHasAvailableRoute } from "@/lib/runtime";
 import { defaultSelfDirectedAttentionPolicy } from "@/lib/runtime";
+import { SandboxTemporalKernel } from "@/lib/sandbox-temporal";
 import { assignmentPublicExpressionLeakageReason } from "@/lib/runtime";
 import { activeAssignmentPursuitWindow, assignmentPursuitBlocksNormalScheduling, assignmentPursuitHasHardResourceCapacity, assignmentPursuitUsage, assignmentPursuitVerifiedCounts, isPromotionBurstWindow, promotionBurstHasVerifiedDirectSource, promotionExpressionIssue, settlePromotionBurstProgress } from "@/lib/runtime";
 import { attentionGovernorSnapshot, requestAttentionCapacity } from "@/lib/attention-governor";
@@ -3935,7 +3936,7 @@ async function runVisualAssignmentCycle(source: OpenPresenceState, sessionId: st
   return next;
 }
 
-async function runSandboxAgentCycle(source: OpenPresenceState, sessionId: string, attentionInstruction?: string, networkResult?: NetworkSearchResult, rehearsal?: { attemptId: string; inspiration?: string }, assignmentContext?: { id: string; researchContext?: string; assignmentRunId?: string; onProgress?: (phase: "researching" | "visual_research" | "publishing") => Promise<void> }, publishingContext?: { planId: string; planRevision: number; windowId: string }) {
+async function runSandboxAgentCycle(source: OpenPresenceState, sessionId: string, attentionInstruction?: string, networkResult?: NetworkSearchResult, rehearsal?: { attemptId: string; inspiration?: string }, assignmentContext?: { id: string; researchContext?: string; assignmentRunId?: string; onProgress?: (phase: "researching" | "visual_research" | "publishing") => Promise<void> }, publishingContext?: { planId: string; planRevision: number; windowId: string }, causalTemporalEventId?: string) {
   const scope = createRuntimeScope(source, { sessionId, assignmentId: assignmentContext?.id });
   assertRuntimeScope(source, scope);
   const session = source.playgroundSessions.find((item) => item.id === sessionId);
@@ -4127,7 +4128,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
   if (inbound?.assetRefs?.length && needsMediaInspection) {
     const inspected = await inspectSandboxObject(actionSource, inbound, "inspect");
     const mediaReady = inbound.assetRefs.every((ref) => hasUsablePerception(inspected.perceptions, ref.assetId, "inspect"));
-    if (mediaReady) return runSandboxAgentCycle(inspected, sessionId, attentionInstruction, networkResult, rehearsal, assignmentContext);
+    if (mediaReady) return runSandboxAgentCycle(inspected, sessionId, attentionInstruction, networkResult, rehearsal, assignmentContext, publishingContext, causalTemporalEventId);
     const next = markSandboxObjectJudged(inspected, sessionId, inbound.externalRef.id);
     next.events.unshift({ id: `sandbox-event:${randomUUID()}`, type: "decision", title: `${presence.name} chose silence`, detail: "Attached evidence remained uninterpreted, so no media-dependent action was formed.", time: new Date().toISOString(), tone: "quiet", presenceId: presence.id, sessionId, sourceObjectId: inbound.id });
     return next;
@@ -4179,7 +4180,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
     } else {
       const result = searchSandboxNetwork(source.sandboxActors, sessionId, inbound.content?.text ?? "");
       const searched = recordSandboxNetworkSearch(actionSource, { sessionId, presenceId: presence.id, result });
-      return runSandboxAgentCycle(searched, sessionId, attentionInstruction, result, rehearsal, assignmentContext);
+      return runSandboxAgentCycle(searched, sessionId, attentionInstruction, result, rehearsal, assignmentContext, publishingContext, causalTemporalEventId);
     }
   }
   // The first planner pass can choose no_op before expression normalization.
@@ -4220,7 +4221,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
     if (!inbound?.assetRefs?.length) return actionSource;
     const next = await inspectSandboxObject(actionSource, inbound, "inspect");
     const mediaReady = inbound.assetRefs.every((ref) => hasUsablePerception(next.perceptions, ref.assetId, "inspect"));
-    if (mediaReady) return runSandboxAgentCycle(next, sessionId, attentionInstruction, networkResult, rehearsal, assignmentContext);
+    if (mediaReady) return runSandboxAgentCycle(next, sessionId, attentionInstruction, networkResult, rehearsal, assignmentContext, publishingContext, causalTemporalEventId);
     next.events.unshift({ id: `sandbox-event:${randomUUID()}`, type: "decision", title: "Media inspection requested", detail: `${presence.name} asked for a deeper reading of the attached asset before deciding whether it deserves action.`, time: new Date().toISOString(), tone: "neutral", presenceId: presence.id, sessionId });
     return next;
   }
@@ -4327,7 +4328,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
     } else {
       const result = searchSandboxNetwork(source.sandboxActors, sessionId, inbound.content?.text ?? "");
       const searched = recordSandboxNetworkSearch(actionSource, { sessionId, presenceId: presence.id, result });
-      return runSandboxAgentCycle(searched, sessionId, attentionInstruction, result, rehearsal, assignmentContext);
+      return runSandboxAgentCycle(searched, sessionId, attentionInstruction, result, rehearsal, assignmentContext, publishingContext, causalTemporalEventId);
     }
   }
   if (decision.action === "inspect") {
@@ -4336,7 +4337,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
     } else {
       const next = await inspectSandboxObject(actionSource, inbound, "inspect");
       const mediaReady = inbound.assetRefs.every((ref) => hasUsablePerception(next.perceptions, ref.assetId, "inspect"));
-      if (mediaReady) return runSandboxAgentCycle(next, sessionId, attentionInstruction, networkResult, rehearsal, assignmentContext);
+      if (mediaReady) return runSandboxAgentCycle(next, sessionId, attentionInstruction, networkResult, rehearsal, assignmentContext, publishingContext, causalTemporalEventId);
       next.events.unshift({ id: `sandbox-event:${randomUUID()}`, type: "decision", title: "Media inspection requested", detail: `${presence.name} asked for a deeper reading of the attached asset before deciding whether it deserves action.`, time: new Date().toISOString(), tone: "neutral", presenceId: presence.id, sessionId });
       return next;
     }
@@ -4454,7 +4455,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
     draft = discovered.draft;
   }
   if (conversationEpisode) applyConversationDisposition(assetSource, conversationEpisode.id, conversationDisposition, decision.rationale, undefined);
-  let next = formSandboxIntent(assetSource, { sessionId, affordance: executionAffordance, format: selectedFormat, text: draft, target, perceptionTarget: inbound?.assetRefs?.length ? inbound.externalRef : undefined, rehearsalAttemptId: rehearsal?.attemptId, assignmentId: assignment?.id, conversationEpisodeId: conversationEpisode?.id, invocationId: scope.invocationId, assets: publicationAssets, networkMetadata: { referencedPeople: decision.referencedPeople, networkReason: decision.networkReason }, ...(publishingContext ? { origin: { kind: "publishing_initiative" as const, planId: publishingContext.planId, planRevision: publishingContext.planRevision, planWindowId: publishingContext.windowId } } : {}) });
+  let next = formSandboxIntent(assetSource, { sessionId, affordance: executionAffordance, format: selectedFormat, text: draft, target, perceptionTarget: inbound?.assetRefs?.length ? inbound.externalRef : undefined, rehearsalAttemptId: rehearsal?.attemptId, assignmentId: assignment?.id, conversationEpisodeId: conversationEpisode?.id, invocationId: scope.invocationId, assets: publicationAssets, causalEventId: causalTemporalEventId, networkMetadata: { referencedPeople: decision.referencedPeople, networkReason: decision.networkReason }, ...(publishingContext ? { origin: { kind: "publishing_initiative" as const, planId: publishingContext.planId, planRevision: publishingContext.planRevision, planWindowId: publishingContext.windowId } } : {}) });
   const execution = next.executions.find((item) => item.sessionId === sessionId);
   const blockedByMedia = next.events[0]?.title === "Media needs inspection";
   if (!blockedByMedia && inbound) next = markSandboxObjectJudged(next, sessionId, inbound.externalRef.id);
@@ -4476,6 +4477,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
       relevantGrowthRevisionRef: presence.activeGrowthRevisionRef,
       socialStrategy: decision.socialStrategy,
       presenceId: presence.id,
+      causalEventId: causalTemporalEventId,
     } as Parameters<typeof recordSocialDecision>[1]);
     const recordedDecision = next.socialDecisions[0];
     if (recordedDecision && createdExecution) recordedDecision.socialIntentId = createdExecution.socialIntentId;
@@ -4682,6 +4684,12 @@ async function applySandboxTemporalEvents(source: OpenPresenceState, sessionId: 
   const finalTemporalSnapshot = initialSession.temporalSnapshot ? JSON.parse(JSON.stringify(initialSession.temporalSnapshot)) as NonNullable<typeof initialSession.temporalSnapshot> : undefined;
   let eventTrajectory = finalTemporalSnapshot?.trajectory ?? [];
   let nextTrajectoryNumber = finalTemporalSnapshot?.nextTrajectoryNumber ?? eventTrajectory.length;
+  // advanceBy records the enclosing time_advanced entry after dispatching
+  // kernel events. Calendar cognition is dispatched by this adapter, so hold
+  // that enclosing record back until all event-local records have been
+  // appended. This keeps the exported causal timeline chronological.
+  const deferredAdvance = [...eventTrajectory].reverse().find((record) => record.kind === "time_advanced" && typeof record.data === "object" && record.data !== null && "to" in record.data && (record.data as { to?: unknown }).to === Date.parse(finalVirtualNow));
+  if (deferredAdvance) eventTrajectory = eventTrajectory.filter((record) => record.sequence !== deferredAdvance.sequence);
   try {
     for (const event of processed) {
       if (event.type === "scenario_stimulus") {
@@ -4702,7 +4710,7 @@ async function applySandboxTemporalEvents(source: OpenPresenceState, sessionId: 
         session.virtualNow = new Date(event.at).toISOString();
         session.virtualTimeMode = "manual";
         next = addSandboxEvent(next, { sessionId, actionId: stimulus.type, kind: stimulus.type, actorName: actor?.displayName ?? stimulus.actorRef, actorHandle: actor?.handle, profile: actor?.profile, content: stimulus.content, language: stimulus.language ?? "en", assets: stimulus.assets, targetExternalRef: target, source: "scenario", trust: "untrusted_world_content", scenarioStimulusId: stimulus.id, temporalEventId: event.id });
-        next = await runSandboxAgentCycle(next, sessionId);
+        next = await runSandboxAgentCycle(next, sessionId, undefined, undefined, undefined, undefined, undefined, event.id);
         next = markScenarioStimulus(next, run.id, stimulusIndex + 1);
         continue;
       }
@@ -4737,7 +4745,7 @@ async function applySandboxTemporalEvents(source: OpenPresenceState, sessionId: 
       const localSession = next.playgroundSessions.find((item) => item.id === sessionId);
       if (!localSession) continue;
       next.events.unshift({ id: `sandbox-calendar:${randomUUID()}`, type: "decision", title: "Calendar attention started", detail: `${next.presences.find((item) => item.id === localSession.presenceId)?.name ?? "The Presence"} is evaluating “${slot.instruction}” in the simulated world at ${eventVirtualNow}.`, time: eventVirtualNow, tone: "positive", presenceId: localSession.presenceId, sessionId: localSession.id, sourceTemporalEventId: event.id });
-      next = await runSandboxAgentCycle(next, sessionId, slot.instruction);
+      next = await runSandboxAgentCycle(next, sessionId, slot.instruction, undefined, undefined, undefined, undefined, event.id);
       const processedSession = next.playgroundSessions.find((item) => item.id === sessionId);
       if (processedSession?.temporalSnapshot) {
         eventTrajectory = processedSession.temporalSnapshot.trajectory;
@@ -4749,7 +4757,14 @@ async function applySandboxTemporalEvents(source: OpenPresenceState, sessionId: 
     if (session) {
       session.virtualNow = finalVirtualNow;
       session.virtualTimeMode = "manual";
-      if (finalTemporalSnapshot) session.temporalSnapshot = { ...finalTemporalSnapshot, trajectory: eventTrajectory, nextTrajectoryNumber };
+      if (finalTemporalSnapshot) {
+        session.temporalSnapshot = { ...finalTemporalSnapshot, trajectory: eventTrajectory, nextTrajectoryNumber };
+        if (deferredAdvance) {
+          const kernel = SandboxTemporalKernel.fromSnapshot(session.temporalSnapshot);
+          kernel.recordTrajectory(deferredAdvance.kind, deferredAdvance.data, deferredAdvance.time);
+          session.temporalSnapshot = kernel.snapshot();
+        }
+      }
     }
   }
   return next;

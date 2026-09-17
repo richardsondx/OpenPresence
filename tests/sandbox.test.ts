@@ -153,6 +153,15 @@ describe("Sandbox and Playground boundaries", () => {
     expect(reply?.occurredAt).toBe(firstAt.toISOString());
     expect(next.calendar.find((item: { id: string }) => item.id === "calendar-local-time-1")?.lastEvaluatedAt).toBe(firstAt.toISOString());
     expect(next.events.filter((item: { sessionId?: string; title?: string }) => item.sessionId === session.id && item.title === "Calendar attention started")).toHaveLength(2);
+    const trajectory = next.playgroundSessions.find((item: { id: string }) => item.id === session.id)?.temporalSnapshot?.trajectory ?? [];
+    expect(trajectory.every((record: { time: number }, index: number) => index === 0 || record.time >= trajectory[index - 1]!.time)).toBe(true);
+    const calendarEventIds = (next.playgroundSessions.find((item: { id: string }) => item.id === session.id)?.temporalSnapshot?.events ?? [])
+      .filter((event: { type: string; status: string }) => event.type === "calendar_attention" && event.status === "fired")
+      .map((event: { id: string }) => event.id);
+    expect(calendarEventIds.length).toBe(2);
+    for (const eventId of calendarEventIds) {
+      expect(trajectory.some((record: { data?: { causal?: { parentIds?: string[] } } }) => record.data?.causal?.parentIds?.includes(eventId))).toBe(true);
+    }
   });
 
   it("keeps Sandbox, native X, and Bridge as one mutually exclusive route", () => {
