@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deliverNativeExecutions } from "../lib/native-execution-delivery";
 import * as db from "../lib/db";
-import { createAgent, formXActionIntent } from "../lib/runtime";
+import { applyOperation, createAgent, formXActionIntent } from "../lib/runtime";
 import type { NativeChannelConnection, OpenPresenceState } from "../lib/types";
 import * as x from "../lib/x";
 
@@ -67,5 +67,41 @@ describe("native in-flight barrier with an external side-effect oracle", () => {
     expect(result.failure).toBeUndefined();
     expect((await deliverNativeExecutions(delivered, new Set([execution.id]))).executions.find((item) => item.id === execution.id)?.status).toBe("succeeded");
     expect(requestCount).toBe(1);
+  });
+
+  it("records zero external requests when cancellation happens during native retry backoff", async () => {
+    let requestCount = 0;
+    oracle = createServer((request, response) => {
+      if (request.method === "POST") requestCount += 1;
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ data: { id: "oracle-backoff-receipt" } }));
+    });
+    await new Promise<void>((resolve) => oracle!.listen(0, "127.0.0.1", () => resolve()));
+
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
+    vi.stubEnv("OPENPRESENCE_X_API_BASE_URL", `http://127.0.0.1:${(oracle.address() as import("node:net").AddressInfo).port}`);
+
+    let state = createAgent({ name: "Backoff Oracle", description: "Test", audience: "Builders", mode: "agent", handle: "@backoff_oracle", accent: "#777777" });
+    const presence = { ...state.presence!, environment: "live" as const, connectionMode: "native" as const, execution: { ...state.presence!.execution, like: "auto" as const } };
+    const connection: NativeChannelConnection = { id: "backoff-connection", presenceId: presence.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "backoff-account", username: "backoff_oracle", name: "Backoff Oracle" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    state.presence = presence;
+    state.presences = [presence];
+    state.nativeConnections = [connection];
+    state.mirrorObjects = [{ id: "backoff-target", bridgeId: connection.id, presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: "backoff-target-post" }, objectType: "post", author: { displayName: "Target", handle: "target" }, content: { text: "A target held in retry backoff" }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", archived: false, environment: "live" } as never];
+    state = formXActionIntent(state, { affordance: "x.like", target: { type: "x.post", id: "backoff-target-post" } });
+    const execution = state.executions[0]!;
+    execution.status = "queued";
+    execution.retryAt = new Date(Date.now() + 60_000).toISOString();
+
+    const beforeCancel = await deliverNativeExecutions(state, new Set([execution.id]));
+    expect(requestCount).toBe(0);
+    expect(beforeCancel.executions.find((item) => item.id === execution.id)).toMatchObject({ status: "queued", retryAt: execution.retryAt });
+
+    const cancelled = applyOperation(beforeCancel, { type: "cancelExecution", id: execution.id });
+    expect(cancelled.executions.find((item) => item.id === execution.id)).toMatchObject({ status: "cancelled" });
+    const afterCancel = await deliverNativeExecutions(cancelled, new Set([execution.id]));
+    expect(afterCancel.executions.find((item) => item.id === execution.id)).toMatchObject({ status: "cancelled" });
+    expect(requestCount).toBe(0);
   });
 });
