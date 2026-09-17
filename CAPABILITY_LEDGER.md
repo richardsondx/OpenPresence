@@ -17,6 +17,13 @@ Use only `UNPROVEN`, `PARTIAL`, `PROVEN`, `REGRESSED`, and `BLOCKED`.
 `PROVEN` requires concrete evidence appropriate to the capability; code
 presence, a prompt, or a passing unit test alone is not enough.
 
+Exact-candidate closure checkpoint: immutable `38e97ca` passed the canonical
+three-slice seven-day certification, detached independent verifier (11 files /
+136 tests plus public causal reconstruction), and final release health (lint,
+typecheck, build, and 131 files / 1,235 tests). Evidence is recorded in
+`qa-learnings/release-candidate-38e97ca-2026-09-17.md`. No PARTIAL row is
+promoted from this aggregate run; each retains its declared behavioral gate.
+
 The corrected action-family learning implementation was verified on exact
 commit `67a7544` and is documented in
 `qa-learnings/release-candidate-67a7544-2026-09-17.md`. The canonical public
