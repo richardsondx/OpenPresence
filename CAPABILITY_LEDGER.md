@@ -545,3 +545,10 @@ migration ablation. SBX-004 still requires the stronger integrated native
 in-flight/backoff race evidence; SBX-008/EVAL-004 still require complete
 independent reconstruction/causal-cone proof. No source changed, so release
 health was not rerun.
+
+The candidate was then serially revalidated for Slice A: the native external
+oracle passed 1 file / 2 tests, and a fresh public independent causal verifier
+passed 1/1 with permission, execution, result/outcome, and retry temporal-parent
+checks. This closes the focused Slice A revalidation without promoting SBX-004,
+SBX-008, or EVAL-004: the broader composed/native and complete causal-cone
+contracts remain unmet.
