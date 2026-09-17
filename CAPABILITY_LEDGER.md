@@ -23,6 +23,13 @@ public inject-cycle decisions. Independent verification passed post-restart
 inject and reply cycles; like/repost/quote/follow and other Assignment action
 families remain open proof gaps.
 
+Release-candidate delta: immutable candidate `8645cda` passed the canonical
+composed seven-day trajectory, exact-candidate independent verifier (including
+cross-process replay and cross-rate checks), and broad release health. The
+resulting bundle is recorded in `qa-learnings/release-candidate-8645cda-2026-09-17.md`.
+Statuses below remain PARTIAL wherever a declared behavioral contract still has
+an explicit missing gate; no row is promoted from a green test alone.
+
 ## Current ledger
 
 Proof-gate shorthand used in the closure manifest: `I` implemented, `P`
