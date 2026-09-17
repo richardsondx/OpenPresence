@@ -162,6 +162,10 @@ test.describe("Seven-day natural supervision trajectory", () => {
       expect(replies, `Day ${day.day} did not produce one private Agent reply.`).toHaveLength(1);
       expect(text(replies[0]?.content).trim().length).toBeGreaterThan(0);
       expect(text(replies[0]?.content)).not.toMatch(/worker|queue|execution envelope|api credits|prompt revision/i);
+      if (day.day === 3) {
+        expect(stateCollection(afterChat, "preferenceEvidence")).toHaveLength(1);
+        expect(stateCollection(afterChat, "preferenceEvidence")[0]).toMatchObject({ source: "operator_explicit", scopeHint: "presence", reaction: "does_not_fit" });
+      }
 
       const assignments = stateCollection(afterChat, "assignments");
       if (day.expect.assignment === "one_agent_owned_continuous_daily") {
@@ -256,5 +260,6 @@ test.describe("Seven-day natural supervision trajectory", () => {
     expect(agentInitiatedMessages.length).toBeGreaterThan(0);
     expect(agentInitiatedMessages.some((message) => message.agentInitiated?.kind === "strategy_change")).toBe(true);
     expect(agentInitiatedMessages.every((message) => !/action verified|delivery complete|published scheduled/i.test(text(message.content)))).toBe(true);
+    expect(stateCollection(finalState, "preferenceEvidence")).toHaveLength(1);
   });
 });

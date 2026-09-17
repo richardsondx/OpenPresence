@@ -1502,7 +1502,7 @@ function assignmentMockCandidates(state: OpenPresenceState, instruction: string)
 function mockSocialDecision(state: OpenPresenceState, instruction: string, actions: string[]): AgentSocialDecision {
   const normalized = instruction.toLowerCase();
   const can = (action: string) => actions.includes(action);
-  if (can("post") && /do not use screenshots unless .*inspected and grounded/.test(normalized)) {
+  if (can("post") && /consider an original publication for the current simulated world/.test(normalized) && /do not use screenshots unless .*inspected and grounded/.test(normalized)) {
     return { action: "no_op", text: "", rationale: "The explicit Presence correction rules out an uninspected screenshot." };
   }
   if (normalized.includes("on-demand attention test")) {
