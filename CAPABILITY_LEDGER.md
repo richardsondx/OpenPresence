@@ -457,11 +457,13 @@ creates a durable supported hypothesis, but its continued trajectory still has
 no later allocation difference; LEARN-002/003/004 remain PARTIAL pending the
 independent public ablations.
 
-Typecheck, lint (0 errors / 157 warnings), production build, and diff checks
-passed. Broad Vitest reached 132 files / 1,237 tests but failed 9 tests in 4
-runtime-profile/native-X fixture-dependent tests; the failure log is preserved
-at `/tmp/openpresence-candidate-33cec2f-release-vitest.log`. No PARTIAL row is
-promoted. Remaining exact gates are recorded in
+Typecheck, lint (0 errors / 157 warnings), production build, diff checks, and
+broad Vitest (132 files / 1,237 tests) passed on the exact candidate after
+restoring its canonical runtime manifest/database fixture. The initial
+fixture-provisioning failure is preserved at
+`/tmp/openpresence-candidate-33cec2f-release-vitest.log`; the valid clean
+result is at `/tmp/openpresence-candidate-33cec2f-release-vitest-clean.log`.
+No PARTIAL row is promoted. Remaining exact gates are recorded in
 `qa-learnings/release-candidate-33cec2f-2026-09-17.md`, including clean broad
 release health, public learning transfer/retirement/media ablations, exact
 candidate legacy migration, and independent composed/adversarial review for
