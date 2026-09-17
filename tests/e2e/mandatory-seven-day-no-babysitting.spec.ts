@@ -493,6 +493,14 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     expect(activePlans.length).toBe(1);
     expect(supersededPlans.some((plan) => Number(plan.revision) < Number(activePlans[0]?.revision)), `The breaking event did not create a successor plan revision. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
     expect(supersededPlans.every((plan) => records(plan.windows).every((window) => text(window.status) === "superseded")), `Superseded plan windows remained executable-looking. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
+    const supersededAtByPlanId = new Map(supersededPlans.map((plan) => [text(plan.id), text(plan.supersededAt)]));
+    const stalePostSupersessionExecutions = current.executions.filter((execution) => {
+      const intent = current.intents.find((item) => text(item.id) === text(execution.socialIntentId));
+      const origin = record(intent?.origin);
+      const supersededAt = supersededAtByPlanId.get(text(origin.planId));
+      return Boolean(supersededAt && text(execution.createdAt) && Date.parse(text(execution.createdAt)!) > Date.parse(supersededAt));
+    });
+    expect(stalePostSupersessionExecutions, `Superseded plan work executed after invalidation: ${JSON.stringify(stalePostSupersessionExecutions)}`).toHaveLength(0);
     expect(autonomousWakeCount, `The continuous responsibility did not receive one autonomous wake per simulated day. Evidence: ${JSON.stringify(evidence)}`).toBeGreaterThanOrEqual(7);
     expect(unexplainedIdleDays, `The Agent went idle without work or an explicit blocker. Evidence: ${JSON.stringify(evidence)}`).toEqual([]);
     expect(
