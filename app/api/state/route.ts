@@ -4510,7 +4510,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
   if (socialDecisionKind) {
     next = recordSocialDecision(next, {
       decision: socialDecisionKind as "reply" | "like" | "follow" | "quote" | "repost" | "original_post",
-      acts: (decision.acts ?? []).filter((act) => ["reply", "like", "follow", "quote", "repost"].includes(act.action)).map((act) => ({ decision: act.action as "reply" | "like" | "follow" | "quote" | "repost", text: act.text, rationale: act.rationale })),
+      acts: (decision.acts ?? []).filter((act) => ["reply", "like", "follow", "quote", "repost"].includes(act.action)).map((act) => ({ decision: act.action as "reply" | "like" | "follow" | "quote" | "repost", text: act.text, rationale: act.rationale, strategyId: act.strategyId, mechanismId: act.mechanismId, noStrategyReason: act.noStrategyReason })),
       focalMirrorObjectIds: inbound ? [inbound.id] : [],
       origin: assignment ? { kind: "assignment", refId: assignment.id } : publishingContext ? { kind: "publishing_initiative", planId: publishingContext.planId, planRevision: publishingContext.planRevision, planWindowId: publishingContext.windowId } : rehearsal ? { kind: "other" } : { kind: "self_directed_discovery", refId: sessionId },
       summary: decision.rationale,

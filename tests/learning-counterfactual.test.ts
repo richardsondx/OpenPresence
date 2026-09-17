@@ -141,6 +141,21 @@ describe("pure learning counterfactual", () => {
 });
 
 describe("runtime learning boundary", () => {
+  it("retains fork-local strategy attribution on Sandbox decisions", () => {
+    let state = startPlaygroundSession(createAgent({ name: "Sandbox strategy lineage", description: "Keep learning tied to the strategy that was actually selected.", audience: "AI builders", mode: "agent", handle: "@sandbox_strategy_lineage", accent: "#7c3aed" }));
+    const presence = state.presence!;
+    const session = state.playgroundSessions[0]!;
+    state = recordSocialDecision(state, {
+      presenceId: presence.id,
+      sessionId: session.id,
+      decision: "reply",
+      acts: [{ decision: "reply", strategyId: "social.x.v1.useful-disagreement", mechanismId: "useful disagreement" }],
+      summary: "A useful disagreement about an observed research claim.",
+      origin: { kind: "self_directed_discovery", refId: session.id },
+    });
+    expect(state.socialDecisions[0]?.socialStrategy?.selectedByAct).toEqual(expect.arrayContaining([expect.objectContaining({ act: "reply", patternId: "social.x.v1.useful-disagreement" })]));
+  });
+
   it("keeps the real multi-action decision surface in the persisted counterfactual", () => {
     let state = startPlaygroundSession(createAgent({ name: "Action-faithful learning", description: "Preserve action choices in learning evidence.", audience: "AI builders", mode: "agent", handle: "@action_faithful", accent: "#7c3aed" }));
     const presence = state.presence!;

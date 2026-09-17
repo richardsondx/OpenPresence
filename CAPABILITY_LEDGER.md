@@ -112,6 +112,16 @@ and the post-fix canonical trajectory are recorded in
 EVAL-004, AUT-003/004/006, and UX-005 remain PARTIAL pending their full
 trajectory-level gates; replay-specific proof remains closed.
 
+Learning provenance delta: the Sandbox runtime now rebuilds Social Decision
+strategy attribution from the fork-local retrieval run instead of accepting a
+precomputed Sandbox retrieval object, and each verified Sandbox outcome is
+persisted as goal-anchored `WORLD_OUTCOME` evidence with social-decision,
+Mirror, Assignment-plan, and session lineage. Focused regressions pass in
+`tests/learning-counterfactual.test.ts` and `tests/sandbox.test.ts`. This
+strengthens LEARN-001/002 and SBX-008, but does not promote them: a complete
+autonomous learning audit, future allocation difference, and independent
+causal-cone review remain required.
+
 ## Current ledger
 
 Proof-gate shorthand used in the closure manifest: `I` implemented, `P`

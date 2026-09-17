@@ -4,7 +4,7 @@ import { claimExecutions, createBridgeWithKey } from "../lib/bridge";
 import * as x from "../lib/x";
 import { deliverNativeExecutions } from "../lib/native-execution-delivery";
 import { GET as stateGet, POST as statePost } from "../app/api/state/route";
-import { addSandboxEvent, advanceSandboxTime, advanceSandboxTimeWithTemporalEvents, applyOperation, beginOriginalPostRehearsal, completeOriginalPostRehearsal, confirmAutoMode, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, recordPreferenceEvidence, resetPlaygroundSession, startPlaygroundSession, syncPlaygroundTime } from "../lib/runtime";
+import { addSandboxEvent, advanceSandboxTime, advanceSandboxTimeWithTemporalEvents, applyOperation, beginOriginalPostRehearsal, completeOriginalPostRehearsal, confirmAutoMode, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, recordPreferenceEvidence, recordSocialDecision, resetPlaygroundSession, startPlaygroundSession, syncPlaygroundTime } from "../lib/runtime";
 import type { OpenPresenceState } from "../lib/types";
 import { SandboxTemporalKernel } from "../lib/sandbox-temporal";
 
@@ -204,6 +204,9 @@ describe("Sandbox and Playground boundaries", () => {
     state = formSandboxIntent(state, { sessionId: session.id, affordance: "reply", text: "The useful detail is in the tradeoff.", target: target.externalRef });
     const execution = state.executions[0]!;
     const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId)!;
+    state = recordSocialDecision(state, { presenceId: state.presence!.id, sessionId: session.id, decision: "reply", summary: "The Agent is working toward a useful audience outcome.", origin: { kind: "self_directed_discovery", refId: session.id } });
+    const decision = state.socialDecisions[0]!;
+    decision.socialIntentId = execution.socialIntentId;
     state = deliverSandboxExecution(state, execution.id);
 
     const kinds = state.playgroundSessions.find((item) => item.id === session.id)!.temporalSnapshot!.trajectory.map((item) => item.kind);
@@ -216,6 +219,8 @@ describe("Sandbox and Playground boundaries", () => {
     expect(trajectory.find((item) => item.kind === "execution")?.data).toMatchObject({ causal: { parentIds: [intent.id] } });
     expect(trajectory.find((item) => item.kind === "result")?.data).toMatchObject({ causal: { parentIds: [execution.id] } });
     expect(trajectory.find((item) => item.kind === "outcome")?.data).toMatchObject({ causal: { parentIds: [execution.id, intent.id] } });
+    expect(state.growthEvidenceRecords).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "WORLD_OUTCOME", verified: true, causalDecisionIds: [decision.id], causalMirrorObjectIds: [expect.any(String)], sandboxSessionId: session.id })]));
+    expect(state.growthEvidenceRecords?.find((record) => record.causalDecisionIds?.includes(decision.id))?.statement).toContain(state.presence!.brief.purpose);
   });
 
   it("does not let a real Bridge claim or native writer consume Sandbox work", async () => {

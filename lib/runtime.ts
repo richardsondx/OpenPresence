@@ -1,6 +1,6 @@
 import { recordPlaybookMilestones } from "./playbook-milestones";
 import { assertAssignmentWindowOpen } from "./assignment-timeframe";
-import type { ActionRecord, ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, AgendaHorizon, AgendaItem, AgendaCompilation, AgendaWorkItem, AgendaWatchingItem, Asset, Assignment, AssignmentDelegationPolicy, AssignmentPlan, AssignmentPreflight, AssignmentQuantityMode, AssignmentReadinessCheck, AssignmentRun, AssignmentPursuitWindow, AssignmentPursuitAction, AssignmentPursuitResourceBudget, AttentionTest, AttentionTestMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, ExplorationBrief, ExplorationFinding, ExplorationSession, ExplorationSessionStatus, FileKind, FileProposal, GhostProfile, GhostRepresentation, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, OperatorDirective, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, ResourceUsageEvent, RuntimeScope, SandboxAssetInput, SelfDirectedAttentionPolicy, SocialAssetKind, SocialDecision, SocialDecisionConfidence, SocialDecisionKind, SocialIntent, SocialOrigin, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, PublicRequestType, PublicRequestDisposition, PresenceRequestPolicy, DelegationGrant, RelationshipPolicy, RelationshipLearningMode, RelationshipEngagementMode, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding, PublishingInitiative, PublishingInitiativeProgress, PublishingPlan, PublishingPlanDraft, PublishingPlanWorkEvent, PresenceCapability, PresenceCapabilityManifest, PublicationMetricSnapshot, PresenceAudienceSnapshot, CapabilityTrial } from "./types";
+import type { ActionRecord, ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, AgendaHorizon, AgendaItem, AgendaCompilation, AgendaWorkItem, AgendaWatchingItem, Asset, Assignment, AssignmentDelegationPolicy, AssignmentPlan, AssignmentPreflight, AssignmentQuantityMode, AssignmentReadinessCheck, AssignmentRun, AssignmentPursuitWindow, AssignmentPursuitAction, AssignmentPursuitResourceBudget, AttentionTest, AttentionTestMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, ExplorationBrief, ExplorationFinding, ExplorationSession, ExplorationSessionStatus, FileKind, FileProposal, GhostProfile, GhostRepresentation, GrowthEvidenceRecord, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, OperatorDirective, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, ResourceUsageEvent, RuntimeScope, SandboxAssetInput, SelfDirectedAttentionPolicy, SocialAssetKind, SocialDecision, SocialDecisionConfidence, SocialDecisionKind, SocialIntent, SocialOrigin, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, PublicRequestType, PublicRequestDisposition, PresenceRequestPolicy, DelegationGrant, RelationshipPolicy, RelationshipLearningMode, RelationshipEngagementMode, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding, PublishingInitiative, PublishingInitiativeProgress, PublishingPlan, PublishingPlanDraft, PublishingPlanWorkEvent, PresenceCapability, PresenceCapabilityManifest, PublicationMetricSnapshot, PresenceAudienceSnapshot, CapabilityTrial } from "./types";
 import { AGENT_CAPABILITY_DEFINITIONS, CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
 import { buildScenarioFromPrompt, builtinScenarioDefinitions, repairScenarioStimuli, scenarioFromImport, stableHash, validateScenarioFidelity } from "./scenarios";
 import { DEFAULT_PRESENCE_LANGUAGE, effectiveLanguagePolicy, EMPTY_LANGUAGE_POLICY, languageEligibleForObservation, languagesMatch, normalizeLanguagePolicy, normalizePresenceLanguage, normalizedObservedLanguage, validateLanguage } from "./language-policy";
@@ -768,7 +768,7 @@ function event(type: LiveEvent["type"], title: string, detail: string, tone: Liv
 
 export interface SocialDecisionInput {
   decision: SocialDecisionKind;
-  acts?: Array<{ decision: Exclude<SocialDecisionKind, "no_op" | "original_post">; text?: string; rationale?: string }>;
+  acts?: Array<{ decision: Exclude<SocialDecisionKind, "no_op" | "original_post">; text?: string; rationale?: string; strategyId?: string; mechanismId?: string; noStrategyReason?: string }>;
   conversationDisposition?: import("./types").ConversationDisposition;
   focalMirrorObjectIds?: string[];
   origin?: SocialOrigin;
@@ -818,7 +818,13 @@ function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInp
     situationId: learningCounterfactual.situationId,
     claim: learningCounterfactual.learningClaim.status,
   };
-  const socialStrategy = (sandboxSessionId ? undefined : input.socialStrategy?.use) ?? strategyUseFromDecision(strategyRun, input.acts?.map((act) => ({ action: act.decision })) ?? [{ action: input.decision }]);
+  // Sandbox cognition must retain the strategy selection it made from the
+  // fork-local retrieval run. Dropping it here makes later verified outcomes
+  // impossible to attribute to a pattern and turns learning into decorative
+  // memory. The retrieval run is already session-scoped above, so preserving
+  // its use does not leak learning across Sandbox branches.
+  const localStrategyUse = strategyUseFromDecision(strategyRun, input.acts?.map((act) => ({ action: act.decision, strategyId: act.strategyId, mechanismId: act.mechanismId, noStrategyReason: act.noStrategyReason })) ?? [{ action: input.decision }]);
+  const socialStrategy = sandboxSessionId ? localStrategyUse : input.socialStrategy?.use ?? localStrategyUse;
   const causalEventId = input.causalEventId ?? input.focalMirrorObjectIds?.map((objectId) => state.mirrorObjects.find((object) => object.id === objectId)?.sourceTemporalEventId).find((value): value is string => Boolean(value));
   if (socialStrategy && assignmentTemplateId && !socialStrategy.strategyTemplateId) socialStrategy.strategyTemplateId = assignmentTemplateId;
   if (strategyRun.id && !state.socialStrategyRetrievalRuns?.some((run) => run.id === strategyRun.id)) state.socialStrategyRetrievalRuns = [strategyRun, ...(state.socialStrategyRetrievalRuns ?? [])].slice(0, 500);
@@ -4054,6 +4060,28 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
   execution.status = "succeeded"; execution.attempts += 1; execution.externalRef = externalRef; execution.executedAt = now(); execution.updatedAt = now();
   const outcome: Outcome = { id: id("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: presence.id, status: "succeeded", observedAt: now(), metrics: {}, evidence: [externalRef], environment: "sandbox", sessionId: session.id, conversationEpisodeId: execution.conversationEpisodeId };
   state.outcomes.unshift(outcome);
+  const causalDecision = state.socialDecisions.find((decision) => decision.socialIntentId === execution.socialIntentId && decision.presenceId === presence.id && decision.sessionId === session.id);
+  const learningEvidenceId = `growth-evidence:sandbox-outcome:${outcome.id}`;
+  if (causalDecision && !state.growthEvidenceRecords?.some((record) => record.id === learningEvidenceId)) {
+    const goal = presence.brief.purpose?.trim() || presence.brief.audience?.trim() || "the Presence's declared growth goal";
+    const learningEvidence: GrowthEvidenceRecord = {
+      id: learningEvidenceId,
+      agentId: state.agent?.id ?? "unknown",
+      presenceId: presence.id,
+      assignmentId: execution.assignmentId,
+      assignmentPlanRevision: execution.assignmentId ? state.assignments.find((assignment) => assignment.id === execution.assignmentId)?.plan?.revision : undefined,
+      kind: "WORLD_OUTCOME",
+      claimScope: "presence",
+      statement: `Verified Sandbox outcome observed while pursuing ${goal}. This records what happened, not a claim that the act caused growth.`,
+      sourceRefs: [{ kind: "social_decision", id: causalDecision.id, sourcePresenceId: presence.id, observedAt: causalDecision.createdAt }, { kind: "mirror_object", id: object.id, sourcePresenceId: presence.id, observedAt: object.observedAt }],
+      verified: true,
+      causalDecisionIds: [causalDecision.id],
+      causalMirrorObjectIds: [object.id],
+      sandboxSessionId: session.id,
+      createdAt: outcome.observedAt,
+    };
+    state.growthEvidenceRecords = [learningEvidence, ...(state.growthEvidenceRecords ?? [])].slice(0, 500);
+  }
   recordSandboxTrajectoryInPlace(state, session.id, "execution", { executionId: execution.id, intentId: execution.socialIntentId, connector: execution.connector, environment: execution.environment, status: execution.status, causal: { parentIds: [execution.socialIntentId] } }, execution.executedAt);
   recordSandboxTrajectoryInPlace(state, session.id, "result", { executionId: execution.id, externalRef, status: execution.status, causal: { parentIds: [execution.id] } }, execution.executedAt);
   recordSandboxTrajectoryInPlace(state, session.id, "outcome", { outcomeId: outcome.id, executionId: execution.id, intentId: outcome.socialIntentId, status: outcome.status, evidence: outcome.evidence, causal: { parentIds: [execution.id, outcome.socialIntentId] } }, outcome.observedAt);
