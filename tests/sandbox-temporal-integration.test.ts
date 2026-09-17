@@ -3,6 +3,8 @@ import {
   advanceSandboxTimeWithTemporalEvents,
   cloneState,
   createAgent,
+  createSandboxCheckpoint,
+  forkSandboxCheckpoint,
   resetPlaygroundSession,
   setSandboxAcceleration,
   setSandboxPaused,
@@ -101,6 +103,34 @@ describe("Playground temporal integration boundary", () => {
     child.advanceBy(60_000);
     expect(child.events).toEqual(expect.arrayContaining([expect.objectContaining({ id: "integration:branch-marker", status: "fired" })]));
     expect(rehydrated.events).toEqual(expect.arrayContaining([expect.objectContaining({ id: "integration:branch-marker", status: "pending" })]));
+  });
+
+  it("forks a full world into an isolated persisted session", () => {
+    let state = startPlaygroundSession(fixtureState());
+    const source = state.playgroundSessions[0]!;
+    state = {
+      ...state,
+      events: [{ id: "integration:source-event", sessionId: source.id, kind: "source_marker", createdAt: source.virtualNow }],
+    };
+    state = createSandboxCheckpoint(state, source.id, "branch point");
+    const checkpoint = state.sandboxCheckpoints?.[0]!;
+    state = forkSandboxCheckpoint(state, source.id, checkpoint.id);
+    const fork = state.playgroundSessions.find((item) => item.id !== source.id && item.source === "replay")!;
+
+    expect(fork).toBeDefined();
+    expect(state.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "integration:source-event", sessionId: source.id }),
+      expect.objectContaining({ id: "integration:source-event", sessionId: fork.id }),
+    ]));
+    const forkEvent = { id: "integration:fork-event", sessionId: fork.id, kind: "fork_marker", createdAt: fork.virtualNow };
+    const isolated = { ...state, events: [...state.events, forkEvent] };
+    expect(isolated.events.filter((event) => event.sessionId === source.id)).toEqual([
+      expect.objectContaining({ id: "integration:source-event" }),
+    ]);
+    expect(isolated.events.filter((event) => event.sessionId === fork.id)).toEqual([
+      expect.objectContaining({ id: "integration:source-event" }),
+      forkEvent,
+    ]);
   });
 
   it("continues checkpoint numbering after rehydration", () => {

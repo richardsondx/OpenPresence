@@ -28,6 +28,7 @@ Playground commands:
   stage-outcome  Stage hidden world truth for later virtual-time release
   checkpoint  Persist a portable full-world Sandbox checkpoint
   restore     Restore a persisted Sandbox checkpoint by id
+  fork        Fork a new isolated Playground session from a checkpoint
   schedule    Add a Calendar Standing Intent used by later Playground time advances
   timeline    Return the session's auditable event/intent/execution timeline
   rehearse    Consider an original publication and record the result
@@ -683,6 +684,17 @@ async function executePlayground(baseUrl, command, options, positionals) {
     const session = sessionForOperation(current, options);
     const checkpointId = required(options, "checkpoint");
     return projectState(await postOperation(baseUrl, { type: "restoreSandboxCheckpoint", sessionId: session.id, checkpointId }), session.id, command);
+  }
+  if (command === "fork") {
+    const current = await getState(baseUrl);
+    const session = sessionForOperation(current, options);
+    const checkpointId = required(options, "checkpoint");
+    const before = new Set((current.playgroundSessions ?? []).map((item) => item.id));
+    const next = await postOperation(baseUrl, { type: "forkSandboxCheckpoint", sessionId: session.id, checkpointId });
+    const forked = (next.playgroundSessions ?? []).find((item) => !before.has(item.id) && item.source === "replay")
+      ?? (next.playgroundSessions ?? []).find((item) => item.id !== session.id && item.source === "replay");
+    if (!forked) fail("Sandbox fork did not return a new replay session.", "INVALID_RESPONSE");
+    return projectState(next, forked.id, command);
   }
   if (command === "schedule") {
     const current = await getState(baseUrl);

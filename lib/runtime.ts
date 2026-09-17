@@ -32,7 +32,7 @@ import { recordLearningCounterfactualInPlace } from "./learning-runtime";
 import { recordAgentInitiatedUpdate } from "./operator-initiated-communication";
 import { SandboxTemporalKernel } from "./sandbox-temporal";
 import type { TemporalEvent } from "./sandbox-temporal";
-import { assertSandboxWorldSnapshot, captureSandboxWorld, restoreSandboxWorld, type SandboxWorldSnapshot } from "./sandbox-replay";
+import { assertSandboxWorldSnapshot, captureSandboxWorld, restoreSandboxWorld, sandboxWorldDigest, type SandboxWorldSnapshot } from "./sandbox-replay";
 
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -3564,6 +3564,25 @@ export function restoreSandboxCheckpoint(source: OpenPresenceState, sessionId: s
   const snapshot = checkpoint.snapshot as SandboxWorldSnapshot;
   assertSandboxWorldSnapshot(snapshot);
   return restoreSandboxWorld(source, snapshot);
+}
+
+/** Create an isolated branch from a full-world checkpoint. Existing durable
+ * records retain their semantic identity inside the branch; all branch-local
+ * records are session-scoped, and future seeded world identities are
+ * namespaced by the new session id by the normal Sandbox runtime. */
+export function forkSandboxCheckpoint(source: OpenPresenceState, sessionId: string, checkpointId: string) {
+  const checkpoint = (source.sandboxCheckpoints ?? []).find((item) => item.id === checkpointId && item.sessionId === sessionId);
+  if (!checkpoint) throw new Error(`Sandbox checkpoint ${checkpointId} was not found for session ${sessionId}.`);
+  const original = checkpoint.snapshot as SandboxWorldSnapshot;
+  assertSandboxWorldSnapshot(original);
+  const forkedSessionId = id("session");
+  const forked: SandboxWorldSnapshot = {
+    ...structuredClone(original),
+    session: { ...structuredClone(original.session), id: forkedSessionId, source: "replay", status: "active", updatedAt: now() },
+    collections: Object.fromEntries(Object.entries(original.collections).map(([key, values]) => [key, values.map((value) => value && typeof value === "object" ? { ...(value as Record<string, unknown>), sessionId: forkedSessionId } : value)])),
+  };
+  forked.digest = sandboxWorldDigest(forked);
+  return restoreSandboxWorld(source, forked);
 }
 
 export function syncPlaygroundTime(source: OpenPresenceState, sessionId: string) {

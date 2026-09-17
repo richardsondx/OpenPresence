@@ -20,7 +20,7 @@ import { xQuoteTargetHasAvailableRoute } from "@/lib/runtime";
 import { defaultSelfDirectedAttentionPolicy } from "@/lib/runtime";
 import { setSandboxAcceleration, setSandboxPaused } from "@/lib/runtime";
 import { stageSandboxOutcome } from "@/lib/runtime";
-import { createSandboxCheckpoint, restoreSandboxCheckpoint } from "@/lib/runtime";
+import { createSandboxCheckpoint, forkSandboxCheckpoint, restoreSandboxCheckpoint } from "@/lib/runtime";
 import { SandboxTemporalKernel } from "@/lib/sandbox-temporal";
 import { assignmentPublicExpressionLeakageReason } from "@/lib/runtime";
 import { activeAssignmentPursuitWindow, assignmentPursuitBlocksNormalScheduling, assignmentPursuitHasHardResourceCapacity, assignmentPursuitUsage, assignmentPursuitVerifiedCounts, isPromotionBurstWindow, promotionBurstHasVerifiedDirectSource, promotionExpressionIssue, settlePromotionBurstProgress } from "@/lib/runtime";
@@ -5189,6 +5189,7 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("stageSandboxOutcome"), sessionId: z.string().min(1), causeEventId: z.string().min(1), visibleAfterMinutes: z.number().int().min(0).max(43200), value: z.unknown() }),
   z.object({ type: z.literal("createSandboxCheckpoint"), sessionId: z.string().min(1), label: z.string().trim().max(200).optional() }),
   z.object({ type: z.literal("restoreSandboxCheckpoint"), sessionId: z.string().min(1), checkpointId: z.string().min(1) }),
+  z.object({ type: z.literal("forkSandboxCheckpoint"), sessionId: z.string().min(1), checkpointId: z.string().min(1) }),
   z.object({ type: z.literal("runSandboxPulse"), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("considerOriginalPublication"), sessionId: z.string().min(1), inspiration: z.string().trim().max(2000).optional() }),
   z.object({ type: z.literal("generatePlaygroundStimulus"), sessionId: z.string().min(1), presenceId: z.string().min(1).optional(), targetAffordance: z.enum(["quote", "repost", "like", "reply", "silence"]), topic: z.string().trim().max(1000).optional() }),
@@ -5233,7 +5234,7 @@ function validateRequestLineage(state: OpenPresenceState, parsed: RuntimeOperati
   }
   // Presence chat sessions also use `sessionId`, but they are a separate
   // durable collection from Playground worlds and must not be conflated.
-  const usesPlaygroundSession = ["createAssignment", "startAssignment", "workAssignment", "planIntervention", "syncPlaygroundTime", "resetPlayground", "removeSandboxObject", "inspectSandboxMedia", "addSandboxEvent", "advanceSandboxTime", "setSandboxAcceleration", "setSandboxPaused", "stageSandboxOutcome", "createSandboxCheckpoint", "restoreSandboxCheckpoint", "runSandboxPulse", "considerOriginalPublication", "recordPreferenceEvidence", "askPresenceToReply", "askPresenceToIgnore"].includes(parsed.type);
+  const usesPlaygroundSession = ["createAssignment", "startAssignment", "workAssignment", "planIntervention", "syncPlaygroundTime", "resetPlayground", "removeSandboxObject", "inspectSandboxMedia", "addSandboxEvent", "advanceSandboxTime", "setSandboxAcceleration", "setSandboxPaused", "stageSandboxOutcome", "createSandboxCheckpoint", "restoreSandboxCheckpoint", "forkSandboxCheckpoint", "runSandboxPulse", "considerOriginalPublication", "recordPreferenceEvidence", "askPresenceToReply", "askPresenceToIgnore"].includes(parsed.type);
   const session = usesPlaygroundSession && candidate.sessionId ? state.playgroundSessions.find((item) => item.id === candidate.sessionId) : undefined;
   if (usesPlaygroundSession && candidate.sessionId && !session) throw new Error("That Playground session does not belong to the requested Agent workspace.");
   if (session && candidate.presenceId && session.presenceId !== candidate.presenceId) throw new Error("The Playground session and Presence do not share the same durable scope.");
@@ -6723,6 +6724,11 @@ export async function POST(request: Request) {
     }
     if (parsed.type === "restoreSandboxCheckpoint") {
       const next = restoreSandboxCheckpoint(current, parsed.sessionId, parsed.checkpointId);
+      writeState(next);
+      return stateResponse(request, next);
+    }
+    if (parsed.type === "forkSandboxCheckpoint") {
+      const next = forkSandboxCheckpoint(current, parsed.sessionId, parsed.checkpointId);
       writeState(next);
       return stateResponse(request, next);
     }
