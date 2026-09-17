@@ -4,6 +4,8 @@ import {
   cloneState,
   createAgent,
   resetPlaygroundSession,
+  setSandboxAcceleration,
+  setSandboxPaused,
   startPlaygroundSession,
 } from "../lib/runtime";
 import { SandboxTemporalKernel } from "../lib/sandbox-temporal";
@@ -20,6 +22,19 @@ function fixtureState() {
 }
 
 describe("Playground temporal integration boundary", () => {
+  it("exposes acceleration and pause controls through the persisted session boundary", () => {
+    let state = startPlaygroundSession(fixtureState());
+    const session = state.playgroundSessions[0]!;
+    state = setSandboxAcceleration(state, session.id, 24);
+    expect(state.playgroundSessions[0]!.temporalSnapshot?.acceleration.factor).toBe(24);
+    state = setSandboxPaused(state, session.id, true);
+    expect(state.playgroundSessions[0]!.status).toBe("paused");
+    expect(state.playgroundSessions[0]!.temporalSnapshot?.paused).toBe(true);
+    state = setSandboxPaused(state, session.id, false);
+    expect(state.playgroundSessions[0]!.status).toBe("active");
+    expect(state.playgroundSessions[0]!.temporalSnapshot?.paused).toBe(false);
+  });
+
   it("round-trips a queued event and trajectory through the persisted session shape", () => {
     let state = startPlaygroundSession(fixtureState());
     const session = state.playgroundSessions[0]!;

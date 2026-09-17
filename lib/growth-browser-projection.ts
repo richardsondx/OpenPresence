@@ -312,7 +312,6 @@ export function growthBrowserProjection(state: OpenPresenceState, presenceId?: s
     agent: state.agent,
     presence: state.presence,
     presences: projection.presences,
-    runtimeIdentity: state.runtimeIdentity,
     metrics: state.metrics,
     growthBrowserSummary: projection.growthBrowserSummary,
     assets: [],
@@ -333,5 +332,5 @@ export function growthBrowserProjection(state: OpenPresenceState, presenceId?: s
     recoveryIncidents: projection.recoveryIncidents,
     relationships: projection.relationships,
     socialDecisions: projection.socialDecisions,
-  } as OpenPresenceState;
+  } as unknown as OpenPresenceState;
 }

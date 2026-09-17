@@ -18,6 +18,7 @@ import { addSandboxEvent, advanceSandboxTimeWithTemporalEvents, applyOperation, 
 import { recordSocialDecision, nativeConnectionCanObserve, recordNativeObservation, resumePresenceAfterNativeRecovery } from "@/lib/runtime";
 import { xQuoteTargetHasAvailableRoute } from "@/lib/runtime";
 import { defaultSelfDirectedAttentionPolicy } from "@/lib/runtime";
+import { setSandboxAcceleration, setSandboxPaused } from "@/lib/runtime";
 import { SandboxTemporalKernel } from "@/lib/sandbox-temporal";
 import { assignmentPublicExpressionLeakageReason } from "@/lib/runtime";
 import { activeAssignmentPursuitWindow, assignmentPursuitBlocksNormalScheduling, assignmentPursuitHasHardResourceCapacity, assignmentPursuitUsage, assignmentPursuitVerifiedCounts, isPromotionBurstWindow, promotionBurstHasVerifiedDirectSource, promotionExpressionIssue, settlePromotionBurstProgress } from "@/lib/runtime";
@@ -5177,6 +5178,8 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("inspectSandboxMedia"), sessionId: z.string().min(1), objectId: z.string().min(1) }),
   z.object({ type: z.literal("addSandboxEvent"), sessionId: z.string().min(1), kind: z.string().trim().min(1).max(40).optional(), actionId: z.string().trim().min(1).max(60).optional(), actorId: z.string().trim().min(1).max(100).optional(), actorName: z.string().trim().max(120).optional(), actorHandle: z.string().trim().max(80).optional(), profile: z.object({ bio: z.string().trim().max(1000).optional(), location: z.string().trim().max(200).optional(), roles: z.array(z.string().trim().min(1).max(120)).max(10).optional(), skills: z.array(z.string().trim().min(1).max(120)).max(20).optional(), introductionPermission: z.enum(["allowed", "ask-first", "not-available"]).optional() }).optional(), content: z.string().trim().max(4000).optional(), language: z.string().trim().max(20).optional(), assets: z.array(z.object({ name: z.string().trim().min(1).max(160), kind: z.enum(["image", "video", "gif", "audio", "document", "chart", "link"]), mimeType: z.string().trim().max(120).optional(), dataUrl: z.string().max(2_500_000).optional(), sourceUrl: z.string().url().max(2000).optional() })).max(4).optional(), targetExternalRef: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(), parentExternalRef: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(), observeOnly: z.boolean().optional() }),
   z.object({ type: z.literal("advanceSandboxTime"), sessionId: z.string().min(1), minutes: z.number().int().min(0).max(43200) }),
+  z.object({ type: z.literal("setSandboxAcceleration"), sessionId: z.string().min(1), factor: z.number().finite().positive().max(100000) }),
+  z.object({ type: z.literal("setSandboxPaused"), sessionId: z.string().min(1), paused: z.boolean() }),
   z.object({ type: z.literal("runSandboxPulse"), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("considerOriginalPublication"), sessionId: z.string().min(1), inspiration: z.string().trim().max(2000).optional() }),
   z.object({ type: z.literal("generatePlaygroundStimulus"), sessionId: z.string().min(1), presenceId: z.string().min(1).optional(), targetAffordance: z.enum(["quote", "repost", "like", "reply", "silence"]), topic: z.string().trim().max(1000).optional() }),
@@ -5221,7 +5224,7 @@ function validateRequestLineage(state: OpenPresenceState, parsed: RuntimeOperati
   }
   // Presence chat sessions also use `sessionId`, but they are a separate
   // durable collection from Playground worlds and must not be conflated.
-  const usesPlaygroundSession = ["createAssignment", "startAssignment", "workAssignment", "planIntervention", "syncPlaygroundTime", "resetPlayground", "removeSandboxObject", "inspectSandboxMedia", "addSandboxEvent", "advanceSandboxTime", "runSandboxPulse", "considerOriginalPublication", "recordPreferenceEvidence", "askPresenceToReply", "askPresenceToIgnore"].includes(parsed.type);
+  const usesPlaygroundSession = ["createAssignment", "startAssignment", "workAssignment", "planIntervention", "syncPlaygroundTime", "resetPlayground", "removeSandboxObject", "inspectSandboxMedia", "addSandboxEvent", "advanceSandboxTime", "setSandboxAcceleration", "setSandboxPaused", "runSandboxPulse", "considerOriginalPublication", "recordPreferenceEvidence", "askPresenceToReply", "askPresenceToIgnore"].includes(parsed.type);
   const session = usesPlaygroundSession && candidate.sessionId ? state.playgroundSessions.find((item) => item.id === candidate.sessionId) : undefined;
   if (usesPlaygroundSession && candidate.sessionId && !session) throw new Error("That Playground session does not belong to the requested Agent workspace.");
   if (session && candidate.presenceId && session.presenceId !== candidate.presenceId) throw new Error("The Playground session and Presence do not share the same durable scope.");
@@ -6686,6 +6689,16 @@ export async function POST(request: Request) {
         presenceId: presence.id,
         sourceObjectId: object.id,
       });
+      writeState(next);
+      return stateResponse(request, next);
+    }
+    if (parsed.type === "setSandboxAcceleration") {
+      const next = setSandboxAcceleration(current, parsed.sessionId, parsed.factor);
+      writeState(next);
+      return stateResponse(request, next);
+    }
+    if (parsed.type === "setSandboxPaused") {
+      const next = setSandboxPaused(current, parsed.sessionId, parsed.paused);
       writeState(next);
       return stateResponse(request, next);
     }

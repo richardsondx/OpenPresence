@@ -106,11 +106,11 @@ describe("Workstream A deterministic replay contract", () => {
 
     const firstObject = state.mirrorObjects.find((item) => item.sessionId === firstSession.id)!;
     const secondObject = state.mirrorObjects.find((item) => item.sessionId === secondSession.id)!;
-    expect(firstObject.content.text).toBe("first session marker");
-    expect(secondObject.content.text).toBe("second session marker");
+    expect(firstObject.content!.text).toBe("first session marker");
+    expect(secondObject.content!.text).toBe("second session marker");
     expect(firstObject.id).not.toBe(secondObject.id);
     expect(firstObject.externalRef.id).not.toBe(secondObject.externalRef.id);
-    expect(firstObject.author.externalRef.id).not.toBe(secondObject.author.externalRef.id);
+    expect(firstObject.author!.externalRef!.id).not.toBe(secondObject.author!.externalRef!.id);
     expect(state.assignments.filter((item) => item.sessionId === firstSession.id)).toHaveLength(1);
     expect(state.assignments.filter((item) => item.sessionId === secondSession.id)).toHaveLength(1);
   });

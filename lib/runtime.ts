@@ -3508,6 +3508,32 @@ export function advanceSandboxTime(source: OpenPresenceState, sessionId: string,
   return advanceSandboxTimeWithTemporalEvents(source, sessionId, minutes).state;
 }
 
+/** Public Sandbox temporal controls; cognition still runs only through the
+ * normal adapter when virtual time is advanced. */
+export function setSandboxAcceleration(source: OpenPresenceState, sessionId: string, factor: number) {
+  const state = cloneState(source);
+  const session = sandboxSessionFor(state, sessionId);
+  const kernel = temporalKernelForSession(session);
+  kernel.setAcceleration(factor);
+  session.temporalSnapshot = kernel.snapshot();
+  session.virtualTimeMode = "manual";
+  session.updatedAt = now();
+  return state;
+}
+
+export function setSandboxPaused(source: OpenPresenceState, sessionId: string, paused: boolean) {
+  const state = cloneState(source);
+  const session = sandboxSessionFor(state, sessionId);
+  const kernel = temporalKernelForSession(session);
+  if (paused) kernel.pause("paused through public Sandbox control");
+  else kernel.resume("resumed through public Sandbox control");
+  session.temporalSnapshot = kernel.snapshot();
+  session.virtualTimeMode = "manual";
+  session.status = paused ? "paused" : "active";
+  session.updatedAt = now();
+  return state;
+}
+
 export function syncPlaygroundTime(source: OpenPresenceState, sessionId: string) {
   const state = cloneState(source);
   const session = sandboxSessionFor(state, sessionId);

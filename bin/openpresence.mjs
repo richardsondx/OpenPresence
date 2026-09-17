@@ -22,6 +22,9 @@ Playground commands:
   inspect-media  Inspect media attached to a simulated object
   consider    Let the Agent evaluate the current simulated world
   advance     Move virtual time and evaluate due Standing Intents
+  rate        Set the Sandbox acceleration factor for explicit tick controls
+  pause       Pause Sandbox virtual-time processing
+  resume      Resume Sandbox virtual-time processing
   schedule    Add a Calendar Standing Intent used by later Playground time advances
   timeline    Return the session's auditable event/intent/execution timeline
   rehearse    Consider an original publication and record the result
@@ -49,6 +52,7 @@ Common options:
   --session <id>       Playground session id
   --presence <id>      Presence id when starting a session
   --seed <value>       Deterministic scenario seed recorded in the Sandbox session
+  --factor <number>     Positive Sandbox acceleration factor (for rate)
   --responsibility <mode>  Schedule mode: consider (default) or assign
   --id <id>            Existing Watch, Assignment, Calendar, or rehearsal id
   --reasons <list>     Comma-separated preference reasons for feedback
@@ -63,6 +67,7 @@ Examples:
   openpresence playground inject --actor Maya --handle @maya --action reply --content "What are you building?"
   openpresence playground consider --session session_123
   openpresence playground advance --session session_123 --minutes 60
+  openpresence playground rate --session session_123 --factor 24
   openpresence playground assignment create --instruction "Produce 2 original posts about useful agent decisions"
   openpresence schedule add --instruction "Teach one useful idea" --day Tuesday --time 08:00
   openpresence watching add --query "@AlexHormozi" --purpose "Study offer clarity"
@@ -206,6 +211,14 @@ function projectState(state, explicitSessionId, mode = "inspect") {
       updatedAt: session.updatedAt,
       evaluatedSlotIds: session.evaluatedSlotIds ?? [],
       judgedObjectIds: session.judgedObjectIds ?? [],
+      temporal: session.temporalSnapshot ? {
+        now: new Date(session.temporalSnapshot.now).toISOString(),
+        paused: session.temporalSnapshot.paused,
+        acceleration: session.temporalSnapshot.acceleration,
+        events: session.temporalSnapshot.events,
+        outcomes: session.temporalSnapshot.outcomes,
+        retries: session.temporalSnapshot.retries,
+      } : undefined,
     },
     presence: {
       id: presence.id,
@@ -632,6 +645,16 @@ async function executePlayground(baseUrl, command, options, positionals) {
     const minutes = options.minutes ?? positionals[0];
     if (minutes === undefined) fail("Missing --minutes.", "INVALID_ARGUMENT");
     return projectState(await postOperation(baseUrl, { type: "advanceSandboxTime", sessionId: session.id, minutes: parseInteger(minutes, "minutes") }), session.id, command);
+  }
+  if (["rate", "pause", "resume"].includes(command)) {
+    const current = await getState(baseUrl);
+    const session = sessionForOperation(current, options);
+    if (command === "rate") {
+      const factor = Number(options.factor ?? positionals[0]);
+      if (!Number.isFinite(factor) || factor <= 0) fail("Provide a positive --factor.", "INVALID_ARGUMENT");
+      return projectState(await postOperation(baseUrl, { type: "setSandboxAcceleration", sessionId: session.id, factor }), session.id, command);
+    }
+    return projectState(await postOperation(baseUrl, { type: "setSandboxPaused", sessionId: session.id, paused: command === "pause" }), session.id, command);
   }
   if (command === "schedule") {
     const current = await getState(baseUrl);

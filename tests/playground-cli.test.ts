@@ -49,6 +49,32 @@ function json(response: ServerResponse, body: unknown, statusCode = 200) {
 }
 
 describe("Playground CLI", () => {
+  it("translates public temporal controls into runtime operations", async () => {
+    const operations: Array<Record<string, unknown>> = [];
+    const server = await startApi((request, response) => {
+      if (request.method === "GET") return json(response, fixtureState);
+      let body = "";
+      request.on("data", (chunk) => { body += chunk.toString(); });
+      request.on("end", () => {
+        const operation = JSON.parse(body) as Record<string, unknown>;
+        operations.push(operation);
+        json(response, fixtureState);
+      });
+    });
+    const rate = await runCli(server.url, ["rate", "--session", "session-1", "--factor", "24"]);
+    const pause = await runCli(server.url, ["pause", "--session", "session-1"]);
+    const resume = await runCli(server.url, ["resume", "--session", "session-1"]);
+    await server.close();
+    expect(rate.code).toBe(0);
+    expect(pause.code).toBe(0);
+    expect(resume.code).toBe(0);
+    expect(operations).toEqual([
+      expect.objectContaining({ type: "setSandboxAcceleration", sessionId: "session-1", factor: 24 }),
+      expect.objectContaining({ type: "setSandboxPaused", sessionId: "session-1", paused: true }),
+      expect.objectContaining({ type: "setSandboxPaused", sessionId: "session-1", paused: false }),
+    ]);
+  });
+
   it("returns a compact agent-facing projection instead of raw state", async () => {
     const server = await startApi((_request, response) => json(response, fixtureState));
     const result = await runCli(server.url, ["inspect"]);
