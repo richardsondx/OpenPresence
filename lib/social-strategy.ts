@@ -471,6 +471,7 @@ export function ensureGrowthEvidenceRecords(state: OpenPresenceState, presenceId
       verified: true,
       createdAt: metric.observedAt || createdAt,
       ...(metricDecision ? { causalDecisionIds: [metricDecision.id], causalMirrorObjectIds: [metric.mirrorObjectId] } : {}),
+      ...(metricMirror?.environment === "sandbox" && metricMirror.sessionId ? { sandboxSessionId: metricMirror.sessionId } : {}),
     });
   }
   for (const decision of state.socialDecisions.filter((item) => item.presenceId === presenceId).slice(0, 24)) {
@@ -800,7 +801,7 @@ export function materializeSandboxOutcomeLearning(source: OpenPresenceState, pre
   const sessionOutcomes = state.outcomes.filter((outcome) => outcome.sessionId === sessionId && outcome.presenceId === presenceId && outcome.status === "succeeded" && outcome.environment === "sandbox");
   const evidenceByDecision = new Map<string, GrowthEvidenceRecord[]>();
   for (const record of state.growthEvidenceRecords ?? []) {
-    if (record.sandboxSessionId !== sessionId || record.presenceId !== presenceId || record.kind !== "WORLD_OUTCOME" || !record.verified) continue;
+    if (record.sandboxSessionId !== sessionId || record.presenceId !== presenceId || record.kind !== "WORLD_OUTCOME" || !record.verified || !record.sourceRefs.some((source) => source.kind === "publication_metric")) continue;
     for (const decisionId of record.causalDecisionIds ?? []) {
       const records = evidenceByDecision.get(decisionId) ?? [];
       records.push(record);
@@ -832,7 +833,7 @@ export function materializeSandboxOutcomeLearning(source: OpenPresenceState, pre
       existing.updatedAt = observedAt;
       continue;
     }
-    const statement = `Repeated verified Sandbox outcomes support testing ${pattern.mechanism} for this Presence; compare it with alternatives before generalizing.`;
+    const statement = `Repeated verified Sandbox performance observations support testing ${pattern.mechanism} for this Presence; compare it with alternatives before generalizing.`;
     state.growthHypotheses = [{
       id,
       agentId: state.agent.id,

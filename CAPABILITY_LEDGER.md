@@ -290,6 +290,14 @@ seven-day trajectory, the independent verifier (8 files / 90 tests), and the
 broad suite (130 files / 1,217 tests). This integration result is recorded in
 `qa-learnings/sandbox-learning-materialization-integration-2026-09-17.md`.
 
+The performance boundary was then tightened: delivery-only outcomes no longer
+create decision-relevant learning. Sandbox publication metrics now create
+session-scoped causal `WORLD_OUTCOME` evidence through the public metric
+operation, and two independent measured outcomes can feed later retrieval.
+Focused proof: 2 files / 60 tests passed, with typecheck, changed-file lint,
+and diff checks passing. Evidence: `qa-learnings/sandbox-performance-learning-2026-09-17.md`.
+This strengthens LEARN-001/002 but leaves their deeper proof gates open.
+
 The natural-supervision trajectory was also rerun on `e4cc6de` and passed:
 seven realistic turns, 10,080 virtual minutes, five verified Sandbox
 outcomes, one deduplicated `strategy_change` update, durable correction

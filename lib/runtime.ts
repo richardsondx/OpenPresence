@@ -502,6 +502,10 @@ function recordPublicationMetricSnapshotInPlace(state: OpenPresenceState, operat
   const snapshot: PublicationMetricSnapshot = { id: id("publication-metric"), presenceId: presence.id, mirrorObjectId: mirror.id, observedAt: now(), publicationAgeSeconds: Math.max(0, Math.round(operation.publicationAgeSeconds ?? Math.max(0, (Date.now() - new Date(mirror.occurredAt ?? mirror.observedAt).getTime()) / 1000))), ...operation.metrics, source: operation.source ?? (presence.environment === "sandbox" ? "sandbox" : "manual"), observationStatus: operation.observationStatus ?? "observed" };
   snapshot.baseline = publicationMetricBaseline(state, snapshot, { normalized: true });
   state.publicationMetricSnapshots.unshift(snapshot);
+  if (mirror.environment === "sandbox" && mirror.sessionId) {
+    ensureGrowthEvidenceRecords(state, presence.id, snapshot.observedAt, [mirror.id]);
+    materializeSandboxOutcomeLearning(state, presence.id, mirror.sessionId, snapshot.observedAt);
+  }
   state.events.unshift(event("learning", "Publication performance observed", `Performance evidence for a verified ${presence.channel === "x" ? "X" : presence.name} publication is available for Growth review.`, "positive", { presenceId: presence.id, sourceObjectId: mirror.id }));
 }
 

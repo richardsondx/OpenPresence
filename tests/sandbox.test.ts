@@ -4,7 +4,7 @@ import { claimExecutions, createBridgeWithKey } from "../lib/bridge";
 import * as x from "../lib/x";
 import { deliverNativeExecutions } from "../lib/native-execution-delivery";
 import { GET as stateGet, POST as statePost } from "../app/api/state/route";
-import { addSandboxEvent, advanceSandboxTime, advanceSandboxTimeWithTemporalEvents, applyOperation, beginOriginalPostRehearsal, completeOriginalPostRehearsal, confirmAutoMode, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, recordPreferenceEvidence, recordSocialDecision, resetPlaygroundSession, startPlaygroundSession, syncPlaygroundTime } from "../lib/runtime";
+import { addSandboxEvent, advanceSandboxTime, advanceSandboxTimeWithTemporalEvents, applyOperation, beginOriginalPostRehearsal, completeOriginalPostRehearsal, confirmAutoMode, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, recordPreferenceEvidence, recordPublicationMetricSnapshots, recordSocialDecision, resetPlaygroundSession, startPlaygroundSession, syncPlaygroundTime } from "../lib/runtime";
 import type { OpenPresenceState } from "../lib/types";
 import { SandboxTemporalKernel } from "../lib/sandbox-temporal";
 
@@ -221,6 +221,33 @@ describe("Sandbox and Playground boundaries", () => {
     expect(trajectory.find((item) => item.kind === "outcome")?.data).toMatchObject({ causal: { parentIds: [execution.id, intent.id] } });
     expect(state.growthEvidenceRecords).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "WORLD_OUTCOME", verified: true, causalDecisionIds: [decision.id], causalMirrorObjectIds: [expect.any(String)], sandboxSessionId: session.id })]));
     expect(state.growthEvidenceRecords?.find((record) => record.causalDecisionIds?.includes(decision.id))?.statement).toContain(state.presence!.brief.purpose);
+  });
+
+  it("turns public Sandbox performance observations into scoped later learning", () => {
+    let state = applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { post: "auto" } } });
+    state = startPlaygroundSession(state);
+    const session = state.playgroundSessions[0]!;
+    const presenceId = session.presenceId;
+    const executions = [] as OpenPresenceState["executions"];
+    for (const text of ["A measured proof point for builders.", "A second measured proof point for builders."]) {
+      state = formSandboxIntent(state, { sessionId: session.id, affordance: "post", text });
+      const execution = state.executions[0]!;
+      state = deliverSandboxExecution(state, execution.id);
+      executions.push(state.executions.find((item) => item.id === execution.id)!);
+    }
+    for (const execution of executions) {
+      state = recordSocialDecision(state, { presenceId, sessionId: session.id, decision: "original_post", summary: "The Agent is testing a proof-led format." });
+      const decision = state.socialDecisions[0]!;
+      decision.socialIntentId = execution.socialIntentId;
+      decision.socialStrategy = { ...(decision.socialStrategy ?? { retrievalRunId: "runtime-test", consideredPatternIds: ["social.x.v1.proof-led-original"] }), selectedByAct: [{ act: "original_post", patternId: "social.x.v1.proof-led-original", mechanismId: "proof-led original" }] };
+    }
+    const mirrors = state.mirrorObjects.filter((item) => item.sessionId === session.id && item.actorPresenceId === state.presence?.id);
+    expect(mirrors).toHaveLength(2);
+    state = recordPublicationMetricSnapshots(state, mirrors.map((mirror, index) => ({ type: "recordPublicationMetricSnapshot" as const, presenceId, mirrorObjectId: mirror.id, publicationAgeSeconds: 60 * 60, metrics: { impressions: index === 0 ? 100 : 240, likes: index === 0 ? 4 : 15 }, source: "sandbox" as const })));
+    const metricEvidence = state.growthEvidenceRecords?.filter((record) => record.sourceRefs.some((source) => source.kind === "publication_metric"));
+    expect(metricEvidence).toHaveLength(2);
+    expect(metricEvidence?.every((record) => record.sandboxSessionId === session.id && record.causalDecisionIds?.length === 1)).toBe(true);
+    expect(state.growthHypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ sandboxSessionId: session.id, status: "supported", decisionTargets: [expect.objectContaining({ strategyId: "social.x.v1.proof-led-original" })] })]));
   });
 
   it("does not let a real Bridge claim or native writer consume Sandbox work", async () => {

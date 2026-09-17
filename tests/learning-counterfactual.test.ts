@@ -77,7 +77,7 @@ describe("pure learning counterfactual", () => {
     }));
     state.socialDecisions = decisions;
     state.outcomes = decisions.map((decision, index) => ({ id: `outcome-${index + 1}`, socialIntentId: decision.socialIntentId!, executionId: `execution-${index + 1}`, presenceId: presence.id, status: "succeeded" as const, observedAt: decision.createdAt, metrics: {}, evidence: [], environment: "sandbox" as const, sessionId: session.id }));
-    state.growthEvidenceRecords = state.outcomes.map((outcome, index) => ({ id: `growth-evidence-${index + 1}`, agentId: state.agent!.id, presenceId: presence.id, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Verified simulated outcome.", sourceRefs: [], verified: true, causalDecisionIds: [decisions[index]!.id], causalMirrorObjectIds: [], sandboxSessionId: session.id, createdAt: outcome.observedAt }));
+    state.growthEvidenceRecords = state.outcomes.map((outcome, index) => ({ id: `growth-evidence-${index + 1}`, agentId: state.agent!.id, presenceId: presence.id, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Verified simulated performance outcome.", sourceRefs: [{ kind: "publication_metric" as const, id: `metric-${index + 1}`, sourcePresenceId: presence.id, observedAt: outcome.observedAt }], verified: true, causalDecisionIds: [decisions[index]!.id], causalMirrorObjectIds: [], sandboxSessionId: session.id, createdAt: outcome.observedAt }));
 
     materializeSandboxOutcomeLearning(state, presence.id, session.id, "2026-09-17T12:00:00.000Z");
     const hypothesis = state.growthHypotheses?.find((item) => item.id === `sandbox-learning:${session.id}:${strategyId}`);
