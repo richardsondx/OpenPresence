@@ -4348,6 +4348,15 @@ function deduplicateMirrorObjects(mirrors: MirrorObject[]) {
   return canonicalOrder.map((key) => canonicalByKey.get(key)!);
 }
 
+function deduplicateRecordsById<T extends { id: string }>(records: T[]): T[] {
+  const seen = new Set<string>();
+  return records.filter((record) => {
+    if (seen.has(record.id)) return false;
+    seen.add(record.id);
+    return true;
+  });
+}
+
 /**
  * Repair the common race where X exposes an authored reply in the own-post
  * feed before the delivery execution has been joined to that mirror object.
@@ -4818,6 +4827,8 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
       referencedExternalRefs: object.referencedExternalRefs?.length ? object.referencedExternalRefs : target ? [target] : object.referencedExternalRefs,
     };
   });
+  normalized.learningCheckpoints = deduplicateRecordsById(normalized.learningCheckpoints ?? []);
+  normalized.learningCounterfactuals = deduplicateRecordsById(normalized.learningCounterfactuals ?? []);
   syncAttentionTests(normalized);
   normalized.personIdentities = normalizePersonIdentityScopes(normalized);
   normalized.publishingPlans = state.publishingPlans ?? [];
