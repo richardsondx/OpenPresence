@@ -44,6 +44,13 @@ commands. `SBX-004` and `SBX-008` remain PARTIAL because the required native
 race plus permission/retry causal cone has not yet been independently owned as
 one composed run. Slice B and Slice C remain gated behind that closure.
 
+An independent verifier also passed the exercised SIM-001 legacy migration
+ablation on `38e97ca`: legacy operator work remained draft, historical Calendar
+data survived restart, Agent-owned Sandbox work executed without activation,
+and no live side effects occurred. Evidence is preserved in
+`qa-learnings/sim001-independent-verifier-38e97ca-2026-09-17.md`; this is
+supporting evidence only until the ordered closure sequence is complete.
+
 The corrected action-family learning implementation was verified on exact
 commit `67a7544` and is documented in
 `qa-learnings/release-candidate-67a7544-2026-09-17.md`. The canonical public
