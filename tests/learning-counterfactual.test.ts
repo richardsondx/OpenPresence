@@ -89,6 +89,40 @@ describe("pure learning counterfactual", () => {
     expect(learningAdjustmentForPattern(state, presence, strategyId, session.id)).toBeGreaterThan(0);
   });
 
+  it("preserves the selected non-post action family in Sandbox learning targets", () => {
+    const state = startPlaygroundSession(createAgent({ name: "Action-family learning", description: "Keep learning attached to the act that was measured.", audience: "AI builders", mode: "agent", handle: "@action_family_learning", accent: "#7c3aed" }));
+    const presence = state.presence!;
+    const session = state.playgroundSessions[0]!;
+    const cases = [
+      { patternId: "social.x.v1.proof-led-original", actions: ["quote", "quote"] },
+      { patternId: "social.x.v1.selective-amplification", actions: ["repost", "follow"] },
+      { patternId: "social.x.v1.quiet-appreciation", actions: ["like", "follow"] },
+    ];
+    const decisions = cases.flatMap(({ patternId, actions }) => actions.map((action, index) => ({
+      id: `action-family-decision-${patternId}-${index}`,
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      environment: "sandbox" as const,
+      sessionId: session.id,
+      focalMirrorObjectIds: [],
+      decision: action as "quote",
+      summary: "Measured action-family decision.",
+      influences: [],
+      socialIntentId: `action-family-intent-${patternId}-${index}`,
+      socialStrategy: { retrievalRunId: `action-family-run-${patternId}-${index}`, consideredPatternIds: [patternId], selectedByAct: [{ act: action, patternId }] },
+      createdAt: `2026-09-${10 + index}T12:00:00.000Z`,
+    })));
+    state.socialDecisions = decisions;
+    state.outcomes = decisions.map((decision, index) => ({ id: `action-family-outcome-${index}`, socialIntentId: decision.socialIntentId!, executionId: `action-family-execution-${index}`, presenceId: presence.id, status: "succeeded" as const, observedAt: decision.createdAt, metrics: {}, evidence: [], environment: "sandbox" as const, sessionId: session.id }));
+    state.growthEvidenceRecords = decisions.map((decision, index) => ({ id: `action-family-evidence-${index}`, agentId: state.agent!.id, presenceId: presence.id, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Measured Sandbox action-family outcome.", sourceRefs: [{ kind: "publication_metric" as const, id: `action-family-metric-${index}`, sourcePresenceId: presence.id, observedAt: decision.createdAt }], verified: true, causalDecisionIds: [decision.id], causalMirrorObjectIds: [], sandboxSessionId: session.id, createdAt: decision.createdAt }));
+
+    materializeSandboxOutcomeLearning(state, presence.id, session.id, "2026-09-17T12:00:00.000Z");
+    const targetActions = (patternId: string) => state.growthHypotheses?.find((hypothesis) => hypothesis.patternIds.includes(patternId))?.decisionTargets?.map((target) => target.action).sort();
+    expect(targetActions("social.x.v1.proof-led-original")).toEqual(["quote"]);
+    expect(targetActions("social.x.v1.selective-amplification")).toEqual(["follow", "repost"]);
+    expect(targetActions("social.x.v1.quiet-appreciation")).toEqual(["follow", "like"]);
+  });
+
   it("weakens a Sandbox hypothesis when a measured alternative materially wins", () => {
     const state = startPlaygroundSession(createAgent({ name: "Contradictory learning", description: "Retire stale strategy confidence.", audience: "AI builders", mode: "agent", handle: "@contradictory_learning", accent: "#7c3aed" }));
     const presence = state.presence!;

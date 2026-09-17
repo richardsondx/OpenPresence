@@ -809,6 +809,7 @@ export function materializeSandboxOutcomeLearning(source: OpenPresenceState, pre
     }
   }
   const decisionIdsByPattern = new Map<string, Set<string>>();
+  const actionsByPattern = new Map<string, Set<string>>();
   for (const outcome of sessionOutcomes) {
     const decision = state.socialDecisions.find((item) => item.socialIntentId === outcome.socialIntentId);
     if (!decision) continue;
@@ -817,6 +818,9 @@ export function materializeSandboxOutcomeLearning(source: OpenPresenceState, pre
       const ids = decisionIdsByPattern.get(selected.patternId) ?? new Set<string>();
       ids.add(decision.id);
       decisionIdsByPattern.set(selected.patternId, ids);
+      const actions = actionsByPattern.get(selected.patternId) ?? new Set<string>();
+      actions.add(selected.act);
+      actionsByPattern.set(selected.patternId, actions);
     }
   }
   for (const [patternId, decisionIds] of decisionIdsByPattern) {
@@ -834,6 +838,7 @@ export function materializeSandboxOutcomeLearning(source: OpenPresenceState, pre
       continue;
     }
     const statement = `Repeated verified Sandbox performance observations support testing ${pattern.mechanism} for this Presence; compare it with alternatives before generalizing.`;
+    const decisionTargets = [...(actionsByPattern.get(patternId) ?? [])].map((action) => ({ strategyId: pattern.id, action, effect: 0.75 }));
     state.growthHypotheses = [{
       id,
       agentId: state.agent.id,
@@ -846,7 +851,7 @@ export function materializeSandboxOutcomeLearning(source: OpenPresenceState, pre
       supportingEvidenceIds: [...new Set(evidenceIds)],
       contradictingEvidenceIds: [],
       derivedFrom: [],
-      decisionTargets: [{ strategyId: pattern.id, effect: 0.75 }],
+      decisionTargets,
       reviewHistory: [{ reviewId: `sandbox-runtime:${sessionId}`, status: "supported" as const, at: observedAt }],
       createdAt: observedAt,
       updatedAt: observedAt,
