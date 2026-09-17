@@ -3076,7 +3076,7 @@ async function runOnDemandAttentionTest(source: OpenPresenceState, presenceId: s
     const quoteText = action === "quote" ? chosen.text.trim() : undefined;
     if (action === "quote" && !quoteText) continue;
     const targetUrl = externalUrlForMirror(candidate, candidate.author?.handle);
-    const decisionInput = { decision: action, summary: chosen.rationale ?? decision.rationale, focalMirrorObjectIds: [candidate.id], origin: { kind: "self_directed_discovery" as const, refId: testId }, influences: ["Brain", "Mission", "Taste", "Presence brief", "Current observed context"], confidence: "medium" as const, autobiographicalEventIds: decision.autobiographicalEventIds, socialStrategy: decision.socialStrategy };
+    const decisionInput = { decision: action, summary: chosen.rationale ?? decision.rationale, focalMirrorObjectIds: [candidate.id], origin: { kind: "self_directed_discovery" as const, refId: testId }, influences: ["Brain", "Mission", "Taste", "Presence brief", "Current observed context"], confidence: "medium" as const, autobiographicalEventIds: decision.autobiographicalEventIds, socialStrategy: decision.socialStrategy, sessionId: candidate.sessionId };
     next = recordAttentionTestDecision(next, { testId, action, rationale: chosen.rationale ?? decision.rationale ?? "Genny found this worth a social signal.", target: candidate.externalRef, targetUrl, quoteText });
     const before = new Set(next.executions.map((item) => item.id));
     if (mode === "sandbox") {
