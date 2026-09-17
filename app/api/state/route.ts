@@ -13,7 +13,7 @@ import { EvidenceVisualAssetDiscoveryProvider, materializeCandidate, previewCand
 import { assessVisualFit } from "@/lib/visual-fit";
 import { AiRuntimeError, checkModelProviderAccess, generateAgentReply, generateAgentSocialDecision, generateAgentSocialEdit, generateAgentSocialJudgment, generateAssetPublicationReview, generateAssetResearchPlannerDecision, generateEvidenceLedDraft, generateEvidenceLedPublication, generateExplorationTriage, generateIndependentModelText, generatePlaygroundTestStimulus, generatePresenceChatReply, generatePublishingPlan, generateTextOnlyAssignmentPublication } from "@/lib/ai";
 import type { AgentSocialDecision } from "@/lib/ai";
-import { validateScenarioFidelity } from "@/lib/scenarios";
+import { stableHash, validateScenarioFidelity } from "@/lib/scenarios";
 import { addSandboxEvent, advanceSandboxTimeWithTemporalEvents, applyOperation, approveSandboxIntroduction, assertRuntimeScope, assignmentIsSatisfied, beginOriginalPostRehearsal, cleanSandboxDraft, compileAgendaWork, completeOriginalPostRehearsal, confirmAutoMode, createRuntimeScope, declineSandboxIntroduction, deleteScenario, deliverSandboxExecution, derivePresenceCapabilityManifest, derivePublishingProgress, derivePublicHistory, deriveSelfDirectedDiscoveryPlan, duePublishingPlanWindows, ensureCapabilityRequests, expireSandboxIntents, finishExplorationSession, finishPulse, formAssignmentPostIntent, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, formXDeleteIntent, formXActionIntent, createScenarioFromPrompt, generateMissingScenarioEvents, identityLeakageReason, importScenarioDefinition, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, markCalendarSlotEvaluated, markInboundJudged, markScenarioStimulus, nativeDeliveryFailureIsConnectionScoped, openAgentRequest, publicSelfGuidance, publishingInitiativeGuidance, recordAttentionTestDecision, recordImportedXMirror, recordNativeMirror, recordNativeMirrorDeletion, recordPreferenceEvidence, recordPublishingPlanFailure, recordPublishingPlanWork, recordResourceUsageEvent, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, recordScenarioEvaluation, recordScenarioReview, renameScenario, replacePublishingPlan, resetPlaygroundSession, settleCapabilityTrialNoOpportunity, startAttentionTest, failAttentionTest, startExplorationSession, startScenarioRunState, completeScenarioRunState, stopScenarioRunState, stateForContext, structuralScenarioEvaluation, startPlaygroundSession, syncPlaygroundTime, syncPublishingInitiativeAssignment, targetIsBlockedByPerson, targetLanguageValidationForAction, unblockNativeExecutions, updateScenarioEvents, updateScenarioRequirements, recordVerifiedXReply, externalUrlForMirror } from "@/lib/runtime";
 import { recordSocialDecision, nativeConnectionCanObserve, recordNativeObservation, resumePresenceAfterNativeRecovery } from "@/lib/runtime";
 import { xQuoteTargetHasAvailableRoute } from "@/lib/runtime";
@@ -4156,7 +4156,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
   prompt += `\n\n${networkMemoryContext}`;
   prompt += `\n\n${publicationHistoryContext}`;
   prompt += `\n\nPublishing initiative context:\n${publishingGuidance}\nThis context describes an ongoing responsibility, not a command to force a weak post. A no_op may reject the current candidate, but it does not complete the standing responsibility.`;
-  if (isOriginalRehearsal) prompt += "\n\nIf a relevant source-backed reusable template is supplied, preserve its exact strategyTemplateId and learningHypothesisId when it materially shapes the draft. If exploring instead, state noStrategyReason.";
+  if (isOriginalRehearsal) prompt += "\n\nAn explicit operator request in the inspiration is supervisory direction to form a candidate, not a reason to wait for an Assignment. Still reject it when the evidence, identity, safety, or Taste standard does not support publishing. If a relevant source-backed reusable template is supplied, preserve its exact strategyTemplateId and learningHypothesisId when it materially shapes the draft. If exploring instead, state noStrategyReason.";
   prompt += `\n\n${sandboxAssetLibraryContext}`;
   prompt += structuredEvidenceGuidance;
   prompt += "\n\nLanguage and phrasing policy:\n" + presenceLanguageGuidance(presence.language) + "\n" + languagePolicyGuidance(effectiveLanguagePolicy(cognitionSource.agent, presence));
@@ -4549,6 +4549,10 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
       confidence: "medium",
       relevantGrowthRevisionRef: presence.activeGrowthRevisionRef,
       socialStrategy: decision.socialStrategy,
+      sourceObservationIds: decision.socialStrategy?.retrievalRun.sourceObservationIds,
+      learningHypothesisId: decision.acts?.find((act) => act.action === "post" || act.action === "original_post")?.learningHypothesisId,
+      ...(decision.action === "post" || decision.action === "original_post" ? { experimentId: `sandbox-experiment:${sessionId}:${createdExecution?.id ?? randomUUID()}`, learningObjective: "Test whether a source-backed evidence structure improves qualified understanding without copying the source.", variationSpecification: decision.strategyTemplateId ? "Template-guided original variation" : decision.socialStrategy?.retrievalRun.sourceObservationIds?.length ? "Source-informed novel exploration" : "Novel exploration" } : {}),
+      generatedContentHash: decision.text?.trim() ? stableHash(decision.text.trim()) : undefined,
       presenceId: presence.id,
       causalEventId: causalTemporalEventId,
       sessionId,

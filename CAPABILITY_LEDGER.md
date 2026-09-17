@@ -611,3 +611,12 @@ remain PARTIAL. The next single highest-impact gate is an independent composed
 canary that requires selected learned-artifact lineage when applicable, records
 the measured keep/modify/retire disposition, and proves a later decision differs
 when that artifact is removed, with the causal cone independently reconstructed.
+
+Run 7 on the current candidate `ff03a5c` is the first real-model public Sandbox
+run to select a learned hypothesis for a later original post. It preserved the
+source mirror ID, selected `social.x.v1.proof-led-original` with its mechanism,
+persisted an experiment ID, learning objective, variation specification, and
+generated-content hash, and delivered a distinct denominator/cohort variation
+inside Sandbox. This is valid partial evidence for the strategy-to-intent and
+generation lineage, not a promotion: measured disposition, later transfer, and
+independent learned-artifact-removed counterfactual gates remain open.
