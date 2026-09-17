@@ -6740,17 +6740,17 @@ export async function POST(request: Request) {
     }
     if (parsed.type === "createSandboxCheckpoint") {
       const next = createSandboxCheckpoint(current, parsed.sessionId, parsed.label);
-      writeState(next);
+      writeState(next, { syncNormalized: true });
       return stateResponse(request, next);
     }
     if (parsed.type === "restoreSandboxCheckpoint") {
       const next = restoreSandboxCheckpoint(current, parsed.sessionId, parsed.checkpointId);
-      writeState(next);
+      writeState(next, { syncNormalized: true });
       return stateResponse(request, next);
     }
     if (parsed.type === "forkSandboxCheckpoint") {
       const next = forkSandboxCheckpoint(current, parsed.sessionId, parsed.checkpointId);
-      writeState(next);
+      writeState(next, { syncNormalized: true });
       return stateResponse(request, next);
     }
     if (parsed.type === "advanceSandboxTime") {
