@@ -213,6 +213,18 @@ retirement; relevant-media learning; adversarial natural-supervision review;
 and independent legacy-migration ablation. Replay closure remains complete;
 no replay-specific hardening is justified without a new material defect.
 
+## Natural-supervision reassessment — 2026-09-17
+
+The current candidate also passed
+`tests/e2e/natural-supervision-seven-day.spec.ts`: seven realistic supervisory
+turns, 10,080 virtual minutes, one Agent-owned responsibility, five verified
+Sandbox outcomes, deliberate silence for weak or untrusted evidence, one
+deduplicated `strategy_change` Agent-initiated update, durable preference
+evidence, and no live actions. The clean run removes the prior stale-lineage
+warning from the builder evidence, but does not itself satisfy the remaining
+independent adversarial threshold review or complete causal-provenance gate;
+`AUT-010`, `EVAL-005`, and `UX-004` remain `PARTIAL`.
+
 ## Update protocol
 
 Latest integrated Sandbox evidence (2026-09-16): the real CLI-launched
