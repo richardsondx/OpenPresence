@@ -742,6 +742,9 @@ export async function generateAgentReply(state: OpenPresenceState, content: stri
       }
       if (/\bgrowth\b/.test(lower)) return "I am treating growth as a direction, not a quota. I am watching for evidence that the conversations and relationships are becoming more useful, then adjusting from what actually happened.";
       if (/\b(?:hello|hi|hey|yo|lol|haha|hilarious)\b/.test(lower)) return "I am here. What caught your eye?";
+      if (/\b(?:make|keep)\b[^.?!]{0,80}\b(?:easier to read|more readable|shorter|concise)\b/i.test(lower)) {
+        return JSON.stringify({ kind: "answer", text: "I’ll make it easier to read and keep the meaning intact.", reaction: "👍" });
+      }
       const excerpt = content.trim().replace(/[\r\n]+/g, " ").slice(0, 180);
       return `I hear you: “${excerpt}”. My read is that this is a conversation first, not automatically a posting task. I’ll respond to the point you made and keep any follow-up grounded in what you actually asked.`;
     }
@@ -968,6 +971,8 @@ export interface AgentSocialDecision {
     droppedIllegalActions?: string[];
   };
   autobiographicalEventIds?: string[];
+  /** Explicit template selection for original-publication experiments. */
+  strategyTemplateId?: string;
   socialStrategy?: { retrievalRun: ReturnType<typeof compileSocialStrategyContext>["retrievalRun"]; use?: ReturnType<typeof strategyUseFromDecision> };
 }
 
@@ -1231,12 +1236,13 @@ export function parseAgentSocialDecision(raw: string, allowedActions: string[], 
         : undefined;
     const conversationDisposition = rawDisposition ? conversationDispositionAliases[rawDisposition] : undefined;
     const operatorReaction = cleanDecisionText(parsed.operatorReaction ?? parsed.operator_reaction) || undefined;
+    const strategyTemplateId = typeof parsed.strategyTemplateId === "string" ? parsed.strategyTemplateId.trim() : typeof parsed.strategy_template_id === "string" ? parsed.strategy_template_id.trim() : undefined;
     if (acts.length > 0) {
       const primary = acts[0]!;
-      return { action: primary.action, text: primary.text, rationale: acts.map((item) => item.rationale).filter(Boolean).join(" ") || undefined, acts, ...(conversationDisposition ? { conversationDisposition } : {}), ...(operatorReaction ? { operatorReaction } : {}), ...(actAssets?.length ? { assets: actAssets } : {}), ...(normalization ? { normalization } : {}) };
+      return { action: primary.action, text: primary.text, rationale: acts.map((item) => item.rationale).filter(Boolean).join(" ") || undefined, acts, ...(conversationDisposition ? { conversationDisposition } : {}), ...(operatorReaction ? { operatorReaction } : {}), ...(actAssets?.length ? { assets: actAssets } : {}), ...(strategyTemplateId ? { strategyTemplateId } : {}), ...(normalization ? { normalization } : {}) };
     }
     const explicitRationale = typeof parsed.rationale === "string" ? cleanDecisionText(parsed.rationale) : undefined;
-    return { action: "no_op", text: "", rationale: explicitRationale || "The Agent had sufficient context and concluded no outward social expression earned its place in this candidate.", acts: [], ...(conversationDisposition ? { conversationDisposition } : {}), ...(operatorReaction ? { operatorReaction } : {}), ...(actAssets?.length ? { assets: actAssets } : {}), ...(normalization ? { normalization } : {}) };
+    return { action: "no_op", text: "", rationale: explicitRationale || "The Agent had sufficient context and concluded no outward social expression earned its place in this candidate.", acts: [], ...(conversationDisposition ? { conversationDisposition } : {}), ...(operatorReaction ? { operatorReaction } : {}), ...(actAssets?.length ? { assets: actAssets } : {}), ...(strategyTemplateId ? { strategyTemplateId } : {}), ...(normalization ? { normalization } : {}) };
   }
   const rawAction = typeof parsed.action === "string" ? parsed.action.trim().toLowerCase()
     : typeof parsed.decision === "string" ? parsed.decision.trim().toLowerCase()
@@ -1255,7 +1261,8 @@ export function parseAgentSocialDecision(raw: string, allowedActions: string[], 
       : undefined;
   const conversationDisposition = rawDisposition ? conversationDispositionAliases[rawDisposition] : undefined;
   const operatorReaction = cleanDecisionText(parsed.operatorReaction ?? parsed.operator_reaction) || undefined;
-  if (action === "no_op") return { action, text: "", rationale: rationale || undefined, ...(conversationDisposition ? { conversationDisposition } : {}), ...(operatorReaction ? { operatorReaction } : {}) };
+  const strategyTemplateId = typeof parsed.strategyTemplateId === "string" ? parsed.strategyTemplateId.trim() : typeof parsed.strategy_template_id === "string" ? parsed.strategy_template_id.trim() : undefined;
+  if (action === "no_op") return { action, text: "", rationale: rationale || undefined, ...(conversationDisposition ? { conversationDisposition } : {}), ...(operatorReaction ? { operatorReaction } : {}), ...(strategyTemplateId ? { strategyTemplateId } : {}) };
   if (!allowed.has(action)) return { action: "no_op", text: "", rationale: `Unsupported action returned by the Agent: ${action}.` };
   const supportedAssetKinds = new Set<SocialAssetKind>(["image", "video", "gif", "chart", "link"]);
   const assets = Array.isArray(parsed.assets)
@@ -1291,7 +1298,7 @@ export function parseAgentSocialDecision(raw: string, allowedActions: string[], 
     }).filter((item): item is NonNullable<typeof item> => Boolean(item)).slice(0, 4)
     : undefined;
   const networkReason = typeof parsed.networkReason === "string" ? parsed.networkReason.trim().slice(0, 500) : typeof parsed.network_reason === "string" ? parsed.network_reason.trim().slice(0, 500) : undefined;
-  return { action, text, rationale: rationale || undefined, ...(conversationDisposition ? { conversationDisposition } : {}), ...(operatorReaction ? { operatorReaction } : {}), ...(referencedPeople?.length ? { referencedPeople } : {}), ...(networkReason ? { networkReason } : {}), ...(format ? { format } : {}), assets: assets?.length ? assets : undefined, ...(storyCandidate ? { storyCandidate } : {}), ...(evidenceNeed ? { evidenceNeed } : {}), ...(visualNeed ? { visualNeed } : {}), ...(visualBrief ? { visualBrief } : {}) };
+  return { action, text, rationale: rationale || undefined, ...(conversationDisposition ? { conversationDisposition } : {}), ...(operatorReaction ? { operatorReaction } : {}), ...(referencedPeople?.length ? { referencedPeople } : {}), ...(networkReason ? { networkReason } : {}), ...(format ? { format } : {}), assets: assets?.length ? assets : undefined, ...(storyCandidate ? { storyCandidate } : {}), ...(evidenceNeed ? { evidenceNeed } : {}), ...(visualNeed ? { visualNeed } : {}), ...(visualBrief ? { visualBrief } : {}), ...(strategyTemplateId ? { strategyTemplateId } : {}) };
 }
 
 function cleanJudgmentField(value: unknown, fallback = "") {
@@ -1678,6 +1685,9 @@ export function validateSocialStrategySelection(decision: AgentSocialDecision, c
   // Older/provider-compatible top-level action responses do not carry the
   // structured `acts` envelope. Preserve those valid decisions; strategy
   // attribution is required only for the current multi-act contract.
+  if (decision.strategyTemplateId && !context?.retrievalRun.relevantSocialTemplateIds?.includes(decision.strategyTemplateId)) {
+    throw new AiRuntimeError("The selected strategyTemplateId was not supplied by the current strategy retrieval run.", { code: "invalid_response" });
+  }
   if (!decision.acts || !context?.retrievalRun.consideredPatterns.length || decision.action === "no_op") return;
   const patterns = context.retrievalRun.consideredPatterns;
   const acts: NonNullable<AgentSocialDecision["acts"]> = decision.acts ?? [{ action: decision.action, text: decision.text }];
@@ -1732,7 +1742,8 @@ export async function generateAgentSocialDecision(state: OpenPresenceState, inst
     ? `\n- Operator reaction: also return operatorReaction as one brief, natural private response about what you think of the post itself. Speak to the operator like a person. Do not narrate your decision, selected action, evidence process, or internal rationale; never say “I chose to,” “I decided to,” or “no public act is warranted.” This private reaction is separate from any public reply text.\n\nInclude "operatorReaction":"one natural sentence" in the top-level JSON.`
     : "";
     const plannerInstruction = `${instruction}\n\nThe rationale and no_op reason may be shown to the operator. Write them as a short, plain-language explanation of the concrete choice, not an evaluation rubric. For example: “I don’t have anything useful to add to this post” or “The numbers in this post have no source.” Avoid abstract phrases such as “truthful specific contribution,” “amplify a product claim,” “concrete mechanism,” and “implementation nuance.” Do not list hidden reasoning or claim checks you did not perform. Preserve your actual judgment and the facts.\n\nEvaluate the social candidate and choose zero or more compatible acts from: ${actions.join(", ")}.\n- Repost: choose repost when the post is valuable as-is and should be shared directly with your audience.\n- Quote: choose quote only when a short, concrete response makes this specific source post more useful to this audience. Anchor the words to the source's claim, tension, or moment; never write a generic essay, product pitch, discovery brief, or abstract lesson. Keep the quote under 240 characters (the channel limit is 280).\n- Reply: choose reply when a direct conversational response to the author adds value; keep it specific and under 240 characters.\n- Like: choose like for quiet appreciation without needing to speak.\n- Follow: choose follow for continued awareness of this author.\n- Silence: return an empty acts array ([]) when sufficient context is present and no outward action earned its place.${operatorReactionInstruction}\n\n${personToPersonLanguageGuidance} Language quality: follow BRAIN.md for the Agent's reasoning stance and TASTE.md plus active Style Guidance for voice and surface choices. When BRAIN.md does not specify a stance, use the realistic-optimist default in AI-SLOP AVOIDANCE. Name the concrete detail first. Be honest about limits when that fits the selected stance. Avoid teacher voice, canned empathy, slang, workplace jargon, bureaucratic phrasing, stock formulas, repeated contrasts, negative parallelism (\"isn't X, it's Y\" and \"not just X, but Y\"), vague frames such as \"the interesting/useful bit\" or \"the real test\", and phrases about doing heroic or heavy lifting.\n\nReturn JSON only in this shape:\n{"acts":[{"action":"${actions.join("|")}","text":"reply or quote text when needed, otherwise empty","rationale":"concise reason for this act","strategyId":"supplied pattern ID when suitable","mechanismId":"that pattern’s mechanism","noStrategyReason":"required instead of strategyId when no pattern fits"}],"conversationDisposition":"continue|react_only|close_with_reply|close_silently|defer","rationale":"concise summary of the decision"}.`;
-  const raw = await generateAgentReply(state, options?.socialInput ?? plannerInstruction, undefined, { social: true, presence, socialHistory: options?.socialHistory, socialGuidance: [options?.socialInput ? plannerInstruction : undefined, options?.socialGuidance, strategyContext?.prompt].filter(Boolean).join("\n\n"), socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, autobiographicalContext: options?.autobiographicalContext ?? autobiography?.text, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, originId: options?.originId, operatorConversation: options?.operatorConversation, maxOutputTokens: options?.maxOutputTokens ?? SOCIAL_DECISION_MAX_OUTPUT_TOKENS, peopleNote: options?.peopleNote });
+  const templateSelectionGuidance = "For an original post, include strategyTemplateId only when one of the supplied reusable templates materially shaped the draft; omit it when exploring a novel format. Never invent an ID.";
+  const raw = await generateAgentReply(state, options?.socialInput ?? plannerInstruction, undefined, { social: true, presence, socialHistory: options?.socialHistory, socialGuidance: [options?.socialInput ? plannerInstruction : undefined, options?.socialInput ? templateSelectionGuidance : undefined, options?.socialGuidance, strategyContext?.prompt].filter(Boolean).join("\n\n"), socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, autobiographicalContext: options?.autobiographicalContext ?? autobiography?.text, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, originId: options?.originId, operatorConversation: options?.operatorConversation, maxOutputTokens: options?.maxOutputTokens ?? SOCIAL_DECISION_MAX_OUTPUT_TOKENS, peopleNote: options?.peopleNote });
   let parsed: AgentSocialDecision;
   try {
     parsed = parseAgentSocialDecision(raw, actions, { strict: true });
@@ -1746,7 +1757,7 @@ export async function generateAgentSocialDecision(state: OpenPresenceState, inst
       social: true,
       presence,
       socialHistory: options?.socialHistory,
-      socialGuidance: [plannerInstruction, options?.socialGuidance, strategyContext?.prompt].filter(Boolean).join("\n\n"),
+      socialGuidance: [plannerInstruction, templateSelectionGuidance, options?.socialGuidance, strategyContext?.prompt].filter(Boolean).join("\n\n"),
       socialEvidence: options?.socialEvidence,
       socialThreadContext: options?.socialThreadContext,
       autobiographicalContext: options?.autobiographicalContext ?? autobiography?.text,
@@ -1768,6 +1779,7 @@ export async function generateAgentSocialDecision(state: OpenPresenceState, inst
     parsed = parseAgentSocialDecision(repairRaw, actions, { strict: true });
     validateSocialStrategySelection(parsed, strategyContext);
   }
+  if (parsed.strategyTemplateId && strategyContext) strategyContext.retrievalRun.selectedTemplateId = parsed.strategyTemplateId;
   const targetText = options?.socialInput?.trim();
   if (parsed.action === "reply" && targetText) {
     const corrected = ensurePlayfulToneEmoji(targetText, parsed.text);

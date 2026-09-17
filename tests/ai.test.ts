@@ -136,6 +136,14 @@ describe("Agent social decision parsing", () => {
     expect(parseAgentSocialDecision('{"action":"quote","text":"The denominator is the story.","rationale":"Adds a distinct point."}', ["post", "quote", "no_op"])).toEqual({ action: "quote", text: "The denominator is the story.", rationale: "Adds a distinct point." });
   });
 
+  it("preserves an explicit reusable-template selection on an original decision", () => {
+    expect(parseAgentSocialDecision('{"acts":[{"action":"post","text":"A concrete mechanism beats a polished promise.","rationale":"A source-backed variation fits the audience.","strategyId":"social.x.v1.proof-led-original","mechanismId":"proof-led original"}],"strategyTemplateId":"growth-hypothesis:observed-template"}', ["post", "no_op"])).toMatchObject({
+      action: "post",
+      strategyTemplateId: "growth-hypothesis:observed-template",
+      acts: [{ strategyId: "social.x.v1.proof-led-original" }],
+    });
+  });
+
   it("preserves independent social acts in a composable decision bundle", () => {
     expect(parseAgentSocialDecision('{"acts":[{"action":"like","rationale":"A quiet signal is enough."},{"action":"follow","rationale":"This author is relevant to the Presence territory."},{"action":"quote","text":"The denominator is the story.","rationale":"Adds a distinct point."}]}', ["like", "follow", "quote", "no_op"])).toMatchObject({
       action: "like",
