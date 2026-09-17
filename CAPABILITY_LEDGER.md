@@ -290,6 +290,14 @@ seven-day trajectory, the independent verifier (8 files / 90 tests), and the
 broad suite (130 files / 1,217 tests). This integration result is recorded in
 `qa-learnings/sandbox-learning-materialization-integration-2026-09-17.md`.
 
+The natural-supervision trajectory was also rerun on `e4cc6de` and passed:
+seven realistic turns, 10,080 virtual minutes, five verified Sandbox
+outcomes, one deduplicated `strategy_change` update, durable correction
+evidence, and no live actions. Evidence is in
+`qa-learnings/natural-supervision-recheck-e4cc6de-2026-09-17.md`. This does
+not promote `EVAL-005`, `AUT-010`, or `UX-004`; independent adversarial
+threshold review remains required.
+
 Latest integrated Sandbox evidence (2026-09-16): the real CLI-launched
 mandatory trajectory began with zero user Assignments, materialized one
 session-scoped Agent-owned Sandbox responsibility, ran for 10,080 virtual
