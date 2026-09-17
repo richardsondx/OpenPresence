@@ -162,6 +162,25 @@ immutable candidate `0f237e3`. These close the corresponding proof gates;
 remaining promotion blockers are recorded in the closure manifest rather than
 being inferred from component tests alone.
 
+## Final release-candidate reassessment — 2026-09-17
+
+Immutable candidate `14d33a4e460942b21fa13f8056804770efea2b56` passed the
+canonical public seven-day trajectory, the independent replay/cross-rate/
+hidden-truth/isolation verifier (8 files / 89 tests), the full suite (130 files
+/ 1,214 tests), lint, build, and typecheck. A single broad-suite regression in
+operator-shared link observation was preserved and repaired before this final
+candidate; no other release-health defect remained.
+
+No `PARTIAL` capability is promoted by this checkpoint. Existing evidence is
+reused for all already-`PROVEN` rows. Remaining rows retain exact gates for
+dependent-work reconsideration and projection coherence, autonomous
+milestone/interruption review, complete causal-cone reconstruction,
+goal-attributed learning review, action-faithful runtime ablation,
+autonomous stale-pattern retirement, relevant-media learning, adversarial
+natural-supervision review, and legacy-migration capability ablation. Replay
+closure is complete; do not add replay-specific hardening without a new
+material defect.
+
 ## Update protocol
 
 Latest integrated Sandbox evidence (2026-09-16): the real CLI-launched
