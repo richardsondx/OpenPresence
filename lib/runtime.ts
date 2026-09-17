@@ -786,6 +786,8 @@ export interface SocialDecisionInput {
   operatorReaction?: string;
   autobiographicalEventIds?: string[];
   causalEventId?: string;
+  /** Sandbox session carrying this decision when no Intent owns it yet. */
+  sessionId?: string;
   socialStrategy?: { retrievalRun: import("./types").SocialStrategyRetrievalRun; use?: import("./types").SocialStrategyUse };
 }
 
@@ -796,9 +798,9 @@ function socialDecisionLabel(decision: SocialDecisionKind) {
 function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInput, socialIntentId?: string): SocialDecision | undefined {
   const presence = input.presenceId ? state.presences.find((p) => p.id === input.presenceId) ?? state.presence : state.presence;
   if (!state.agent || !presence) return undefined;
-  const sandboxSessionId = socialIntentId
+  const sandboxSessionId = input.sessionId ?? (socialIntentId
     ? state.socialIntents.find((intent) => intent.id === socialIntentId)?.sessionId
-    : undefined;
+    : undefined);
   const assignmentTemplateId = input.origin?.kind === "assignment"
     ? state.assignments.find((assignment) => assignment.id === input.origin?.refId)?.strategyTemplateId
     : undefined;
@@ -845,6 +847,7 @@ function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInp
     autobiographicalEventIds: input.autobiographicalEventIds?.filter((eventId) => state.autobiographicalEvents.some((event) => event.id === eventId)),
     attentionEpisodeId: input.attentionEpisodeId,
     causalEventId,
+    ...(sandboxSessionId ? { sandboxSessionId } : {}),
     createdAt: now(),
   };
 }

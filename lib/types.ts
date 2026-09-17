@@ -1984,6 +1984,8 @@ export interface SocialDecision {
   attentionEpisodeId?: string;
   /** Causal Sandbox temporal event, when this judgment came from one. */
   causalEventId?: string;
+  /** Replay-only scope for Sandbox learning and causal reconstruction. */
+  sandboxSessionId?: string;
 }
 export type PublishingInitiativeStatus = "idle" | "seeking" | "awaiting_review" | "blocked" | "at_pace";
 export interface PublishingInitiativeProgress {

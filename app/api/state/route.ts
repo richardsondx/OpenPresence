@@ -4487,6 +4487,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
       socialStrategy: decision.socialStrategy,
       presenceId: presence.id,
       causalEventId: causalTemporalEventId,
+      sessionId,
     } as Parameters<typeof recordSocialDecision>[1]);
     const recordedDecision = next.socialDecisions[0];
     if (recordedDecision && createdExecution) recordedDecision.socialIntentId = createdExecution.socialIntentId;
