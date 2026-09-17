@@ -562,3 +562,19 @@ found no public operation for the altered-learning branch with identical future
 inputs. The result is preserved as an inconclusive proof-boundary artifact in
 `qa-learnings/independent-public-learning-ablation-9baca92-2026-09-17.md`; the
 LEARN-002/003/004 rows remain PARTIAL.
+
+## Autonomous learning lineage audit — `e6b9f22` — 2026-09-17
+
+The live original-publication audit found a concrete decision → intent gap:
+the runtime compiled `socialStrategy` for autonomous launch and Publishing
+Assignment decisions but dropped it when forming the durable Social Decision.
+`e6b9f22` propagates that lineage through the live launch and Publishing
+Assignment paths and records the structured launch decision immediately before
+intent formation. The focused real route regression passed 1/1, and the
+related X/Publishing Plan regression passed 67/67. Full details are in
+`qa-learnings/autonomous-learning-lineage-e6b9f22-2026-09-17.md`.
+
+This is a boundary repair, not learning proof. No capability is promoted. A
+real-model, isolated public-runtime canary still must prove pattern/template
+selection, grounded traceable variation, publication/result/learning lineage,
+later decision transfer, and a retained-vs-removed independent counterfactual.
