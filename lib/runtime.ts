@@ -1212,7 +1212,7 @@ export function replacePublishingPlan(source: OpenPresenceState, input: { presen
   }
   const initiative = presence.publishingInitiative;
   const newPlanId = id("publishing-plan");
-  state.publishingPlans = state.publishingPlans.map((item) => previous.some((old) => old.id === item.id) ? { ...item, status: "superseded" as const, supersededBy: newPlanId, supersededAt: timestamp, updatedAt: timestamp } : item);
+  state.publishingPlans = state.publishingPlans.map((item) => previous.some((old) => old.id === item.id) ? { ...item, status: "superseded" as const, windows: item.windows.map((window) => ({ ...window, status: "superseded" as const })), supersededBy: newPlanId, supersededAt: timestamp, updatedAt: timestamp } : item);
   const plan: PublishingPlan = {
     id: newPlanId, agentId: state.agent.id, presenceId: presence.id, environment,
     initiativeMode: initiative.mode === "pace" ? "pace" : "adaptive", horizonStart: input.draft.horizonStart, horizonEnd: input.draft.horizonEnd, timezone: initiative.timezone,

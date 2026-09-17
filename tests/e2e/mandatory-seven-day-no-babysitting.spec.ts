@@ -475,6 +475,7 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     expect(current.events.some((event) => text(event.title) === "Plan invalidation reviewed"), `The breaking event did not trigger an explicit plan invalidation review. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
     expect(activePlans.length).toBe(1);
     expect(supersededPlans.some((plan) => Number(plan.revision) < Number(activePlans[0]?.revision)), `The breaking event did not create a successor plan revision. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
+    expect(supersededPlans.every((plan) => records(plan.windows).every((window) => text(window.status) === "superseded")), `Superseded plan windows remained executable-looking. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
     expect(autonomousWakeCount, `The continuous responsibility did not receive one autonomous wake per simulated day. Evidence: ${JSON.stringify(evidence)}`).toBeGreaterThanOrEqual(7);
     expect(unexplainedIdleDays, `The Agent went idle without work or an explicit blocker. Evidence: ${JSON.stringify(evidence)}`).toEqual([]);
     expect(
