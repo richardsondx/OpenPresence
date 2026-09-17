@@ -24,6 +24,14 @@ typecheck, build, and 131 files / 1,235 tests). Evidence is recorded in
 `qa-learnings/release-candidate-38e97ca-2026-09-17.md`. No PARTIAL row is
 promoted from this aggregate run; each retains its declared behavioral gate.
 
+Independent verifier delta: the fresh adversarial review of `38e97ca` found no
+reproducible product failure, but returned `INCONCLUSIVE` for every remaining
+PARTIAL row because the required public composed/adversarial contracts were not
+actually exercised. Its fresh launch also hit a detached-environment `bindings`
+resolution error (HTTP 500); this setup failure is preserved in
+`qa-learnings/independent-verifier-38e97ca-2026-09-17.md` and is not product
+evidence. No replay-specific hardening is reopened.
+
 The corrected action-family learning implementation was verified on exact
 commit `67a7544` and is documented in
 `qa-learnings/release-candidate-67a7544-2026-09-17.md`. The canonical public
