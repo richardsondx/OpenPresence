@@ -684,12 +684,18 @@ function compatibleSkills(state: OpenPresenceState, presence: Presence, situatio
 function visualAssetContext(state: OpenPresenceState, presenceId: string) {
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   if (!presence) return "No active Presence is available for visual asset selection.";
+  const latestPerceptionByAsset = new Map<string, NonNullable<OpenPresenceState["perceptions"]>[number]>();
+  for (const perception of [...(state.perceptions ?? [])].sort((left, right) => right.createdAt.localeCompare(left.createdAt))) {
+    if (!latestPerceptionByAsset.has(perception.assetId)) latestPerceptionByAsset.set(perception.assetId, perception);
+  }
   const eligible = state.assets.filter((asset) => asset.retention === "preserved"
     && !asset.archivedAt
     && asset.agentId === state.agent?.id
     && assetIsEligibleForPresence(state, asset, presenceId)
     && asset.rights?.status !== "restricted"
     && asset.reusePermission !== "blocked"
+    && latestPerceptionByAsset.get(asset.id)?.result.decorative !== true
+    && latestPerceptionByAsset.get(asset.id)?.result.visualRole !== "atmosphere"
     && ["image", "gif", "video", "chart"].includes(asset.type));
   if (!eligible.length) return "No durable authorized visual asset is currently available. Do not invent or attach media.";
   const usageByAsset = new Map<string, number>();
@@ -716,7 +722,7 @@ function visualAssetContext(state: OpenPresenceState, presenceId: string) {
     const label = asset.description ?? asset.perception?.observation ?? `${asset.type} asset`;
     return { asset, usageCount, bestSignal, label };
   }).sort((left, right) => right.bestSignal - left.bestSignal || right.usageCount - left.usageCount || right.asset.updatedAt.localeCompare(left.asset.updatedAt)).slice(0, 6);
-  return `Authorized reusable visuals (ranked by observed reuse and verified performance; evidence is descriptive, not causal):\n${lines.map(({ asset, usageCount, bestSignal, label }) => `- ${asset.id} · ${label.slice(0, 220)} · used ${usageCount} live time${usageCount === 1 ? "" : "s"}${bestSignal ? ` · best observed engagement signal ${bestSignal}` : ""}`).join("\n")}\nChoose media only when it materially improves this post and matches the template's visual guidance. Prefer a relevant previously useful asset over a new discovery; do not attach ads, generic decoration, or uninspected temporary discoveries.`;
+  return `Authorized reusable visuals (ranked by observed reuse and verified performance; explicitly decorative or atmosphere-only media is excluded; evidence is descriptive, not causal):\n${lines.map(({ asset, usageCount, bestSignal, label }) => `- ${asset.id} · ${label.slice(0, 220)} · used ${usageCount} live time${usageCount === 1 ? "" : "s"}${bestSignal ? ` · best observed engagement signal ${bestSignal}` : ""}`).join("\n")}\nChoose media only when it materially improves this post and matches the template's visual guidance. Prefer a relevant previously useful asset over a new discovery; do not attach ads, generic decoration, or uninspected temporary discoveries.`;
 }
 
 function durablePreferenceContext(state: OpenPresenceState, presence: Presence) {

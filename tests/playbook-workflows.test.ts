@@ -5,7 +5,7 @@ import { POST, GET } from "../app/api/state/route";
 import { writeState } from "../lib/db";
 import { recordPlaybookMilestones } from "../lib/playbook-milestones";
 import { growthBrowserProjection } from "../lib/growth-browser-projection";
-import type { Assignment, Execution, MirrorObject, OpenPresenceState, PublicationMetricSnapshot } from "../lib/types";
+import type { Assignment, Asset, Execution, MirrorObject, OpenPresenceState, PublicationMetricSnapshot } from "../lib/types";
 
 type TemplateHypothesisRecord = { id: string; template?: { title?: string } };
 type ScheduledAssignmentRecord = { id: string; strategyTemplateId?: string; title?: string; description?: string; instruction?: string };
@@ -28,6 +28,22 @@ describe("Growth playbook workflows", () => {
     expect(context.prompt).toContain("IMAGE DECISION RULE");
     expect(context.prompt).toContain("visual guidance:");
     expect(context.prompt).toContain("No durable authorized visual asset is currently available");
+  });
+
+  it("keeps explicitly decorative media out of later reusable-asset context", () => {
+    const state = normalizeState(createAgent({ name: "Media allocator", description: "Choose evidence that fits the idea.", mode: "agent", handle: "@media_allocator", accent: "#123456" }));
+    const presence = state.presence!;
+    const now = new Date().toISOString();
+    const asset = (id: string, name: string): Asset => ({ id, agentId: state.agent!.id, presenceId: presence.id, type: "image", status: "ready", retention: "preserved", rights: { status: "owned" }, provenance: { origin: "sandbox", importedAt: now }, description: name, environment: "sandbox", visibility: "public", shareability: "presence-only", createdAt: now, updatedAt: now });
+    state.assets = [asset("asset-chart", "Relevant evidence chart"), asset("asset-stock", "Decorative stock photo")];
+    state.perceptions = [
+      { id: "perception-chart", assetId: "asset-chart", presenceId: presence.id, level: "inspect", result: { observation: "A chart is visible.", uncertainty: "low", visualForm: "chart", visualRole: "evidence", decorative: false }, sourceAssetVersion: now, createdAt: now, environment: "sandbox" },
+      { id: "perception-stock", assetId: "asset-stock", presenceId: presence.id, level: "inspect", result: { observation: "A generic office photo is visible.", uncertainty: "low", visualForm: "photo", visualRole: "atmosphere", decorative: true }, sourceAssetVersion: now, createdAt: now, environment: "sandbox" },
+    ];
+    const context = compileSocialStrategyContext(state, presence, { invocation: "later media decision", objective: "Publish a grounded technical post", availableActions: ["post"] });
+    expect(context.prompt).toContain("asset-chart");
+    expect(context.prompt).not.toContain("asset-stock");
+    expect(context.prompt).toContain("explicitly decorative or atmosphere-only media is excluded");
   });
 
   it("abstracts a bounded observed source set and carries it into Growth planning", () => {
