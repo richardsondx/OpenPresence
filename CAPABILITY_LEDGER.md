@@ -497,3 +497,24 @@ surface and preserved its run at
 `/tmp/openpresence-candidate-9df4085/data/public-learning-final.db`. It
 observed one accepted measured action but not the second independent action
 needed for a durable transfer hypothesis; LEARN-002/003/004 remain PARTIAL.
+
+## Current candidate reassessment — `9baca92` — 2026-09-17
+
+Candidate `9baca92` adds only the closure-enabling native external-oracle
+backoff-cancellation proof. Its oracle passed 2/2: one in-flight revocation
+produced one verified external request, while cancellation during retry
+backoff produced zero requests before and after cancellation. The candidate
+also passed the composed public slices 3/3, independent verifier 9 files / 93
+tests, independent public causal verifier 1/1, typecheck, lint with 0 errors /
+157 pre-existing warnings, production build, and broad Vitest (132 files /
+1,239 tests). Full evidence is in
+`qa-learnings/release-candidate-9baca92-2026-09-17.md`.
+
+No PARTIAL row is promoted. SBX-004's focused oracle gate is satisfied, but the
+stronger integrated native retry-backoff trajectory and complete independent
+causal-cone gate remain open. LEARN-002's independent transfer sub-gate is
+satisfied (`decisionsDiffer=true`, `scoreDelta=0.28125`), while its full
+action-family/causal contract remains open. LEARN-003/004, SIM-001, and the
+remaining autonomy/interruption/causal-cone reviews retain their explicit
+gates. The migration evidence remains source-equivalent support, not a fresh
+candidate-bound run.
