@@ -45,6 +45,15 @@ caught and closed a test-harness child-process discovery defect. No capability
 is promoted merely because this composed run is green; each remaining PARTIAL
 row retains its exact missing behavioral gate.
 
+Final immutable candidate delta: `c99cc37` passed the canonical composed
+seven-day run, detached exact-SHA independent verifier including cross-process
+and cross-rate checks, detached natural-supervision run, and broad release
+health (lint 0 errors / 155 warnings; build; serial typecheck; 130 files /
+1,209 tests). The candidate-bound evidence is recorded in
+`qa-learnings/release-candidate-c99cc37-2026-09-17.md`. AUT-002 is promoted by
+the new natural-answer persistence and Agent-owned planning proof; all other
+PARTIAL rows retain their explicit missing gates.
+
 Current closure delta: `tests/plan-intervention-process-boundary.test.ts`
 passed a real Process A → terminate → fresh Process B replay. The restored
 Agent-owned responsibility retained its supervisory constraint and executed
