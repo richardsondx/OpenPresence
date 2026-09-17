@@ -37,6 +37,13 @@ browser reload truth, and zero live executions), but still returned
 full-causal-cone, learning-transfer, interruption, and legacy-ablation gates
 were not all exercised. No replay-specific hardening is reopened.
 
+Slice A focused rerun (2026-09-17) passed the native executor, public retry/
+cancellation route, and independent public causal-trace checks; see
+`qa-learnings/slice-a-focused-rerun-2026-09-17.md` for the explicit oracle and
+commands. `SBX-004` and `SBX-008` remain PARTIAL because the required native
+race plus permission/retry causal cone has not yet been independently owned as
+one composed run. Slice B and Slice C remain gated behind that closure.
+
 The corrected action-family learning implementation was verified on exact
 commit `67a7544` and is documented in
 `qa-learnings/release-candidate-67a7544-2026-09-17.md`. The canonical public
