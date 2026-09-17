@@ -194,6 +194,25 @@ the full composed trajectory still needs dependent-work reconsideration and
 projection coherence after mutation/reload; this is not promoted from the
 focused proof alone.
 
+## Final release-candidate reassessment — 2026-09-17
+
+Immutable candidate `567cae2c52218dda2771762ffbd3a803fdc2973c` passed the
+canonical public seven-day Sandbox trajectory, the exact-candidate independent
+verifier (8 files / 90 tests, including cross-process replay and cross-rate
+verification), and final broad release health (lint 0 errors / existing
+warnings, production build, typecheck, and 130 files / 1,215 tests). The
+candidate-bound evidence is recorded in
+`qa-learnings/release-candidate-567cae2-2026-09-17.md`.
+
+No `PARTIAL` capability is promoted by this checkpoint. Existing passing
+evidence is reused, and the explicit gaps remain: dependent-work
+reconsideration and Calendar reload coherence; complete causal-cone
+reconstruction; autonomous milestone/interruption threshold verification;
+goal-attributed learning audit; action-faithful ablation; stale-pattern
+retirement; relevant-media learning; adversarial natural-supervision review;
+and independent legacy-migration ablation. Replay closure remains complete;
+no replay-specific hardening is justified without a new material defect.
+
 ## Update protocol
 
 Latest integrated Sandbox evidence (2026-09-16): the real CLI-launched
