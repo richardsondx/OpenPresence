@@ -346,6 +346,17 @@ function retryFenceKey(retryId: string) {
   return `retry:${retryId}`;
 }
 
+function temporalCausalData(data: unknown, parentIds: string[]) {
+  const parents = [...new Set(parentIds.filter((value) => typeof value === "string" && value.length > 0))];
+  return {
+    ...(data && typeof data === "object" && !Array.isArray(data) ? data : { value: data }),
+    causal: {
+      parentIds: parents,
+      parentTypes: Object.fromEntries(parents.map((parentId) => [parentId, "temporal_event"])),
+    },
+  };
+}
+
 export class SandboxTemporalKernel {
   private nowValue: number;
   private pausedValue: boolean;
@@ -588,7 +599,7 @@ export class SandboxTemporalKernel {
     retry.fence = fence;
     if (input.payload !== undefined) retry.payload = clone(input.payload);
     if (!existing) this.retriesValue.push(retry);
-    this.addTrajectory("retry_scheduled", { operationId: input.operationId, attempt, delayMs: delay, retryId: id }, event.id);
+    this.addTrajectory("retry_scheduled", temporalCausalData({ operationId: input.operationId, attempt, delayMs: delay, retryId: id }, [event.id]), event.id);
     return clone(retry);
   }
 
@@ -598,6 +609,7 @@ export class SandboxTemporalKernel {
       .sort((a, b) => b.attempt - a.attempt)[0];
     if (!retry) return undefined;
     retry.lastError = clone(error);
+    const failedEventId = retry.eventId;
     // Invalidate the complete operation lineage before changing its terminal
     // state or scheduling the next attempt. This covers duplicate/persisted
     // events whose IDs are older than the retry record's current eventId.
@@ -605,13 +617,13 @@ export class SandboxTemporalKernel {
     this.cancelPendingRetryEvents(retry.operationId, "retry transition superseded this event");
     if (retry.attempt >= retry.policy.maxAttempts) {
       retry.status = "exhausted";
-      this.addTrajectory("retry_exhausted", { operationId, attempt: retry.attempt, error: clone(error) }, retry.eventId);
+      this.addTrajectory("retry_exhausted", temporalCausalData({ operationId, attempt: retry.attempt, error: clone(error) }, failedEventId ? [failedEventId] : []), failedEventId);
       return clone(retry);
     }
     const next = this.scheduleRetry({ id: retry.id, operationId, attempt: retry.attempt + 1, policy: retry.policy, payload: retry.payload });
     retry.status = "pending";
     retry.eventId = next.eventId;
-    this.addTrajectory("retry_failed", { operationId, attempt: retry.attempt, error: clone(error) }, retry.eventId);
+    this.addTrajectory("retry_failed", temporalCausalData({ operationId, attempt: retry.attempt, error: clone(error) }, [failedEventId, next.eventId].filter((value): value is string => Boolean(value))), failedEventId);
     return clone(next);
   }
 
@@ -623,7 +635,7 @@ export class SandboxTemporalKernel {
     retry.fence = this.issueFence(retryFenceKey(retry.id));
     this.cancelPendingRetryEvents(retry.operationId, "retry succeeded");
     retry.status = "succeeded";
-    this.addTrajectory("retry_succeeded", { operationId, attempt: retry.attempt }, retry.eventId);
+    this.addTrajectory("retry_succeeded", temporalCausalData({ operationId, attempt: retry.attempt }, retry.eventId ? [retry.eventId] : []), retry.eventId);
     return clone(retry);
   }
 
@@ -765,7 +777,7 @@ export class SandboxTemporalKernel {
       }
       if (event.type === "retry" && this.retryEventIsStale(event)) {
         event.status = "stale";
-        this.addTrajectory("retry_event_stale", { operationId: this.retryOperationId(event), attempt: this.retryAttempt(event) }, event.id);
+        this.addTrajectory("retry_event_stale", temporalCausalData({ operationId: this.retryOperationId(event), attempt: this.retryAttempt(event) }, [event.id]), event.id);
         processed.push(clone(event));
         return;
       }
@@ -832,7 +844,7 @@ export class SandboxTemporalKernel {
     if (!retry) return;
     retry.status = "attempting";
     retry.attempt = payload?.attempt ?? retry.attempt;
-    this.addTrajectory("retry_attempted", { operationId: retry.operationId, attempt: retry.attempt }, event.id);
+    this.addTrajectory("retry_attempted", temporalCausalData({ operationId: retry.operationId, attempt: retry.attempt }, [event.id]), event.id);
   }
 
   private scheduleNextOccurrence(event: TemporalEvent): void {

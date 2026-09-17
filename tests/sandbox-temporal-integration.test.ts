@@ -66,8 +66,8 @@ describe("Playground temporal integration boundary", () => {
     const second = advanceSandboxTimeWithTemporalEvents(first.state, session.id, 10);
     expect(second.state.playgroundSessions[0]!.temporalSnapshot?.retries[0]).toMatchObject({ operationId: "integration:delivery", status: "exhausted", attempt: 2 });
     expect(second.state.playgroundSessions[0]!.temporalSnapshot?.trajectory).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: "retry_failed" }),
-      expect.objectContaining({ kind: "retry_exhausted" }),
+      expect.objectContaining({ kind: "retry_failed", data: expect.objectContaining({ causal: { parentIds: expect.arrayContaining([expect.any(String)]), parentTypes: expect.any(Object) } }) }),
+      expect.objectContaining({ kind: "retry_exhausted", data: expect.objectContaining({ causal: { parentIds: expect.arrayContaining([expect.any(String)]), parentTypes: expect.any(Object) } }) }),
     ]));
   });
 
