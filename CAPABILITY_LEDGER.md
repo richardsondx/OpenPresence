@@ -17,6 +17,13 @@ Use only `UNPROVEN`, `PARTIAL`, `PROVEN`, `REGRESSED`, and `BLOCKED`.
 `PROVEN` requires concrete evidence appropriate to the capability; code
 presence, a prompt, or a passing unit test alone is not enough.
 
+The corrected action-family learning implementation was verified on exact
+commit `67a7544` and is documented in
+`qa-learnings/release-candidate-67a7544-2026-09-17.md`. The canonical public
+trajectory, independent verifier (9 files / 111 tests), and release-health
+gates all passed. This supersedes the prior candidate for runtime evidence;
+the remaining PARTIAL rows keep their declared proof gates.
+
 Closure checkpoint `4d4903d` is now the immutable release candidate, tagged
 `openpresence-release-candidate-2026-09-17-4d4903d`. Its candidate-bound
 evidence is recorded in
