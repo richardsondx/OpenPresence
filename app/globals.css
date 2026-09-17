@@ -7304,6 +7304,43 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
   .app-shell .workspace-context-inspector { position: fixed; inset: 76px 0 0; width: 100%; height: auto; max-height: calc(100dvh - 76px); border-radius: 24px 24px 0 0; z-index: 80; overflow-y: auto; padding: 20px 18px calc(24px + env(safe-area-inset-bottom)); box-shadow: 0 -12px 60px #0002; }
   .app-shell .inspector-view-nav button { min-height: 48px; }
   .app-shell .page h1 { font-size: 28px; }
+
+  /* Chat has no competing page title on mobile. Give its identity a stable
+     center column so the two shell controls never squeeze or wrap it. */
+  .app-shell .workspace-chat .topbar {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    gap: 8px;
+    padding: 6px 12px;
+  }
+  .app-shell .workspace-chat .workspace-agent-heading {
+    min-width: 0;
+    width: fit-content;
+    max-width: 100%;
+    margin: 0 auto;
+    justify-self: center;
+    gap: 7px;
+  }
+  .app-shell .workspace-chat .workspace-agent-heading .presence-glyph {
+    width: 36px;
+    height: 36px;
+  }
+  .app-shell .workspace-chat .workspace-agent-heading > span {
+    min-width: 0;
+  }
+  .app-shell .workspace-chat .workspace-agent-heading strong {
+    font-size: 14px;
+  }
+  .app-shell .workspace-chat .workspace-agent-heading small {
+    max-width: 100%;
+    overflow: hidden;
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .app-shell .workspace-chat .topbar-actions {
+    justify-content: flex-end;
+  }
 }
 @media (prefers-reduced-motion: reduce) { .agent-navigation *, .operator-chat-message { animation: none !important; transition: none !important; } }
 .chat-media-dialog { width: min(1040px, calc(100vw - 64px)); max-height: min(820px, calc(100dvh - 48px)); padding: 34px 36px 36px; border: 1px solid var(--line); border-radius: 28px; color: var(--ink); background: var(--surface); box-shadow: 0 24px 80px rgba(37, 35, 31, .18); overflow-y: auto; }

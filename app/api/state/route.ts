@@ -5350,7 +5350,7 @@ export async function GET(request: Request) {
   try {
   const url = new URL(request.url);
   const requestedAgentId = url.searchParams.get("agentId") || process.env.OPENPRESENCE_DEFAULT_AGENT_ID;
-  const requestedPresenceId = url.searchParams.get("presenceId");
+  const requestedPresenceId = url.searchParams.get("presenceId") || process.env.OPENPRESENCE_DEFAULT_PRESENCE_ID;
   const projection = url.searchParams.get("projection");
   const readToken = projection === "chat" ? readStateReadToken("chat") : readStateReadToken();
   const earlyResolvedAgentId = requestedAgentId ?? "";
@@ -5424,7 +5424,13 @@ export async function GET(request: Request) {
       stored = readStateViewForContext({ agentId: requestedAgentId, presenceId: requestedPresenceId });
     }
   }
-  const resolvedAgentId = requestedAgentId || stored.agents.find((agent) => agent.name.trim().toLowerCase() === (process.env.OPENPRESENCE_DEFAULT_AGENT_NAME?.trim().toLowerCase() || "genny"))?.id;
+  // Runtime profiles carry immutable identity IDs. Prefer them over the
+  // legacy name fallback: a multi-Agent workspace can legitimately contain
+  // several Agents named "Jenny", and choosing by name can make a healthy
+  // database look empty when the browser opens the wrong workspace.
+  const resolvedAgentId = requestedAgentId
+    || process.env.OPENPRESENCE_DEFAULT_AGENT_ID?.trim()
+    || stored.agents.find((agent) => agent.name.trim().toLowerCase() === (process.env.OPENPRESENCE_DEFAULT_AGENT_NAME?.trim().toLowerCase() || "genny"))?.id;
   // Projection is part of the representation. A cached Activity response
   // must never satisfy a later full Growth/Settings read with a 304.
   const etagReadToken = projection === "chat" ? readStateReadToken("chat") : readStateReadToken();
@@ -5484,7 +5490,7 @@ export async function GET(request: Request) {
             : projection === "playground"
               ? agentLibraryBrowserProjection(contextualState, "playground")
           : browserWorkspaceProjection(contextualState);
-      const payload = { ...withAgentPresenceDirectory(redactSandboxTruth(browserState), contextualState), runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } };
+      const payload = { ...withAgentPresenceDirectory(redactSandboxTruth(browserState), contextualState), runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, runtimeProfile: process.env.OPENPRESENCE_PROFILE?.trim() || null, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } };
       if (!["activity", "chat"].includes(projection ?? "")) return stateBodyResponse(request, JSON.stringify(payload), { headers: responseHeaders });
       const body = JSON.stringify(payload);
       rememberActivityResponse(activityCacheKey, { etag, body });

@@ -1846,6 +1846,49 @@ export function readRuntimeHealthProjection(presenceId?: string) {
   return result;
 }
 
+/**
+ * Minimal identity projection for startup diagnostics. This endpoint must not
+ * hydrate the compatibility workspace: a status check should remain safe even
+ * when the full local workspace is large or the development compiler is under
+ * memory pressure.
+ */
+export function readRuntimeIdentityProjection() {
+  const row = sqlite.prepare(`SELECT
+    json_extract(payload, '$.agent.id') AS app_state_agent_id,
+    json_extract(payload, '$.agent.name') AS app_state_agent_name,
+    json_extract(payload, '$.activeAgentId') AS active_agent_id,
+    json_extract(payload, '$.activePresenceId') AS active_presence_id,
+    json_extract(payload, '$.presence.handle') AS active_presence_handle
+    FROM app_state WHERE id = 1`).get() as {
+      app_state_agent_id?: string | null;
+      app_state_agent_name?: string | null;
+      active_agent_id?: string | null;
+      active_presence_id?: string | null;
+      active_presence_handle?: string | null;
+    } | undefined;
+  const agentId = process.env.OPENPRESENCE_DEFAULT_AGENT_ID?.trim() || row?.active_agent_id || row?.app_state_agent_id || null;
+  const presenceId = process.env.OPENPRESENCE_DEFAULT_PRESENCE_ID?.trim() || row?.active_presence_id || null;
+  const presenceRow = presenceId
+    ? sqlite.prepare("SELECT agent_id, payload FROM presences WHERE id = ?").get(presenceId) as { agent_id?: string | null; payload?: string } | undefined
+    : undefined;
+  let handle = row?.active_presence_handle || null;
+  if (presenceRow?.payload) {
+    try { handle = (JSON.parse(presenceRow.payload) as { handle?: string }).handle || handle; } catch { /* keep the indexed compatibility value */ }
+  }
+  return {
+    dbPath: resolvedDbPath,
+    dbSelectionSource,
+    agentId,
+    presenceId,
+    handle,
+    appStateAgentId: row?.app_state_agent_id || null,
+    appStateAgentName: row?.app_state_agent_name || null,
+    persistedActiveAgentId: row?.active_agent_id || null,
+    persistedActivePresenceId: row?.active_presence_id || null,
+    presenceOwnerId: presenceRow?.agent_id || null,
+  };
+}
+
 /** Cheap, read-only projection used by the Technical Audit ledger. */
 export function readRuntimeAuditProjection(presenceId?: string) {
   const parseRows = <T>(rows: Array<{ payload?: string }>) => rows.flatMap((row) => {

@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 
 import { readFile } from "node:fs/promises";
+import { readFileSync, statSync } from "node:fs";
 import process from "node:process";
-import { extname } from "node:path";
+import { extname, join, relative, resolve } from "node:path";
+import Database from "better-sqlite3";
+import { readRuntimeConfig, resolveRuntimeSelection, selectRuntimeProfile, writeRuntimeConfig, projectRoot } from "../scripts/openpresence-runtime-config.mjs";
 
-const DEFAULT_URL = process.env.OPENPRESENCE_URL ?? "http://localhost:3000";
+const DEFAULT_URL = process.env.OPENPRESENCE_URL ?? "http://localhost:3015";
 
 const HELP = `OpenPresence agent CLI
 
@@ -53,8 +56,19 @@ Watching commands:
   add          Add a creator, topic, conversation, or opportunity Watch
   remove       Remove a Watch
 
+Runtime commands:
+  status       Show the selected profile, database identity, and running server identity
+  doctor       Check that the configured profile, SQLite file, and server all agree
+  list         List named local runtime profiles
+  use          Make a named profile the default for the next server start
+  add          Register or update a named profile
+
 Common options:
-  --url <url>          OpenPresence server URL (default: $OPENPRESENCE_URL or localhost:3000)
+  --url <url>          OpenPresence server URL (default: $OPENPRESENCE_URL or localhost:3015)
+  --db <path>          SQLite path when adding a runtime profile
+  --port <number>      Port when adding a runtime profile
+  --agent-id <id>      Immutable Agent id for a runtime profile
+  --presence-id <id>   Immutable Presence id for a runtime profile
   --session <id>       Playground session id
   --presence <id>      Presence id when starting a session
   --seed <value>       Deterministic scenario seed recorded in the Sandbox session
@@ -89,6 +103,10 @@ Examples:
   openpresence playground scenario list
   openpresence playground scenario create --prompt "Rehearse a privacy-sensitive hostile reply"
   openpresence playground scenario run <scenario-id> --presence presence_123
+  openpresence runtime status
+  openpresence runtime doctor
+  openpresence runtime use regular
+  openpresence runtime add codex-dev --db data/codex-dev.db --port 3113 --agent-id agent_123 --presence-id presence_123
 `;
 
 function parseArgs(argv) {
@@ -460,6 +478,191 @@ function projectWatching(state, explicitPresenceId, mode = "list") {
     watches,
     noticed: [],
     observationState: watches.some((item) => item.observation.observedCount > 0) ? "observations-available" : "no-observations",
+  };
+}
+
+const ROUTING_ENV_KEYS = ["OPENPRESENCE_PROFILE", "OPENPRESENCE_DB_PATH", "OPENPRESENCE_PORT", "OPENPRESENCE_DEFAULT_AGENT_ID", "OPENPRESENCE_DEFAULT_PRESENCE_ID", "OPENPRESENCE_DEFAULT_AGENT_NAME"];
+
+function readProjectRoutingEnv() {
+  const filePath = join(projectRoot, ".env");
+  const values = {};
+  try {
+    for (const line of readFileSync(filePath, "utf8").split(/\r?\n/)) {
+      const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+      if (!match || !ROUTING_ENV_KEYS.includes(match[1])) continue;
+      let value = match[2];
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+      values[match[1]] = value;
+    }
+  } catch { /* .env is optional; the profile manifest remains authoritative. */ }
+  return values;
+}
+
+function databaseReport(profile) {
+  const report = {
+    path: profile.resolvedDbPath,
+    configuredPath: profile.dbPath,
+    exists: false,
+    sizeBytes: 0,
+    integrity: "unavailable",
+    identity: {},
+    counts: {},
+  };
+  try {
+    const stats = statSync(profile.resolvedDbPath);
+    report.exists = stats.isFile();
+    report.sizeBytes = stats.size;
+    if (!report.exists) return report;
+    const database = new Database(profile.resolvedDbPath, { readonly: true, fileMustExist: true });
+    try {
+      report.integrity = database.pragma("quick_check", { simple: true });
+      const appState = database.prepare("SELECT payload FROM app_state WHERE id = 1").get()?.payload;
+      if (appState) {
+        const state = JSON.parse(appState);
+        report.identity = {
+          appStateAgentId: state.agent?.id ?? null,
+          appStateAgentName: state.agent?.name ?? null,
+          activeAgentId: state.activeAgentId ?? null,
+          activePresenceId: state.activePresenceId ?? null,
+          activePresenceHandle: state.presence?.handle ?? null,
+        };
+      }
+      for (const table of ["agents", "presences", "mirror_objects", "conversations", "people", "assignments", "publications"]) {
+        const exists = database.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+        if (exists) report.counts[table] = database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count;
+      }
+      if (profile.agentId) {
+        const agent = database.prepare("SELECT id, payload FROM agents WHERE id = ?").get(profile.agentId);
+        report.identity.profileAgentPresent = Boolean(agent);
+        if (agent?.payload) {
+          try { report.identity.profileAgentName = JSON.parse(agent.payload).name ?? null; } catch { /* optional diagnostic field */ }
+        }
+      }
+      if (profile.presenceId) {
+        const presence = database.prepare("SELECT id, agent_id, payload FROM presences WHERE id = ?").get(profile.presenceId);
+        report.identity.profilePresencePresent = Boolean(presence);
+        report.identity.profilePresenceOwnerId = presence?.agent_id ?? null;
+        if (presence?.payload) {
+          try { report.identity.profilePresenceHandle = JSON.parse(presence.payload).handle ?? null; } catch { /* optional diagnostic field */ }
+        }
+      }
+    } finally {
+      database.close();
+    }
+  } catch (error) {
+    report.error = error instanceof Error ? error.message : String(error);
+  }
+  return report;
+}
+
+async function runningRuntimeReport(baseUrl, profile) {
+  const report = { url: baseUrl, reachable: false };
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/runtime/identity`, { signal: AbortSignal.timeout(2500) });
+    report.httpStatus = response.status;
+    const body = await response.json().catch(() => undefined);
+    if (!response.ok) {
+      report.error = body?.error ?? `HTTP ${response.status}`;
+      return report;
+    }
+    report.reachable = true;
+    report.identity = body?.runtimeIdentity ?? {};
+  } catch (error) {
+    report.error = error instanceof Error ? error.message : String(error);
+  }
+  return report;
+}
+
+function runtimeSelectionForStatus() {
+  const routingEnv = { ...readProjectRoutingEnv(), ...process.env };
+  try {
+    return { selection: resolveRuntimeSelection(routingEnv), routingEnv };
+  } catch (error) {
+    const config = readRuntimeConfig();
+    const requestedProfile = routingEnv.OPENPRESENCE_PROFILE || config.activeProfile;
+    const profile = selectRuntimeProfile(requestedProfile);
+    return {
+      selection: { config, profile, profileName: profile.name, dbPath: profile.resolvedDbPath, port: profile.port, agentId: profile.agentId, presenceId: profile.presenceId, handle: profile.handle, source: "invalid environment override", overridden: true },
+      routingEnv,
+      configurationError: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function executeRuntime(command = "status", options, positionals) {
+  if (["list", "profiles"].includes(command)) {
+    const config = readRuntimeConfig();
+    return {
+      ok: true,
+      command: "runtime list",
+      activeProfile: config.activeProfile,
+      configPath: config.path,
+      profiles: Object.values(config.profiles).map((profile) => ({
+        name: profile.name,
+        label: profile.label,
+        dbPath: profile.dbPath,
+        port: profile.port,
+        agentId: profile.agentId,
+        presenceId: profile.presenceId,
+        handle: profile.handle,
+        exists: databaseReport(profile).exists,
+      })),
+    };
+  }
+  if (["use", "select"].includes(command)) {
+    const name = positionals[0] ?? options.profile;
+    if (!name) fail("Provide a runtime profile name, such as `regular`.", "INVALID_ARGUMENT");
+    const config = readRuntimeConfig();
+    selectRuntimeProfile(name);
+    const next = writeRuntimeConfig({ activeProfile: name, profiles: config.profiles });
+    return { ok: true, command: "runtime use", activeProfile: next.activeProfile, profile: next.profiles[name], restartRequired: true, message: "Profile selected. Restart the server for the change to take effect." };
+  }
+  if (["add", "register"].includes(command)) {
+    const name = positionals[0] ?? options.profile;
+    if (!name || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) fail("Provide a profile name using letters, numbers, dots, dashes, or underscores.", "INVALID_ARGUMENT");
+    const configuredDb = typeof options.db === "string" ? options.db : undefined;
+    if (!configuredDb) fail("Provide --db when adding a runtime profile.", "INVALID_ARGUMENT");
+    const dbPath = resolve(projectRoot, configuredDb);
+    const provisional = { name, label: typeof options.label === "string" ? options.label : name, dbPath: relative(projectRoot, dbPath) || ".", resolvedDbPath: dbPath, port: Number(options.port ?? 3015), agentId: options["agent-id"], presenceId: options["presence-id"], handle: options.handle, description: options.description };
+    const inspected = databaseReport(provisional);
+    if (!provisional.agentId) provisional.agentId = inspected.identity.appStateAgentId ?? inspected.identity.activeAgentId;
+    if (!provisional.presenceId) provisional.presenceId = inspected.identity.activePresenceId;
+    if (!provisional.handle) provisional.handle = inspected.identity.activePresenceHandle;
+    const config = readRuntimeConfig();
+    config.profiles[name] = provisional;
+    const next = writeRuntimeConfig({ activeProfile: options.use === true ? name : config.activeProfile, profiles: config.profiles });
+    return { ok: true, command: "runtime add", profile: next.profiles[name], activeProfile: next.activeProfile, database: inspected, restartRequired: options.use === true || next.activeProfile === name };
+  }
+  if (!["status", "doctor"].includes(command)) fail(`Unknown Runtime command: ${command}. Use runtime status, doctor, list, use, or add.`, "INVALID_ARGUMENT");
+  const { selection, routingEnv, configurationError } = runtimeSelectionForStatus();
+  const profile = selection.profile;
+  const selectedDatabase = selection.overridden
+    ? { ...profile, dbPath: selection.dbPath, resolvedDbPath: selection.dbPath }
+    : profile;
+  const database = databaseReport(selectedDatabase);
+  const baseUrl = options.url ?? `http://localhost:${selection.port}`;
+  const running = await runningRuntimeReport(baseUrl, profile);
+  const issues = [];
+  if (configurationError) issues.push(configurationError);
+  if (!database.exists) issues.push(`Database file is missing: ${database.path}`);
+  if (database.integrity !== "ok") issues.push(`SQLite integrity is ${database.integrity}.`);
+  if (profile.agentId && database.identity.profileAgentPresent === false) issues.push(`Profile Agent ${profile.agentId} is not present in the selected database.`);
+  if (profile.presenceId && database.identity.profilePresencePresent === false) issues.push(`Profile Presence ${profile.presenceId} is not present in the selected database.`);
+  if (running.reachable) {
+    if (running.identity.dbPath && resolve(running.identity.dbPath) !== resolve(selection.dbPath)) issues.push(`Running server uses ${running.identity.dbPath}, not ${selection.dbPath}.`);
+    if (running.identity.runtimeProfile && running.identity.runtimeProfile !== profile.name) issues.push(`Running server profile is ${running.identity.runtimeProfile}, not ${profile.name}.`);
+    if (profile.agentId && running.identity.agentId !== profile.agentId) issues.push(`Running server Agent is ${running.identity.agentId ?? "unknown"}, expected ${profile.agentId}.`);
+    if (profile.presenceId && running.identity.presenceId !== profile.presenceId) issues.push(`Running server Presence is ${running.identity.presenceId ?? "unknown"}, expected ${profile.presenceId}.`);
+  } else issues.push(`Server is not reachable at ${baseUrl}.`);
+  return {
+    ok: true,
+    command: `runtime ${command}`,
+    healthy: issues.length === 0,
+    profile: { name: profile.name, label: profile.label, dbPath: profile.dbPath, resolvedDbPath: profile.resolvedDbPath, port: profile.port, agentId: profile.agentId, presenceId: profile.presenceId, handle: profile.handle },
+    selection: { source: selection.source, overridden: selection.overridden, dbPath: selection.dbPath, port: selection.port, env: Object.fromEntries(ROUTING_ENV_KEYS.filter((key) => routingEnv[key] !== undefined).map((key) => [key, key.includes("PATH") || key === "PORT" || key.endsWith("_ID") || key.endsWith("_NAME") || key === "PROFILE" ? routingEnv[key] : "<set>"])) },
+    database,
+    running,
+    issues,
   };
 }
 
@@ -902,7 +1105,8 @@ async function executeScope(baseUrl, scope, command, options, positionals) {
   if (scope === "playground") return executePlayground(baseUrl, command, options, positionals);
   if (scope === "schedule") return executeSchedule(baseUrl, command, options, positionals);
   if (scope === "watching") return executeWatching(baseUrl, command, options, positionals);
-  fail(`Unknown scope: ${scope}. Use playground, schedule, or watching.`, "INVALID_ARGUMENT");
+  if (scope === "runtime") return executeRuntime(command, options, positionals);
+  fail(`Unknown scope: ${scope}. Use playground, schedule, watching, or runtime.`, "INVALID_ARGUMENT");
 }
 
 function humanize(result) {
@@ -913,6 +1117,12 @@ function humanize(result) {
   const watches = result.result?.watches ?? result.watches;
   const calendar = result.result?.calendar ?? result.calendar;
   const assignments = result.result?.assignments ?? result.assignments;
+  if (result.command?.startsWith("runtime ")) {
+    if (result.command === "runtime list") return [`runtime list: active profile ${result.activeProfile}`, ...(result.profiles ?? []).map((profile) => `profile ${profile.name}${profile.name === result.activeProfile ? " (active)" : ""} · ${profile.dbPath} · port ${profile.port} · ${profile.exists ? "database present" : "database missing"}`)].join("\n");
+    const profile = result.profile;
+    const state = result.healthy === undefined ? "ok" : result.healthy ? "healthy" : "needs attention";
+    return [`${result.command}: ${state}`, profile ? `profile ${profile.name} · ${profile.dbPath} · port ${profile.port}` : "", profile?.agentId ? `scope ${profile.agentId} · ${profile.presenceId ?? "no Presence"} ${profile.handle ?? ""}` : "", result.database ? `database ${result.database.exists ? "present" : "missing"} · SQLite ${result.database.integrity}` : "", result.running ? `server ${result.running.reachable ? `reachable at ${result.running.url}` : `unreachable at ${result.running.url}`}` : "", ...(result.issues ?? []).slice(0, 6).map((issue) => `! ${issue}`)].filter(Boolean).join("\n");
+  }
   return [
     `${result.command}: ${result.ok ? "ok" : "failed"}`,
     session ? `session ${session.id} · ${session.channel} · virtual time ${session.virtualNow}` : "",
@@ -934,6 +1144,7 @@ async function main() {
   const result = await executeScope(options.url ?? DEFAULT_URL, scope, command ?? (scope === "playground" ? undefined : "list"), options, args);
   if (options.human) process.stdout.write(`${humanize(result)}\n`);
   else process.stdout.write(`${JSON.stringify(result)}\n`);
+  if (scope === "runtime" && command === "doctor" && result.healthy === false) process.exitCode = 1;
 }
 
 main().catch((error) => {

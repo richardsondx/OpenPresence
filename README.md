@@ -178,11 +178,52 @@ pnpm --silent openpresence schedule list
 pnpm --silent openpresence watching list
 ~~~
 
-Set `OPENPRESENCE_URL` when the local server is not on port 3000. Use `--human` for a concise terminal summary. Repeatable JSON scenarios live in [scenarios/reply-to-founder.json](scenarios/reply-to-founder.json):
+Set `OPENPRESENCE_URL` when the local server is not on its profile port. Use `--human` for a concise terminal summary. Repeatable JSON scenarios live in [scenarios/reply-to-founder.json](scenarios/reply-to-founder.json):
 
 ~~~bash
 pnpm --silent openpresence playground run scenarios/reply-to-founder.json
 ~~~
+
+### Local runtime profiles
+
+The local server uses named runtime profiles so the database, port, and
+Agent/Presence identity stay together. The `regular` profile is the canonical
+`data/openpresence-main.db` workspace on port 3015 and is pinned to the
+immutable `Genny → @example_agent` IDs. The profile file is local-only and is
+created on first use at `data/openpresence-runtime.json`.
+
+Before opening the browser or running a write operation, inspect the complete
+selection and the server’s resolved identity:
+
+~~~bash
+pnpm --silent openpresence runtime list
+pnpm --silent openpresence runtime status --human
+pnpm --silent openpresence runtime doctor --human
+~~~
+
+Switch the next server start explicitly:
+
+~~~bash
+pnpm --silent openpresence runtime use regular
+pnpm dev
+~~~
+
+Register an isolated Codex/QA runtime without editing `.env`:
+
+~~~bash
+pnpm --silent openpresence runtime add codex-dev \\
+  --db data/codex-dev.db --port 3113 \\
+  --agent-id agent_123 --presence-id presence_123
+pnpm --silent openpresence runtime use codex-dev
+~~~
+
+Ordinary starts must not use ad-hoc `OPENPRESENCE_DB_PATH` or
+`OPENPRESENCE_PORT` overrides. Test runtimes may override a profile with
+`OPENPRESENCE_TEST_MODE=1`; an intentional manual override requires
+`OPENPRESENCE_ALLOW_RUNTIME_OVERRIDE=1`. A mismatch fails closed so a healthy
+but different database cannot appear as missing data. The status/doctor output
+also reports the SQLite integrity result and whether the running server agrees
+with the selected profile.
 
 Command meanings:
 
