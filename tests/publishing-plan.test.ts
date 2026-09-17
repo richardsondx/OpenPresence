@@ -69,6 +69,37 @@ describe("Publishing Plan", () => {
     expect(cancelled.publishingPlans[0]).toMatchObject({ status: "superseded" });
   });
 
+  it("cancels one supervised publishing window without shutting down the responsibility", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto", reply: "auto" }, publishingInitiative: { ...state.presence!.publishingInitiative, mode: "pace", target: { count: 2, period: "week" } } } });
+    state = startPlaygroundSession(state);
+    const session = state.playgroundSessions[0]!;
+    const start = new Date(session.virtualNow).getTime() + 60_000;
+    state = replacePublishingPlan(state, {
+      presenceId: state.presence!.id,
+      draft: {
+        horizonStart: new Date(start - 60_000).toISOString(),
+        horizonEnd: new Date(start + 86_400_000).toISOString(),
+        expectedOriginals: { min: 1, max: 2 },
+        windows: [
+          { startAt: new Date(start).toISOString(), endAt: new Date(start + 60_000).toISOString(), purpose: "originate", summary: "Publish the benchmark takeaway.", desiredContribution: { min: 1, max: 1 } },
+          { startAt: new Date(start + 120_000).toISOString(), endAt: new Date(start + 180_000).toISOString(), purpose: "originate", summary: "Share the implementation lesson.", desiredContribution: { min: 1, max: 1 } },
+        ],
+      },
+    });
+    const assignmentId = state.presence!.publishingInitiative.assignmentId!;
+    const priorPlanId = state.publishingPlans[0]!.id;
+    const next = applyOperation(state, { type: "planIntervention", assignmentId, action: "cancel", note: "Cancel tomorrow's benchmark post." });
+    const activePlan = next.publishingPlans.find((plan) => plan.status === "active");
+    expect(next.assignments.find((assignment) => assignment.id === assignmentId)).toMatchObject({ status: "active", origin: "publishing_initiative" });
+    expect(next.presence?.publishingInitiative.mode).toBe("pace");
+    expect(next.publishingPlans.find((plan) => plan.id === priorPlanId)).toMatchObject({ status: "superseded", supersededBy: activePlan?.id });
+    expect(activePlan?.revision).toBe(2);
+    expect(activePlan?.windows[0]?.summary).toBe("Share the implementation lesson.");
+    expect(activePlan?.constraints?.some((item) => item.includes("benchmark takeaway"))).toBe(true);
+    expect(next.events[0]?.title).toBe("Planned item canceled");
+  });
+
   it("persists a Presence-scoped plan without turning windows into posts", () => {
     let state = createAgent(input);
     const presence = state.presence!;

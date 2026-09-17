@@ -8431,6 +8431,50 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     if (!assignment || ["completed", "completed_with_adaptation", "cancelled"].includes(assignment.status)) return state;
     const timestamp = now();
     if (operation.action === "cancel") {
+      // Supervisory cancel targets the next planned item, not the continuous
+      // Agent-owned publishing responsibility. Keep that responsibility alive
+      // and let it continue from a coherent successor plan. The lower-level
+      // cancelAssignment operation remains the explicit whole-responsibility
+      // shutdown path.
+      if (assignment.origin === "publishing_initiative") {
+        const activePlan = state.publishingPlans.find((plan) => plan.presenceId === assignment.presenceId
+          && plan.environment === assignment.environment && plan.status === "active");
+        const futureWindows = activePlan?.windows.filter((window) => window.status === "future").sort((left, right) => left.startAt.localeCompare(right.startAt)) ?? [];
+        if (activePlan && futureWindows.length) {
+          const cancelledWindow = futureWindows[0];
+          const remainingWindows = activePlan.windows.filter((window) => window.id !== cancelledWindow.id && window.status === "future");
+          if (!remainingWindows.length) {
+            const nextStart = new Date(new Date(timestamp).getTime() + 60 * 60_000);
+            remainingWindows.push({
+              startAt: nextStart.toISOString(),
+              endAt: new Date(nextStart.getTime() + 60 * 60_000).toISOString(),
+              purpose: "reassess",
+              desiredContribution: { min: 0, max: 1 },
+              summary: "Reconsider the next useful publishing opportunity after the canceled item.",
+            });
+          }
+          const successor = replacePublishingPlan(state, {
+            presenceId: assignment.presenceId,
+            environment: activePlan.environment,
+            expectedPlanId: activePlan.id,
+            expectedRevision: activePlan.revision,
+            draft: {
+              horizonStart: activePlan.horizonStart,
+              horizonEnd: activePlan.horizonEnd,
+              expectedOriginals: activePlan.expectedOriginals,
+              windows: remainingWindows,
+              currentWork: activePlan.currentWork,
+              nextReassessmentAt: activePlan.nextReassessmentAt,
+              rationaleSummary: `${activePlan.rationaleSummary ?? "The Agent is maintaining this responsibility."} The next planned item was canceled under supervision; the Agent is reconsidering the next useful opportunity.`.slice(0, 500),
+              evidenceSummary: activePlan.evidenceSummary,
+              constraints: [...(activePlan.constraints ?? []), `Canceled planned item: ${cancelledWindow.summary}`].slice(-8),
+              replanSignals: activePlan.replanSignals,
+            },
+          });
+          successor.events.unshift(event("decision", "Planned item canceled", `${cancelledWindow.summary} was canceled. The publishing responsibility remains active and the Agent has a coherent successor plan.`, "quiet", { presenceId: assignment.presenceId, sessionId: assignment.sessionId, sourceObjectId: assignment.id }));
+          return successor;
+        }
+      }
       return applyOperation(state, { type: "cancelAssignment", id: assignment.id });
     }
     if (operation.action === "pause") return applyOperation(state, { type: "pauseAssignment", id: assignment.id });
