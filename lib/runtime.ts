@@ -802,7 +802,13 @@ function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInp
   const assignmentTemplateId = input.origin?.kind === "assignment"
     ? state.assignments.find((assignment) => assignment.id === input.origin?.refId)?.strategyTemplateId
     : undefined;
-  const strategyRun = input.socialStrategy?.retrievalRun ?? compileSocialStrategyContext(state, presence, { invocation: input.origin?.kind ?? "social_decision", objective: input.summary ?? input.decision, availableActions: input.acts?.map((act) => act.decision) ?? [input.decision], strategyTemplateId: assignmentTemplateId, sandboxSessionId }).retrievalRun;
+  // A Sandbox decision must be derived from the fork-local world at the
+  // runtime boundary. Do not let a caller-supplied retrieval run compiled
+  // before restart (or in another branch) smuggle global learning into this
+  // session. Live decisions retain the existing precomputed-run contract.
+  const strategyRun = sandboxSessionId
+    ? compileSocialStrategyContext(state, presence, { invocation: input.origin?.kind ?? "social_decision", objective: input.summary ?? input.decision, availableActions: input.acts?.map((act) => act.decision) ?? [input.decision], strategyTemplateId: assignmentTemplateId, sandboxSessionId }).retrievalRun
+    : input.socialStrategy?.retrievalRun ?? compileSocialStrategyContext(state, presence, { invocation: input.origin?.kind ?? "social_decision", objective: input.summary ?? input.decision, availableActions: input.acts?.map((act) => act.decision) ?? [input.decision], strategyTemplateId: assignmentTemplateId }).retrievalRun;
   const learningCounterfactual = recordLearningCounterfactualInPlace(state, presence, strategyRun, now(), undefined, sandboxSessionId);
   if (learningCounterfactual) strategyRun.learningCounterfactual = {
     checkpointId: learningCounterfactual.checkpoint.id,
@@ -810,7 +816,7 @@ function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInp
     situationId: learningCounterfactual.situationId,
     claim: learningCounterfactual.learningClaim.status,
   };
-  const socialStrategy = input.socialStrategy?.use ?? strategyUseFromDecision(strategyRun, input.acts?.map((act) => ({ action: act.decision })) ?? [{ action: input.decision }]);
+  const socialStrategy = (sandboxSessionId ? undefined : input.socialStrategy?.use) ?? strategyUseFromDecision(strategyRun, input.acts?.map((act) => ({ action: act.decision })) ?? [{ action: input.decision }]);
   const causalEventId = input.causalEventId ?? input.focalMirrorObjectIds?.map((objectId) => state.mirrorObjects.find((object) => object.id === objectId)?.sourceTemporalEventId).find((value): value is string => Boolean(value));
   if (socialStrategy && assignmentTemplateId && !socialStrategy.strategyTemplateId) socialStrategy.strategyTemplateId = assignmentTemplateId;
   if (strategyRun.id && !state.socialStrategyRetrievalRuns?.some((run) => run.id === strategyRun.id)) state.socialStrategyRetrievalRuns = [strategyRun, ...(state.socialStrategyRetrievalRuns ?? [])].slice(0, 500);
@@ -7098,7 +7104,7 @@ export function isExplicitXPostRequest(content: string) {
     || /\b(?:publish|post|tweet|send|ship)\b[^.!?\n]{0,120}\b(?:now|right\s+now|immediately|right\s+away)\b/.test(normalized);
 }
 
-export function formChatPostIntent(source: OpenPresenceState, text: string, standingIntentId?: string, sourceKind: "agent" | "operator" = "agent", assetIds: string[] = [], decisionInput?: SocialDecisionInput, runId?: string, presenceOverride?: Presence, operatorAssetIds: string[] = []) {
+export function formChatPostIntent(source: OpenPresenceState, text: string, standingIntentId?: string, sourceKind: "agent" | "operator" = "agent", assetIds: string[] = [], decisionInput?: SocialDecisionInput, runId?: string, presenceOverride?: Presence, operatorAssetIds: string[] = [], sandboxSessionId?: string) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = presenceOverride ? state.presences.find((item) => item.id === presenceOverride.id) ?? presenceOverride : state.presence;
   if (!state.agent || !presence || presence.status !== "live" || presence.channel !== "x" || !text.trim()) return state;
@@ -7116,7 +7122,7 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
   const origin: SocialOrigin = standingIntentId ? { kind: "standing_intent", refId: standingIntentId } : sourceKind === "operator" ? { kind: "operator" } : { kind: "other" };
   publication.origin = origin;
   publication.autobiographicalEventIds = autobiographicalEventIds;
-  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.post", publicationId: publication.id, priority: 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, standingIntentId, origin, runId, autobiographicalEventIds };
+  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.post", publicationId: publication.id, priority: 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, standingIntentId, origin, runId, autobiographicalEventIds, ...(sandboxSessionId ? { sessionId: sandboxSessionId } : {}) };
   if (publication.publicExpression) publication.publicExpression.socialIntentId = socialIntent.id;
   state.socialIntents.unshift(socialIntent);
   const socialDecision = effectiveDecisionInput ? createSocialDecision(state, { ...effectiveDecisionInput, origin: effectiveDecisionInput.origin ?? origin }, socialIntent.id) : undefined;
@@ -7200,7 +7206,7 @@ export function formAssignmentPostIntent(source: OpenPresenceState, text: string
   const existingPresence = assignmentPresence;
   if (existingPresence && hasExistingPublicAction(source, { presenceId: existingPresence.id, environment: existingPresence.environment ?? "live", affordance: "x.post", text })) return normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   if (assignmentContext?.assetConstraint?.required && !assetIds.length) throw new Error("This Assignment requires an Asset from its Collection.");
-  const state = formChatPostIntent(source, text, undefined, "agent", assetIds, decisionInput, runId, assignmentPresence);
+  const state = formChatPostIntent(source, text, undefined, "agent", assetIds, decisionInput, runId, assignmentPresence, [], assignmentContext.sessionId);
   const intent = state.socialIntents[0];
   const execution = intent ? state.executions.find((item) => item.socialIntentId === intent.id) : undefined;
   const assignment = state.assignments.find((item) => item.id === assignmentId);
