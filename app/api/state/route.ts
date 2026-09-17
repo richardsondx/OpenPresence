@@ -2089,7 +2089,7 @@ async function runScheduledLiveAssignments(source: OpenPresenceState, presenceId
     deferLiveAssignmentCandidate(currentAssignment, "candidate_rejected", media.error);
     return media.state;
   }
-  next = formAssignmentPostIntent(media.state, draft, currentAssignment.id, media.assetIds, options?.runId, { decision: "original_post", summary: decision.rationale, origin: { kind: "assignment", refId: currentAssignment.id }, influences: ["Mission", "Taste", "Assignment context", "Relevant autobiographical memory"], confidence: "medium", autobiographicalEventIds: decision.autobiographicalEventIds });
+  next = formAssignmentPostIntent(media.state, draft, currentAssignment.id, media.assetIds, options?.runId, { decision: "original_post", summary: decision.rationale, origin: { kind: "assignment", refId: currentAssignment.id }, influences: ["Mission", "Taste", "Assignment context", "Relevant autobiographical memory"], confidence: "medium", autobiographicalEventIds: decision.autobiographicalEventIds, socialStrategy: decision.socialStrategy });
   const executionIds = new Set(next.executions.filter((item) => !before.has(item.id)).map((item) => item.id));
   next = await deliverNativeExecutions(next, executionIds);
   const execution = next.executions.find((item) => executionIds.has(item.id));
@@ -2657,7 +2657,7 @@ async function runPublishingAssignmentPulse(source: OpenPresenceState, presenceI
     deferLiveAssignmentCandidate(currentAssignment, "candidate_rejected", media.error);
     return media.state;
   }
-  next = formAssignmentPostIntent(media.state, draft, currentAssignment.id, media.assetIds, undefined, { decision: "original_post", summary: decision.rationale, origin: { kind: "assignment", refId: currentAssignment.id }, influences: ["Mission", "Taste", "Assignment context", "Relevant autobiographical memory"], confidence: "medium", autobiographicalEventIds: decision.autobiographicalEventIds });
+  next = formAssignmentPostIntent(media.state, draft, currentAssignment.id, media.assetIds, undefined, { decision: "original_post", summary: decision.rationale, origin: { kind: "assignment", refId: currentAssignment.id }, influences: ["Mission", "Taste", "Assignment context", "Relevant autobiographical memory"], confidence: "medium", autobiographicalEventIds: decision.autobiographicalEventIds, socialStrategy: decision.socialStrategy });
   const executionIds = new Set(next.executions.filter((item) => !before.has(item.id)).map((item) => item.id));
   next = await deliverNativeExecutions(next, executionIds);
   const execution = next.executions.find((item) => executionIds.has(item.id));
@@ -3270,7 +3270,7 @@ async function runNativePulse(source: OpenPresenceState, presenceId: string) {
   if (draft.trim().length > 280) return complete(recordRuntimeEvent(next, presenceId, "Launch held", "Jenny's candidate first move exceeded X's single-post limit, so she kept it as silence instead of truncating her meaning.", "warning"), "Observed X but did not publish an invalidly sized first move.");
   const existingExecutionIds = new Set(next.executions.map((item) => item.id));
   const launchMedia = await materializeLiveDecisionAssets(next, presenceId, launchDecision);
-  next = formChatPostIntent(launchMedia.state, draft, undefined, "agent", launchMedia.assetIds, { decision: "original_post", summary: launchDecision.rationale, origin: { kind: "publishing_initiative" }, influences: ["Mission", "Taste", "Current channel context"], confidence: "medium", autobiographicalEventIds: launchDecision.autobiographicalEventIds });
+  next = formChatPostIntent(launchMedia.state, draft, undefined, "agent", launchMedia.assetIds, { decision: "original_post", summary: launchDecision.rationale, origin: { kind: "publishing_initiative" }, influences: ["Mission", "Taste", "Current channel context"], confidence: "medium", autobiographicalEventIds: launchDecision.autobiographicalEventIds, socialStrategy: launchDecision.socialStrategy });
   const launchExecutionIds = new Set(next.executions.filter((item) => !existingExecutionIds.has(item.id)).map((item) => item.id));
   next = await deliverNativeExecutions(next, launchExecutionIds);
   const launchExecution = next.executions.find((item) => launchExecutionIds.has(item.id));

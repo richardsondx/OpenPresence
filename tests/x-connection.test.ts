@@ -717,6 +717,8 @@ describe("native X connection", () => {
     expect(body.socialIntents[0].affordance).toBe("x.post");
     expect(body.executions[0].status).toBe("blocked");
     expect(body.executions[0].failure.code).toBe("LIVE_WRITE_BLOCKED_NON_PRODUCTION_RUNTIME");
+    expect(body.events.some((event: { title: string; detail?: string }) => event.title === "Autonomous launch decision" && event.detail?.includes("socialStrategy"))).toBe(true);
+    expect(body.socialDecisions[0]?.socialStrategy?.retrievalRunId).toBeTruthy();
     const cognitionCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/chat/completions"));
     expect(JSON.stringify(cognitionCall?.[1]?.body)).toContain("publicFooting");
     expect(JSON.stringify(cognitionCall?.[1]?.body)).toContain("postsPublished");
