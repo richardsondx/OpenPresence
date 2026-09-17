@@ -440,3 +440,29 @@ rows retain their named independent adversarial gates. SBX-004's focused native
 oracle is closed, but its declared canonical composed native retry-backoff
 race gate remains explicit. Replay-specific hardening remains closed absent a
 new material defect.
+
+## Current candidate reassessment — `33cec2f` — 2026-09-17
+
+Candidate-bound Slice A safety/causal checks passed, including the external
+native in-flight authority oracle and independent causal trace. The independent
+verifier passed 9 files / 92 tests, including cross-process replay, cross-rate,
+hidden-truth/session isolation, retry/idempotency, production-boundary, and
+process-boundary checks. Existing replay evidence is reused; no replay
+hardening was reopened.
+
+Slice B passed 4 files / 39 tests and Slice C responsive/UI passed 8/8 on the
+exact candidate. The canonical composed seven-day/no-babysitting, natural
+supervision, and media-truth run passed 3/3. The public learning verifier now
+creates a durable supported hypothesis, but its continued trajectory still has
+no later allocation difference; LEARN-002/003/004 remain PARTIAL pending the
+independent public ablations.
+
+Typecheck, lint (0 errors / 157 warnings), production build, and diff checks
+passed. Broad Vitest reached 132 files / 1,237 tests but failed 9 tests in 4
+runtime-profile/native-X fixture-dependent tests; the failure log is preserved
+at `/tmp/openpresence-candidate-33cec2f-release-vitest.log`. No PARTIAL row is
+promoted. Remaining exact gates are recorded in
+`qa-learnings/release-candidate-33cec2f-2026-09-17.md`, including clean broad
+release health, public learning transfer/retirement/media ablations, exact
+candidate legacy migration, and independent composed/adversarial review for
+the affected rows.
