@@ -8330,6 +8330,28 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       if (note && !assignment.instruction.includes(note)) assignment.instruction = `${assignment.instruction.trim()}\n\nSupervisory constraint: ${note}`;
       assignment.preflight = preflightAssignment(state, assignment, assignment.executionPolicy.delegationPolicy);
     }
+    // Calendar is a projection of Agent-owned work. Keep linked standing
+    // intent records synchronized when supervision changes that work.
+    for (const slot of state.calendar.filter((item) => item.assignmentId === assignment.id)) {
+      if (operation.action === "postpone" && operation.schedule) {
+        slot.day = operation.schedule.day;
+        slot.time = operation.schedule.time;
+        slot.executionWindow = operation.schedule.executionWindow;
+        slot.lastEvaluatedAt = undefined;
+      }
+      if (operation.action === "constrain" || operation.action === "replan") {
+        slot.instruction = assignment.instruction;
+        slot.label = assignment.title ?? (assignment.instruction.length > 34 ? `${assignment.instruction.slice(0, 34).trim()}…` : assignment.instruction);
+      }
+      const standing = slot.standingIntentId ? state.standingIntents.find((item) => item.id === slot.standingIntentId) : undefined;
+      if (standing) {
+        standing.instruction = slot.instruction;
+        standing.trigger = { type: "schedule", config: { day: slot.day, time: slot.time } };
+        const [startsAt, endsAt] = slot.executionWindow.split(/[–-]/).map((part) => part.trim());
+        standing.executionWindow = { startsAt: startsAt || slot.time, endsAt: endsAt || startsAt || slot.time };
+        standing.updatedAt = timestamp;
+      }
+    }
     assignment.revision = (assignment.revision ?? 0) + 1;
     assignment.updatedAt = timestamp;
     state.events.unshift(event("decision", "Agent plan changed", `${assignment.title ?? assignment.instruction} was updated from supervisory feedback: ${operation.note.trim()}`, "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId, sourceObjectId: assignment.id }));
@@ -8864,6 +8886,10 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
         ? ` ${stopped} unsent deliveries stopped${unresolved ? `; ${unresolved} existing delivery outcomes still await verification` : ""}.`
         : "";
       assignment.lastOutcome = { class: "assignment_cancelled", message: `${assignment.progress.verified} / ${assignment.progress.required} verified publications remain recorded, but this Assignment will not continue.${stopDetail}`, at: assignment.updatedAt };
+      for (const slot of state.calendar.filter((item) => item.assignmentId === assignment.id)) {
+        slot.enabled = false;
+        slot.lastEvaluatedAt = undefined;
+      }
       state.assignmentRuns = (state.assignmentRuns ?? []).map((run) => run.assignmentId === assignment.id && assignmentRunIsActive(run)
         ? { ...run, status: "cancelled" as const, currentStage: "completed" as const, lastError: "The Assignment was cancelled before this work cycle completed.", completedAt: assignment.updatedAt, leaseOwner: undefined, leaseExpiresAt: undefined, updatedAt: assignment.updatedAt }
         : run);

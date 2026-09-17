@@ -1892,6 +1892,21 @@ describe("OpenPresence runtime boundaries", () => {
     expect(edited.standingIntents[0]?.trigger.config.day).toBe("Wednesday");
   });
 
+  it("keeps the Calendar projection coherent when supervision changes Agent-owned work", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "addSlot", instruction: "Publish the weekly evidence note", day: "Tuesday", time: "08:00", objective: "education", executionWindow: "08:00–11:00" });
+    const assignment = state.assignments[0]!;
+    const slot = state.calendar.find((item) => item.assignmentId === assignment.id)!;
+    state = applyOperation(state, { type: "planIntervention", assignmentId: assignment.id, action: "postpone", note: "Move this to Thursday.", schedule: { day: "Thursday", time: "10:00", executionWindow: "10:00–13:00" } });
+    expect(state.calendar.find((item) => item.id === slot.id)).toMatchObject({ day: "Thursday", time: "10:00", executionWindow: "10:00–13:00" });
+    state = applyOperation(state, { type: "planIntervention", assignmentId: assignment.id, action: "constrain", note: "Use only verified benchmark evidence.", instruction: "Use only verified benchmark evidence." });
+    const projected = state.calendar.find((item) => item.id === slot.id)!;
+    expect(projected.instruction).toContain("Use only verified benchmark evidence.");
+    expect(state.standingIntents.find((item) => item.id === projected.standingIntentId)?.instruction).toContain("Use only verified benchmark evidence.");
+    state = applyOperation(state, { type: "planIntervention", assignmentId: assignment.id, action: "cancel", note: "Cancel this plan." });
+    expect(state.calendar.find((item) => item.id === slot.id)?.enabled).toBe(false);
+  });
+
   it("creates an enabled skill and configures providers without allowing connection renames", () => {
     let state = createAgent(input);
     state = applyOperation(state, { type: "createSkill", name: "Founder brief", description: "Turn research into a founder brief." });
