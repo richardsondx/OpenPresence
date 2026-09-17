@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
-import { Activity, ArrowUpRight, BarChart3, Check, ChevronRight, CircleAlert, Clock3, Eye, Heart, Info, LoaderCircle, Plus, ShieldCheck, Sparkles, TrendingUp, Users, X } from "lucide-react";
+import { Activity, ArrowUpRight, BarChart3, Check, ChevronRight, CircleAlert, Clock3, Eye, Heart, Info, LoaderCircle, ShieldCheck, Sparkles, TrendingUp, Users, X } from "lucide-react";
 import { assignmentIsOpen, audienceDeltas, capabilityProviderLabel, collapseAudienceSnapshots, derivePresenceCapabilityManifest, derivePublicHistory, externalUrlForMirrorObject, pendingReviewExecutionsForCapabilities } from "@/lib/runtime";
 import { deriveHistoricalGrowthContext } from "@/lib/growth-history";
 import { deriveGrowthProfile } from "@/lib/growth-profile";
@@ -688,9 +688,6 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
   const presence = state.presence;
   const agentName = state.agent?.name ?? "the Agent";
   const [reviewingGrowth, setReviewingGrowth] = useState(false);
-  const [growthSetupOpen, setGrowthSetupOpen] = useState(false);
-  const [growthGoalDraft, setGrowthGoalDraft] = useState("");
-  const [creatingGrowth, setCreatingGrowth] = useState(false);
   const [selectedMetric, setSelectedMetric] = useState<GrowthMetricKey | null>(null);
   const [now] = useState(() => Date.now());
   useEffect(() => {
@@ -702,7 +699,6 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [selectedMetric]);
   if (!presence) return <div className="page"><PageHeader eyebrow="Growth" title="No Presence selected" description="Select a Presence before reviewing growth evidence." /></div>;
-  const parsedGrowthGoal = Math.floor(Number(growthGoalDraft.replaceAll(",", "").trim()));
 
   const growthBoundary = presenceGrowthBoundary(state, presence.id);
   const growthWindowCopy = growthBoundary.startAt
@@ -805,25 +801,6 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
     try { await mutate({ type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind }); } finally { setReviewingGrowth(false); }
   };
 
-  const createGrowthResponsibility = async () => {
-    if (!Number.isFinite(parsedGrowthGoal) || parsedGrowthGoal < 1 || creatingGrowth) return;
-    setCreatingGrowth(true);
-    try {
-      const next = await mutate({
-        type: "createAssignment",
-        presenceId: presence.id,
-        environment: presence.connectionMode === "sandbox" ? "sandbox" : "live",
-        instruction: `Grow this Presence toward ${parsedGrowthGoal.toLocaleString()} followers while building an audience of ${presence.brief.audience}.`,
-      });
-      const goal = next?.assignments.find((item) => item.presenceId === presence.id && item.activation?.type === "continuous" && item.successEvidence?.kind === "metric_threshold" && item.successEvidence.value === parsedGrowthGoal);
-      if (next && goal?.status === "draft" && ["ready", "ready_with_assumptions"].includes(goal.preflight?.status ?? "")) await mutate({ type: "activateAssignment", id: goal.id }, next);
-      setGrowthSetupOpen(false);
-      setGrowthGoalDraft("");
-    } finally {
-      setCreatingGrowth(false);
-    }
-  };
-
   return (
     <div className="page growth-page">
       <PageHeader
@@ -861,42 +838,13 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
             <TrendingUp size={23} />
           </div>
           <SectionEyebrow>Continuous responsibility</SectionEyebrow>
-          <h2>What do you want to grow?</h2>
+          <h2>Tell {agentName} what outcome you want</h2>
           <p>
-            Set an audience goal. {agentName} will choose the day-to-day work and review what makes a difference.
+            {agentName} owns the growth plan and day-to-day work. Share the outcome, context, and any boundaries in Chat; this page will show the resulting evidence.
           </p>
-          {!growthSetupOpen ? (
-            <Button variant="primary" onClick={() => setGrowthSetupOpen(true)}>
-              <Plus size={14} /> Set a growth goal
-            </Button>
-          ) : (
-            <div className="growth-responsibility-setup" aria-label="Set growth goal">
-              <label htmlFor="growth-goal">Follower goal</label>
-              <input
-                id="growth-goal"
-                aria-describedby="growth-goal-help"
-                inputMode="numeric"
-                min="1"
-                pattern="[0-9,]*"
-                placeholder="Enter a target audience size"
-                value={growthGoalDraft}
-                onChange={(event) => setGrowthGoalDraft(event.target.value)}
-              />
-              <p id="growth-goal-help">{agentName} chooses how to pursue this goal. You can adjust it later.</p>
-              {parsedGrowthGoal >= 1 && (
-                <div className="growth-responsibility-contract" role="status">
-                  <strong>Growth contract</strong>
-                  <span>Work toward {parsedGrowthGoal.toLocaleString()} followers for {presence.name}, then review the evidence before adapting the plan.</span>
-                </div>
-              )}
-              <div className="growth-responsibility-actions">
-                <Button variant="ghost" onClick={() => { setGrowthSetupOpen(false); setGrowthGoalDraft(""); }} disabled={creatingGrowth}>Cancel</Button>
-                <Button variant="primary" onClick={() => void createGrowthResponsibility()} disabled={creatingGrowth || parsedGrowthGoal < 1}>
-                  {creatingGrowth ? <><LoaderCircle size={14} className="spin" /> Creating…</> : <><Check size={14} /> Confirm and create</>}
-                </Button>
-              </div>
-            </div>
-          )}
+          <Button variant="primary" onClick={() => setView("chat")}>
+            <ArrowUpRight size={14} /> Open Chat
+          </Button>
         </section>
       ) : (
         <>

@@ -42,6 +42,15 @@ Record accepted design decisions here so repeated reviews do not reopen settled 
 - **Reasoning:** The operator sees the inferred success measure and confirms it before persistence, while the Agent retains autonomy over day-to-day strategy.
 - **Reopen when:** Growth supports a documented objective model beyond follower targets and the preflight contract can represent it without hiding operator intent.
 
+## 2026-09-17 — Agent-owned growth responsibility supersedes task-entry setup
+
+- **Decision:** The operator supplies growth outcomes, context, and boundaries conversationally in Chat. The Agent asks only for missing identity/context, then creates and manages the executable continuous responsibility. Growth projects the resulting goal and evidence; it is not a task-entry form.
+- **Context/problem:** The product direction is supervisory: the user hires an autonomous social-media Agent and should not construct or activate its work system. The prior follower-target form preserved the task-management mental model.
+- **Alternatives rejected:** Keep a dedicated Growth goal form; create a planning-only Assignment awaiting explicit activation; remove executable Assignment primitives entirely.
+- **Reasoning:** Chat preserves user intent while the Agent owns decomposition, scheduling, execution, measurement, and replanning. Legacy persisted Assignments remain readable for migration, and Tasks retains scoped conversational intervention and explicit cancellation.
+- **Evidence:** `tests/operator-chat-harness.test.ts`, `tests/e2e/responsive-workspace.spec.ts`, `tests/e2e/artifacts-playbook.spec.ts`, and `qa-learnings/simplification-tasks-supervisory-2026-09-17.md`.
+- **Reopen when:** A new user-owned configuration capability is demonstrated to require structured editing without restoring routine task construction.
+
 ## Review discipline
 
 Do not reopen a decision because a new component, trend, or visual style is available. Reopen only for changed goals, changed user evidence, changed surrounding architecture, or demonstrated friction against the decision.

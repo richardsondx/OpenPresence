@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("templates persist separately from analytics and can prepare scheduled work", async ({ page, request }, testInfo) => {
+test("templates persist separately from analytics and can draft ideas without scheduling work", async ({ page, request }, testInfo) => {
   expect((await request.post("/api/state", { data: { type: "reset" } })).ok()).toBeTruthy();
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Template Agent");
@@ -28,19 +28,8 @@ test("templates persist separately from analytics and can prepare scheduled work
   await expect(page.getByRole("tab", { name: "Media", exact: true })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("tab", { name: "Templates", exact: true }).click();
   await card.locator("summary").click();
-  await card.getByRole("button", { name: "Schedule a task" }).click();
-  const localTime = (ms: number) => { const date = new Date(ms); return new Date(ms - date.getTimezoneOffset() * 60000).toISOString().slice(0,16); };
-  await card.getByLabel("Start", { exact: true }).fill(localTime(Date.now() + 86400000));
-  await card.getByLabel("Finish by", { exact: true }).fill(localTime(Date.now() + 90000000));
-  await card.getByRole("button", { name: "Create scheduled task" }).click();
-  await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
-  const state = await request.get("/api/state").then(response => response.json());
-  const template = state.growthHypotheses.find((item: { template?: { title: string } }) => item.template?.title === "Builder introduction");
-  const task = state.assignments.find((item: { strategyTemplateId?: string }) => item.strategyTemplateId === template.id);
-  expect(task).toBeTruthy();
-  expect(task).toMatchObject({ title: "Use Builder introduction", description: "Apply Builder introduction to a current audience-relevant idea and verify the result.", strategyTemplateId: template.id });
-  expect(task.instruction).toContain("Compare media with text-only");
-  expect(state.executions.filter((item: { assignmentId?: string }) => item.assignmentId === task.id)).toHaveLength(0);
+  await expect(card.getByRole("button", { name: "Schedule a task" })).toHaveCount(0);
+  await expect(card.getByRole("button", { name: "Create scheduled task" })).toHaveCount(0);
   await nav.getByRole("button", { name: "Growth", exact: true }).click();
   await expect(page.locator('[aria-label="Growth profile"]')).toContainText("Audience model");
   await expect(page.getByRole("button", { name: "Create template", exact: true })).toHaveCount(0);

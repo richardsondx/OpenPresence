@@ -17,9 +17,6 @@ export function SocialPlaybook({ state, presenceId, mutate, setView }: Props) {
   const [visualGuidance, setVisualGuidance] = useState("");
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState("");
-  const [scheduleId, setScheduleId] = useState<string>();
-  const [startsAt, setStartsAt] = useState("");
-  const [deadline, setDeadline] = useState("");
   const [draftBodies, setDraftBodies] = useState<Record<string, string>>({});
   const run = async (operation: unknown, success: string, after?: () => void) => {
     setBusy(true); setFeedback("");
@@ -58,13 +55,7 @@ export function SocialPlaybook({ state, presenceId, mutate, setView }: Props) {
           {template?.sourceMirrorObjectIds?.map(id => { const post = state.mirrorObjects.find(item => item.id === id); const url = post?.channelId === "x" && /^\d+$/.test(post.externalRef.id) ? `https://x.com/i/status/${post.externalRef.id}` : undefined; return url && /^https?:\/\//.test(url) ? <p key={id}><a href={url} target="_blank" rel="noreferrer">View source post</a></p> : null; })}
           {template?.sourceUrls?.map(url => /^https?:\/\//.test(url) ? <p key={url}><a href={url} target="_blank" rel="noreferrer">View study source</a></p> : null)}
           <div className="social-template-actions"><button type="button" className="button button-secondary" disabled={busy} onClick={() => void run({ type: "sendPresenceNudge", presenceId, content: `Use playbook item ${lesson.id} (${template?.title ?? lesson.statement}) to prepare three distinct content ideas and private drafts. Retrieve its source evidence and current results. Preserve our identity and existing constraints; do not invent missing personal details. Do not publish or schedule anything.`, clientRequestId: `playbook-draft:${lesson.id}:${crypto.randomUUID()}` }, "Draft request sent.", () => setView("chat"))}>Draft ideas</button>
-          {template && lesson.status !== "disfavored" && <button type="button" className="button button-secondary" onClick={() => setScheduleId(scheduleId === lesson.id ? undefined : lesson.id)}>Schedule a task</button>}</div>
-          {scheduleId === lesson.id && <form className="social-template-form" onSubmit={event => { event.preventDefault(); void run({ type: "scheduleSocialTemplate", presenceId, hypothesisId: lesson.id, startsAt: new Date(startsAt).toISOString(), deadline: new Date(deadline).toISOString() }, "Task prepared. Open Tasks to review its schedule and status.", () => { setScheduleId(undefined); setView("schedule"); }); }}>
-            <p>Create one scheduled task using this template. {presence?.name} adapts it to current context and follows the configured publishing permissions.</p>
-            <label>Start<input type="datetime-local" required value={startsAt} onChange={event => setStartsAt(event.target.value)} /></label>
-            <label>Finish by<input type="datetime-local" required min={startsAt || undefined} value={deadline} onChange={event => setDeadline(event.target.value)} /></label>
-            <button className="button button-primary" disabled={busy} type="submit">Create scheduled task</button>
-          </form>}
+          </div>
         </div>
       </details>;
     })}</div>

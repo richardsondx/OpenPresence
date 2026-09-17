@@ -22,6 +22,10 @@ test("five destinations preserve Agent scope and Tasks remain a supervisory proj
     await expect(nav.getByRole("button", { name, exact: true })).toHaveAttribute("aria-current", "page");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
+  await nav.getByRole("button", { name: "Growth", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Open Chat", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Set a growth goal", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Confirm and create", exact: true })).toHaveCount(0);
   await page.goto("/work");
   await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Calendar", exact: true }).click();
@@ -30,6 +34,8 @@ test("five destinations preserve Agent scope and Tasks remain a supervisory proj
   await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add task", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Back to Chat", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Edit Assignment instruction")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save changes", exact: true })).toHaveCount(0);
   await expect(page.getByText(/Jenny will add work here when Chat or her autonomous plan calls for it/i)).toBeVisible();
 });
 

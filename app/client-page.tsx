@@ -13696,18 +13696,6 @@ function ScheduleView({
   const selectedPresence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   const presenceName = selectedPresence?.name ?? "this Presence";
   const timezone = presenceTimezone(selectedPresence);
-  // Legacy task-entry/editor state remains quarantined below for persisted
-  // compatibility. It is intentionally unreachable from the primary UX;
-  // Chat owns new work and plan interventions.
-  const assetCollections = (state.assetCollections ?? []).filter((collection) => collection.agentId === state.agent?.id && collection.status === "active");
-  const [showForm, setShowForm] = useState(false);
-  const [instruction, setInstruction] = useState("");
-  const [scheduleType, setScheduleType] = useState<"one-time" | "weekly">("one-time");
-  const [date, setDate] = useState(localDateInputValue());
-  const [day, setDay] = useState("Tuesday");
-  const [time, setTime] = useState("08:00");
-  const [assetConstraintCollectionId, setAssetConstraintCollectionId] = useState("");
-  const [assetConstraintRequired, setAssetConstraintRequired] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "week">("list");
   const [scheduleDayFilter, setScheduleDayFilter] = useState<ScheduleDayFilter>("all");
   const [scheduleRecurrenceFilter, setScheduleRecurrenceFilter] = useState<ScheduleRecurrenceFilter>("all");
@@ -13719,43 +13707,6 @@ function ScheduleView({
   const [intervention, setIntervention] = useState("");
   const [sendingIntervention, setSendingIntervention] = useState(false);
   const [scheduleNow] = useState(() => Date.now());
-  const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
-  const [editingAssignmentInstruction, setEditingAssignmentInstruction] = useState("");
-  const [editingAssignmentType, setEditingAssignmentType] = useState<"one-time" | "weekly">("one-time");
-  const [editingTaskTitle, setEditingTaskTitle] = useState("");
-  const [editingWindowStart, setEditingWindowStart] = useState("");
-  const [editingWindowEnd, setEditingWindowEnd] = useState("");
-  const [editingAssignmentDate, setEditingAssignmentDate] = useState(localDateInputValue());
-  const [editingAssignmentCollectionId, setEditingAssignmentCollectionId] = useState("");
-  const [editingAssignmentRequiresAsset, setEditingAssignmentRequiresAsset] = useState(false);
-  const [editingAssignmentSchedule, setEditingAssignmentSchedule] = useState<Assignment["schedule"]>();
-  const [savingAssignmentId, setSavingAssignmentId] = useState<string | null>(null);
-  const resetForm = () => { setInstruction(""); setScheduleType("one-time"); setDate(localDateInputValue()); setDay("Tuesday"); setTime("08:00"); setAssetConstraintCollectionId(""); setAssetConstraintRequired(false); };
-  const changeScheduleTime = (nextTime: string) => setTime(nextTime);
-  const [creatingAssignment, setCreatingAssignment] = useState(false);
-  const add = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (creatingAssignment) return;
-    setCreatingAssignment(true);
-    try {
-      let next = await mutate({ type: "createAssignment", instruction, presenceId, environment: selectedPresence?.connectionMode === "sandbox" ? "sandbox" : "live", schedule: { day: scheduleType === "one-time" ? weekdayForDate(date) : day, time, executionWindow: `${time}–${time}`, ...(scheduleType === "one-time" ? { date } : {}) }, assetConstraint: assetConstraintCollectionId || assetConstraintRequired ? { collectionId: assetConstraintCollectionId || undefined, required: assetConstraintRequired } : undefined });
-      let created = next?.assignments.find((item) => item.instruction === instruction.trim() && item.presenceId === presenceId);
-      if (next && created && created.status === "draft" && ["ready", "ready_with_assumptions"].includes(created.preflight?.status ?? "")) {
-        next = (await mutate({ type: "activateAssignment", id: created.id }, next)) ?? next;
-        created = next.assignments.find((item) => item.id === created?.id) ?? created;
-      }
-      if (next && created) { resetForm(); setShowForm(false); setSelectedAssignmentId(created.id); }
-    } finally { setCreatingAssignment(false); }
-  };
-  const saveAssignmentEdit = async (assignment: Assignment) => {
-    if (savingAssignmentId || !editingAssignmentInstruction.trim()) return;
-    setSavingAssignmentId(assignment.id);
-    try {
-      const schedule = editingAssignmentSchedule ? { day: editingAssignmentType === "one-time" ? weekdayForDate(editingAssignmentDate) : editingAssignmentSchedule.day, time: editingAssignmentSchedule.time, executionWindow: `${editingAssignmentSchedule.time}–${editingAssignmentSchedule.time}`, ...(editingAssignmentType === "one-time" ? { date: editingAssignmentDate } : {}) } : null;
-      const next = await mutate({ type: "updateAssignment", id: assignment.id, title: editingTaskTitle, timeframe: editingWindowStart && editingWindowEnd ? { startsAt: new Date(editingWindowStart).toISOString(), deadline: new Date(editingWindowEnd).toISOString() } : undefined, instruction: editingAssignmentInstruction, schedule, assetConstraint: editingAssignmentCollectionId || editingAssignmentRequiresAsset ? { collectionId: editingAssignmentCollectionId || undefined, required: editingAssignmentRequiresAsset } : undefined });
-      if (next) setEditingAssignmentId(null);
-    } finally { setSavingAssignmentId(null); }
-  };
   const visibleSlots: CalendarSlot[] = [];
   const visibleAssignments = state.assignments.filter((item) => item.presenceId === presenceId && item.status !== "cancelled");
   const goalAssignments = visibleAssignments.filter((assignment) => assignment.activation?.type === "continuous");
@@ -13819,7 +13770,6 @@ function ScheduleView({
   }, [selectedAssignmentId, scrollToInspector]);
   const openAssignment = (assignment: Assignment) => {
     setSelectedAssignmentId(assignment.id);
-    setEditingAssignmentId(null);
     scrollToInspector();
   };
   const selectedAssignment = visibleAssignments.find((assignment) => assignment.id === selectedAssignmentId) ?? null;
@@ -13881,63 +13831,6 @@ function ScheduleView({
           </div>
         </section>
       )}
-      {false && showForm && (
-        <form className="add-slot-form" onSubmit={add}>
-          <label className="instruction-field">
-            What should {presenceName} accomplish?
-            <textarea
-              aria-label={`What should ${presenceName} accomplish?`}
-              value={instruction}
-              onChange={(event) => setInstruction(event.target.value)}
-              placeholder="Teach the audience one useful thing about persistent agents."
-              rows={3}
-              required
-            />
-          </label>
-          <fieldset className="assignment-schedule-type">
-            <legend>Assignment type</legend>
-            <div className="assignment-type-options" role="group" aria-label="Assignment type">
-              <label className={scheduleType === "one-time" ? "selected" : ""}>
-                <input type="radio" name="assignment-type" value="one-time" checked={scheduleType === "one-time"} onChange={() => setScheduleType("one-time")} />
-                <span><strong>One time only</strong><small>Run on a specific date.</small></span>
-              </label>
-              <label className={scheduleType === "weekly" ? "selected" : ""}>
-                <input type="radio" name="assignment-type" value="weekly" checked={scheduleType === "weekly"} onChange={() => setScheduleType("weekly")} />
-                <span><strong>Weekly</strong><small>Run on the same day every week.</small></span>
-              </label>
-            </div>
-          </fieldset>
-          <div className="when-field">
-            <span className="schedule-field-label">When should it start?</span>
-            <div className="when-field-controls">
-              {scheduleType === "one-time" ? (
-                <label>Date<input aria-label="Assignment date" type="date" value={date} onChange={(event) => setDate(event.target.value)} required /></label>
-              ) : (
-                <label>Day<select aria-label="Day" value={day} onChange={(event) => setDay(event.target.value)}>{calendarWeekDays.map((item) => <option key={item}>{item}</option>)}</select></label>
-              )}
-              <label>Time<input aria-label="Time" type="time" value={time} onChange={(event) => changeScheduleTime(event.target.value)} required /></label>
-            </div>
-            <small className="form-hint">The Agent starts at this time. It decides how to complete the outcome.</small>
-          </div>
-          <details className="assignment-advanced-details">
-            <summary>Optional asset preferences</summary>
-            <fieldset className="assignment-asset-constraint">
-              <legend>Asset preference <small>Only approved Assets can be used</small></legend>
-              <label>Collection
-                <select aria-label="Assignment Asset Collection" value={assetConstraintCollectionId} onChange={(event) => setAssetConstraintCollectionId(event.target.value)}>
-                  <option value="">Any eligible Asset</option>
-                  {assetCollections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}
-                </select>
-              </label>
-              <label className="assignment-asset-required"><input type="checkbox" checked={assetConstraintRequired} onChange={(event) => setAssetConstraintRequired(event.target.checked)} /> Require an Asset for this responsibility</label>
-              <small className="form-hint">This limits the choice; it does not grant permission to publish an Asset.</small>
-            </fieldset>
-          </details>
-          <Button type="submit" variant="secondary" disabled={creatingAssignment}>
-            {creatingAssignment ? <><LoaderCircle size={14} className="spin" /> Creating assignment…</> : <><Check size={14} /> Create assignment</>}
-          </Button>
-        </form>
-      )}
       {selectedAssignment && (
         <aside
           ref={assignmentInspectorRef}
@@ -13965,52 +13858,12 @@ function ScheduleView({
               </div>
             );
           })()}
-          {editingAssignmentId === selectedAssignment.id ? (
-            <form className="assignment-edit-form" onSubmit={(event) => { event.preventDefault(); void saveAssignmentEdit(selectedAssignment); }}>
-              <label>Task title
-                <input aria-label="Task summary" value={editingTaskTitle} onChange={(event) => setEditingTaskTitle(event.target.value)} required maxLength={240} />
-              </label>
-              <label>Instructions and constraints<textarea aria-label="Edit Assignment instruction" value={editingAssignmentInstruction} onChange={(event) => setEditingAssignmentInstruction(event.target.value)} rows={4} required />
-              </label>
-              {selectedAssignment.activation?.type !== "continuous" && (!selectedAssignment.schedule || ["expired_incomplete", "failed"].includes(selectedAssignment.status)) && <div className="assignment-edit-schedule">
-                <label>Start<input aria-label="Task window start" type="datetime-local" value={editingWindowStart} onChange={(event) => setEditingWindowStart(event.target.value)} required={["expired_incomplete", "failed"].includes(selectedAssignment.status) || Boolean(editingWindowEnd)} /></label>
-                <label>Finish by<input aria-label="Task window end" type="datetime-local" value={editingWindowEnd} onChange={(event) => setEditingWindowEnd(event.target.value)} required={["expired_incomplete", "failed"].includes(selectedAssignment.status) || Boolean(editingWindowStart)} /></label>
-              </div>}
-              {selectedAssignment.schedule && <>
-              <fieldset className="assignment-schedule-type">
-                <legend>Assignment type</legend>
-                <div className="assignment-type-options" role="group" aria-label="Edit assignment type">
-                  <label className={editingAssignmentType === "one-time" ? "selected" : ""}><input type="radio" name="edit-assignment-type" value="one-time" checked={editingAssignmentType === "one-time"} onChange={() => setEditingAssignmentType("one-time")} /><span><strong>One time only</strong><small>Run on a specific date.</small></span></label>
-                  <label className={editingAssignmentType === "weekly" ? "selected" : ""}><input type="radio" name="edit-assignment-type" value="weekly" checked={editingAssignmentType === "weekly"} onChange={() => setEditingAssignmentType("weekly")} /><span><strong>Weekly</strong><small>Run on the same day every week.</small></span></label>
-                </div>
-              </fieldset>
-              <fieldset className="assignment-asset-constraint">
-                <legend>Asset constraint</legend>
-                <label>Collection
-                  <select aria-label="Edit Assignment Asset Collection" value={editingAssignmentCollectionId} onChange={(event) => setEditingAssignmentCollectionId(event.target.value)}>
-                    <option value="">Any eligible Asset</option>
-                    {assetCollections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}
-                  </select>
-                </label>
-                <label className="assignment-asset-required"><input type="checkbox" checked={editingAssignmentRequiresAsset} onChange={(event) => setEditingAssignmentRequiresAsset(event.target.checked)} /> Require an Asset</label>
-                <small className="form-hint">Only media available to this agent can be used.</small>
-              </fieldset>
-              <div className="assignment-edit-schedule">
-                {editingAssignmentType === "one-time" ? <label>Date<input aria-label="Edit Assignment date" type="date" required value={editingAssignmentDate} onChange={(event) => setEditingAssignmentDate(event.target.value)} /></label> : <label>Day<select aria-label="Edit Assignment day" required value={editingAssignmentSchedule?.day ?? "Tuesday"} onChange={(event) => setEditingAssignmentSchedule((current) => ({ day: event.target.value, time: current?.time ?? "08:00", executionWindow: current?.executionWindow ?? "08:00–08:00" }))}>{calendarWeekDays.map((item) => <option key={item}>{item}</option>)}</select></label>}
-                <label>Time<input aria-label="Edit Assignment time" type="time" disabled={!editingAssignmentSchedule} value={editingAssignmentSchedule?.time ?? "08:00"} onChange={(event) => setEditingAssignmentSchedule((current) => current ? { ...current, time: event.target.value, executionWindow: `${event.target.value}–${event.target.value}` } : current)} /></label>
-              </div>
-              </>}
-              <small className="assignment-edit-help">Choose the time window for this task. Saving a new window prepares another attempt. Select Start task after saving to resume; previous results stay recorded.</small>
-              <div className="assignment-edit-actions"><Button type="button" variant="ghost" onClick={() => setEditingAssignmentId(null)}>Keep current</Button><Button type="submit" variant="primary" disabled={savingAssignmentId === selectedAssignment.id || !editingAssignmentInstruction.trim()}>{savingAssignmentId === selectedAssignment.id ? <><LoaderCircle size={14} className="spin" /> Saving…</> : <><Check size={14} /> Save changes</>}</Button></div>
-            </form>
-          ) : <>
-            <div className="assignment-inspector-summary">
-              <SectionEyebrow>Task summary</SectionEyebrow>
-              <h3>{selectedAssignment.title || cleanUserFacingAssignmentInstruction(selectedAssignment.instruction)}</h3>
-              {selectedAssignment.description && <p>{selectedAssignment.description}</p>}
-            </div>
-            <details><summary>Instructions and constraints</summary><p>{selectedAssignment.instruction}</p></details>
-          </>}
+          <div className="assignment-inspector-summary">
+            <SectionEyebrow>Task summary</SectionEyebrow>
+            <h3>{selectedAssignment.title || cleanUserFacingAssignmentInstruction(selectedAssignment.instruction)}</h3>
+            {selectedAssignment.description && <p>{selectedAssignment.description}</p>}
+          </div>
+          <details><summary>Instructions and constraints</summary><p>{selectedAssignment.instruction}</p></details>
           <div className="assignment-inspector-meta">
             <div><span>Schedule</span><strong>{assignmentTimingLabel(selectedAssignment)}</strong><small>{selectedAssignment.status === "expired_incomplete" ? "The deadline passed before this attempt finished. Choose a new window to try again." : selectedAssignment.schedule?.date ? `Starts once on ${assignmentDateLabel(selectedAssignment)} at ${selectedAssignment.schedule.time}.` : selectedAssignment.schedule ? `Starts every ${selectedAssignment.schedule.day} at ${selectedAssignment.schedule.time}.` : selectedAssignment.activation?.type === "continuous" ? "Progress is tracked over time in Growth." : selectedAssignment.timeframe?.deadline ? "Work is limited to this time window." : "No start time is set."}</small></div>
             <div><span>Current attempt</span><strong>{selectedAssignment.status === "expired_incomplete" ? "Ended incomplete" : selectedAssignment.status === "draft" ? (["ready", "ready_with_assumptions"].includes(selectedAssignment.preflight?.status ?? "") ? "Not started" : "Needs information") : selectedAssignment.status.replaceAll("_", " ")}</strong><small>{assignmentScheduleProgress(selectedAssignment)}</small></div>
@@ -14054,7 +13907,7 @@ function ScheduleView({
           </form>
           <div className="assignment-inspector-actions">
 
-            {editingAssignmentId !== selectedAssignment.id && !["completed", "completed_with_adaptation", "cancelled"].includes(selectedAssignment.status) && !getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing && (
+            {! ["completed", "completed_with_adaptation", "cancelled"].includes(selectedAssignment.status) && !getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing && (
               <Button variant="ghost" onClick={() => setIntervention("Please review this plan and choose the next worthwhile step.")}>Ask Jenny to review this plan</Button>
             )}
             {!["completed", "completed_with_adaptation", "cancelled", "draft", "expired_incomplete", "failed"].includes(selectedAssignment.status) && (
