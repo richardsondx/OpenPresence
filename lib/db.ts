@@ -2373,8 +2373,16 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
       delete compatibilityState.publicationMetricSnapshots;
       writeNewHighVolumeCollectionRows(normalized, previousHighVolumeState);
     }
-    if (agentId && mirrorObjectsProjectionReady) {
+    const sandboxEnvironmentIds = new Set((normalized.sandboxEnvironments ?? []).map((environment) => environment.id));
+    const hasActiveSandbox = normalized.playgroundSessions?.some((session) => sandboxEnvironmentIds.has(session.environmentId) && session.status === "active") ?? false;
+    if (agentId && mirrorObjectsProjectionReady && !hasActiveSandbox) {
       delete compatibilityState.mirrorObjects;
+      syncMirrorObjectRows(normalized, previousHighVolumeState);
+    } else if (agentId && mirrorObjectsProjectionReady) {
+      // Active Sandbox sessions need their authoritative mirror snapshot in
+      // the compatibility workspace so a restart can restore the exact world
+      // before normalized live-history hydration. Keep the indexed rows in
+      // sync as well for later cleanup when the Sandbox session completes.
       syncMirrorObjectRows(normalized, previousHighVolumeState);
     }
     if (agentId && attentionEpisodesProjectionReady) {
