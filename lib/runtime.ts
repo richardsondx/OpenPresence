@@ -848,6 +848,7 @@ function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInp
     attentionEpisodeId: input.attentionEpisodeId,
     causalEventId,
     ...(sandboxSessionId ? { sandboxSessionId } : {}),
+    ...(sandboxSessionId ? { sessionId: sandboxSessionId } : {}),
     createdAt: now(),
   };
 }
