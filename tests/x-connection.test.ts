@@ -12,7 +12,7 @@ async function attentionResult(response: Response) {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readChannelSecret, readProviderSecret, readState, shouldRecordNativeOperationalFailure, writeState } from "../lib/db";
 import { deleteXPost, findVerifiedXQuote, findVerifiedXReply, matchesXQuote, matchesXReply, mergeXCredentials, normalizeXText, readRecentXMentions, readRecentXPosts, readXPostsByIds } from "../lib/x";
-import { applyOperation, createAgent, derivePublicHistory, recordNativeMirror, recordPublicFooting, settleCapabilityTrialNoOpportunity } from "../lib/runtime";
+import { applyOperation, createAgent, derivePublicHistory, failNativeExecution, formXActionIntent, recordNativeMirror, recordPublicFooting, settleCapabilityTrialNoOpportunity } from "../lib/runtime";
 import { hydrateNativeXThreadContext } from "../lib/native-x";
 import { xCreditsExhausted } from "../lib/x-credits";
 import { generateAgentReply } from "../lib/ai";
@@ -564,6 +564,31 @@ describe("native X connection", () => {
     expect(completed.executions[0].status).toBe("blocked");
     expect(completed.executions[0].failure.code).toBe("LIVE_WRITE_BLOCKED_NON_PRODUCTION_RUNTIME");
     expect(completed.outcomes).toHaveLength(0);
+  });
+
+  it("keeps a public-route native retry in backoff until cancellation fences it", async () => {
+    const presenceId = readState().presence!.id;
+    const saved = await POST(new Request("http://localhost/api/x/manage", { method: "POST", body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_access", accessTokenSecret: "test_access_secret" } }), headers: { "content-type": "application/json" } }));
+    let state = (await saved.json()).state;
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { ...state.presence!.execution, like: "auto" } } });
+    state.mirrorObjects = [{ id: "public-route-retry-target", bridgeId: state.nativeConnections[0].id, presenceId, channelId: "x", externalRef: { type: "x.post", id: "public-route-retry-post" }, objectType: "post", language: "en", content: { text: "A public route retry target", language: "en" }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", archived: false, environment: "live" } as never];
+    state = formXActionIntent(state, { affordance: "x.like", target: { type: "x.post", id: "public-route-retry-post" } });
+    const executionId = state.executions[0]!.id;
+    state = failNativeExecution(state, executionId, "Temporary native failure.");
+    writeState(state);
+    const like = vi.spyOn(await import("../lib/x"), "likeXPost").mockResolvedValue({ type: "x.like", id: "must-not-be-created" });
+
+    const retried = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "retryExecution", id: executionId }), headers: { "content-type": "application/json" } }));
+    expect(retried.status).toBe(200);
+    const queued = (await retried.json()).executions.find((item: { id: string }) => item.id === executionId);
+    expect(queued).toMatchObject({ status: "queued", retryAt: expect.any(String) });
+    expect(new Date(queued.retryAt).getTime()).toBeGreaterThan(Date.now());
+    expect(like).not.toHaveBeenCalled();
+
+    const cancelled = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "cancelExecution", id: executionId }), headers: { "content-type": "application/json" } }));
+    expect(cancelled.status).toBe(200);
+    expect((await cancelled.json()).executions.find((item: { id: string }) => item.id === executionId)).toMatchObject({ status: "cancelled" });
+    expect(like).not.toHaveBeenCalled();
   });
 
   it("runs the Publishing Initiative Assignment without a Calendar slot and counts only verified Mirror evidence", async () => {
