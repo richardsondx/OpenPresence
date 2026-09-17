@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { writeState } from "../lib/db";
+import { readStateSnapshot, writeState } from "../lib/db";
 import { claimExecutions, createBridgeWithKey } from "../lib/bridge";
 import * as x from "../lib/x";
 import { deliverNativeExecutions } from "../lib/native-execution-delivery";
@@ -248,6 +248,12 @@ describe("Sandbox and Playground boundaries", () => {
     expect(metricEvidence).toHaveLength(2);
     expect(metricEvidence?.every((record) => record.sandboxSessionId === session.id && record.causalDecisionIds?.length === 1)).toBe(true);
     expect(state.growthHypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ sandboxSessionId: session.id, status: "supported", decisionTargets: [expect.objectContaining({ strategyId: "social.x.v1.proof-led-original" })] })]));
+
+    writeState(state);
+    const reopened = readStateSnapshot();
+    expect(reopened.growthEvidenceRecords?.filter((record) => record.sourceRefs.some((source) => source.kind === "publication_metric"))).toHaveLength(2);
+    expect(reopened.growthEvidenceRecords?.filter((record) => record.sourceRefs.some((source) => source.kind === "publication_metric")).every((record) => record.sandboxSessionId === session.id && record.verified && record.causalDecisionIds?.length === 1)).toBe(true);
+    expect(reopened.growthHypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ sandboxSessionId: session.id, status: "supported" })]));
   });
 
   it("does not let a real Bridge claim or native writer consume Sandbox work", async () => {
