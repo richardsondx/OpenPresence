@@ -19,13 +19,13 @@ test(`Chat feedback process phase ${process.env.CHAT_FEEDBACK_PHASE ?? "unknown"
   }
 
   expect(phase).toBe("B");
-  let state = readStateSnapshot();
+  const state = readStateSnapshot();
   const presence = state.presence!;
   const preference = state.preferenceEvidence.find((item) => item.source === "operator_explicit" && item.presenceId === presence.id);
   expect(preference).toMatchObject({ scopeHint: "presence", reaction: "does_not_fit", note: expect.stringContaining("inspected and grounded") });
   const strategy = compileSocialStrategyContext(state, presence, { invocation: "future autonomous decision", objective: "choose a relevant visual for a grounded technical post", availableActions: ["post", "reply"], format: "x.reply" });
   expect(strategy.prompt).toContain("inspected and grounded");
-  let baselineState = structuredClone(state);
+  const baselineState = structuredClone(state);
   baselineState.preferenceEvidence = baselineState.preferenceEvidence.filter((item) => item.id !== preference?.id);
   const baselineStrategy = compileSocialStrategyContext(baselineState, baselineState.presence!, { invocation: "future autonomous decision", objective: "choose a relevant visual for a grounded technical post", availableActions: ["post", "reply"], format: "x.reply" });
   expect(baselineStrategy.prompt).not.toContain("inspected and grounded");
