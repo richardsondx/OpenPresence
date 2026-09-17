@@ -541,7 +541,8 @@ export function applyGrowthHypothesisActions(
     } else if (action.action === "weaken") {
       addHistory(hypothesis, "weakened");
       hypothesis.contradictingEvidenceIds = [...new Set([...hypothesis.contradictingEvidenceIds, ...evidenceIds])];
-      hypothesis.confidence = confidenceRank[hypothesis.confidence] > 0 ? "medium" : "low";
+      const rank = confidenceRank[hypothesis.confidence];
+      hypothesis.confidence = rank >= confidenceRank.medium ? (rank === confidenceRank.high ? "medium" : "low") : "low";
     } else if (action.action === "disfavor") addHistory(hypothesis, "disfavored");
     else if (action.action === "retire") addHistory(hypothesis, "retired");
   });

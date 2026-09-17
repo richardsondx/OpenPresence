@@ -85,6 +85,21 @@ describe("Social Strategy Intelligence", () => {
     expect(state.growthHypotheses![0]!.supportingEvidenceIds).toEqual(["unrelated-1"]);
   });
 
+  it("decreases confidence on contradictory evidence and retires the pattern from retrieval", () => {
+    const state = createAgent(input);
+    const presenceId = state.presence!.id;
+    state.growthEvidenceRecords = [{ id: "contradiction", agentId: state.agent!.id, presenceId, kind: "WORLD_OUTCOME", claimScope: "presence", statement: "Verified counter-result", sourceRefs: [], verified: true, createdAt: new Date().toISOString() }];
+    applyGrowthHypothesisActions(state, presenceId, "create-hypothesis", [{ action: "create", statement: "Proof-led originals help this audience.", scope: "presence", patternIds: ["social.x.v1.proof-led-original"], decisionTargets: [{ strategyId: "social.x.v1.proof-led-original", effect: 2 }], confidence: "high" }]);
+    const hypothesisId = state.growthHypotheses![0]!.id;
+    applyGrowthHypothesisActions(state, presenceId, "weaken-high", [{ action: "weaken", hypothesisId, evidenceIds: ["contradiction"] }]);
+    expect(state.growthHypotheses![0]).toMatchObject({ status: "weakened", confidence: "medium", contradictingEvidenceIds: ["contradiction"] });
+    applyGrowthHypothesisActions(state, presenceId, "weaken-medium", [{ action: "weaken", hypothesisId, evidenceIds: ["contradiction"] }]);
+    expect(state.growthHypotheses![0]?.confidence).toBe("low");
+    applyGrowthHypothesisActions(state, presenceId, "retire", [{ action: "retire", hypothesisId }]);
+    expect(state.growthHypotheses![0]?.status).toBe("retired");
+    expect(compileSocialStrategyContext(state, state.presence!, { invocation: "after retirement", objective: "share proof-led originals", availableActions: ["original_post"] }).retrievalRun.relevantGrowthHypothesisIds).not.toContain(hypothesisId);
+  });
+
   it("gives Genny verified act-level performance evidence so quote versus repost is strategic", async () => {
     let state = createAgent({ name: "Genny", description: "Help AI builders understand durable agent systems.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#D68754" });
     const presenceId = state.presence!.id;
