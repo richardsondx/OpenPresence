@@ -3570,6 +3570,9 @@ export function scheduleSandboxRetry(source: OpenPresenceState, sessionId: strin
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 20) throw new Error("Sandbox retry max attempts must be an integer from 1 to 20.");
   if (!Number.isInteger(initialDelayMinutes) || initialDelayMinutes < 0 || initialDelayMinutes > 43200) throw new Error("Sandbox retry delay must be a non-negative integer number of minutes.");
   const kernel = temporalKernelForSession(session);
+  if (kernel.retries.some((retry) => retry.operationId === operationId && ["pending", "attempting"].includes(retry.status))) {
+    throw new Error(`Sandbox retry operation ${operationId} already has an active retry lineage.`);
+  }
   kernel.startRetry({ operationId, offsetMs: initialDelayMinutes * 60_000, policy: { maxAttempts, initialDelayMs: Math.max(1, initialDelayMinutes * 60_000) }, payload: { sandboxFailure: true, source: "public-sandbox-control" } });
   session.temporalSnapshot = kernel.snapshot();
   session.virtualTimeMode = "manual";

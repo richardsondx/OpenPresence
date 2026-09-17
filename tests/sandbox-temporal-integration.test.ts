@@ -84,6 +84,14 @@ describe("Playground temporal integration boundary", () => {
     expect(advanced.processed).toEqual([]);
   });
 
+  it("rejects duplicate active public retry lineages", () => {
+    let state = startPlaygroundSession(fixtureState());
+    const session = state.playgroundSessions[0]!;
+    state = scheduleSandboxRetry(state, session.id, "integration:duplicate", 2, 5);
+    expect(() => scheduleSandboxRetry(state, session.id, "integration:duplicate", 2, 5)).toThrow(/already has an active retry lineage/);
+    expect(state.playgroundSessions[0]!.temporalSnapshot?.retries).toHaveLength(1);
+  });
+
   it("round-trips a queued event and trajectory through the persisted session shape", () => {
     let state = startPlaygroundSession(fixtureState());
     const session = state.playgroundSessions[0]!;
