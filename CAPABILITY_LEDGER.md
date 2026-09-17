@@ -527,3 +527,21 @@ correction are preserved in
 `qa-learnings/independent-causal-cone-9baca92-2026-09-17.md`. This is stronger
 support for SBX-008/EVAL-004, but not the complete composed trajectory proof,
 so neither row is promoted.
+
+## Corrected steering follow-up — Slice B/C — `9baca92` — 2026-09-17
+
+The existing Slice B matrix passed on the isolated immutable candidate: 4 files
+/ 40 tests (`learning-counterfactual`, multi-rate trajectory, asset
+intelligence, and media authorization). The existing Slice C legacy/runtime
+matrix passed 4 files / 251 tests, and the candidate-bound public responsive
+workspace check passed 4/4. Evidence and the invalid concurrent shared-DB
+harness attempt are recorded in
+`qa-learnings/slice-b-c-9baca92-2026-09-17.md`.
+
+These are reused/strengthened focused gates only. No PARTIAL row is promoted:
+LEARN-002/003/004 still require independent composed transfer/retirement/media
+choice proof, and SIM-001 still requires an independent candidate-bound legacy
+migration ablation. SBX-004 still requires the stronger integrated native
+in-flight/backoff race evidence; SBX-008/EVAL-004 still require complete
+independent reconstruction/causal-cone proof. No source changed, so release
+health was not rerun.
