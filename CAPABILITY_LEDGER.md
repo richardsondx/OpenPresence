@@ -485,3 +485,9 @@ learned state; LEARN-002/003/004 retain their public ablation gate. Exact
 candidate legacy migration and the named autonomy/interruption/complete-causal
 cone independent reviews also remain open. Evidence is recorded in
 `qa-learnings/release-candidate-9df4085-2026-09-17.md`.
+
+The candidate-bound public learning attempt used only the Playground/API
+surface and preserved its run at
+`/tmp/openpresence-candidate-9df4085/data/public-learning-final.db`. It
+observed one accepted measured action but not the second independent action
+needed for a durable transfer hypothesis; LEARN-002/003/004 remain PARTIAL.
