@@ -912,7 +912,8 @@ async function executePlayground(baseUrl, command, options, positionals) {
     const session = sessionForOperation(current, options);
     const checkpointId = required(options, "checkpoint");
     const before = new Set((current.playgroundSessions ?? []).map((item) => item.id));
-    const next = await postOperation(baseUrl, { type: "forkSandboxCheckpoint", sessionId: session.id, checkpointId });
+    const learning = options.learning === "removed" ? "removed" : "retained";
+    const next = await postOperation(baseUrl, { type: "forkSandboxCheckpoint", sessionId: session.id, checkpointId, learning });
     const forked = (next.playgroundSessions ?? []).find((item) => !before.has(item.id) && item.source === "replay")
       ?? (next.playgroundSessions ?? []).find((item) => item.id !== session.id && item.source === "replay");
     if (!forked) fail("Sandbox fork did not return a new replay session.", "INVALID_RESPONSE");

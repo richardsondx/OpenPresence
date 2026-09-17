@@ -353,6 +353,10 @@ describe("runtime learning boundary", () => {
     const fork = state.playgroundSessions.find((item) => item.id !== source.id && item.source === "replay")!;
     const forkLearning = learningStateForPresence(state, presence, fork.id);
     expect(forkLearning.hypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience.", targets: expect.arrayContaining([expect.objectContaining({ strategyId })]) })]));
+    const removedLearningState = forkSandboxCheckpoint(state, source.id, checkpoint.id, { learning: "removed" });
+    const removedFork = removedLearningState.playgroundSessions.find((item) => item.id !== source.id && item.id !== fork.id && item.source === "replay")!;
+    expect(removedFork).toBeDefined();
+    expect(learningStateForPresence(removedLearningState, presence, removedFork.id).hypotheses).toEqual([]);
     expect((state.growthHypotheses ?? []).filter((item) => (item as typeof item & { sandboxSessionId?: string }).sandboxSessionId === fork.id)).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience." })]));
     const freshSourceSnapshot = captureSandboxWorld(state, source.id);
     expect(freshSourceSnapshot.learning?.growthHypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ id: hypothesisId })]));

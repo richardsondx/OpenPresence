@@ -5273,7 +5273,7 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("cancelSandboxRetry"), sessionId: z.string().min(1), operationId: z.string().trim().min(1).max(160) }),
   z.object({ type: z.literal("createSandboxCheckpoint"), sessionId: z.string().min(1), label: z.string().trim().max(200).optional() }),
   z.object({ type: z.literal("restoreSandboxCheckpoint"), sessionId: z.string().min(1), checkpointId: z.string().min(1) }),
-  z.object({ type: z.literal("forkSandboxCheckpoint"), sessionId: z.string().min(1), checkpointId: z.string().min(1) }),
+  z.object({ type: z.literal("forkSandboxCheckpoint"), sessionId: z.string().min(1), checkpointId: z.string().min(1), learning: z.enum(["retained", "removed"]).optional() }),
   z.object({ type: z.literal("runSandboxPulse"), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("considerOriginalPublication"), sessionId: z.string().min(1), inspiration: z.string().trim().max(2000).optional() }),
   z.object({ type: z.literal("generatePlaygroundStimulus"), sessionId: z.string().min(1), presenceId: z.string().min(1).optional(), targetAffordance: z.enum(["quote", "repost", "like", "reply", "silence"]), topic: z.string().trim().max(1000).optional() }),
@@ -6860,7 +6860,7 @@ export async function POST(request: Request) {
       return stateResponse(request, next);
     }
     if (parsed.type === "forkSandboxCheckpoint") {
-      const next = forkSandboxCheckpoint(current, parsed.sessionId, parsed.checkpointId);
+      const next = forkSandboxCheckpoint(current, parsed.sessionId, parsed.checkpointId, { learning: parsed.learning });
       writeState(next, { syncNormalized: true });
       return stateResponse(request, next);
     }

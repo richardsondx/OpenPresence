@@ -3775,7 +3775,7 @@ export function restoreSandboxCheckpoint(source: OpenPresenceState, sessionId: s
  * records retain their semantic identity inside the branch; all branch-local
  * records are session-scoped, and future seeded world identities are
  * namespaced by the new session id by the normal Sandbox runtime. */
-export function forkSandboxCheckpoint(source: OpenPresenceState, sessionId: string, checkpointId: string) {
+export function forkSandboxCheckpoint(source: OpenPresenceState, sessionId: string, checkpointId: string, options: { learning?: "retained" | "removed" } = {}) {
   const checkpoint = (source.sandboxCheckpoints ?? []).find((item) => item.id === checkpointId && item.sessionId === sessionId);
   if (!checkpoint) throw new Error(`Sandbox checkpoint ${checkpointId} was not found for session ${sessionId}.`);
   const original = checkpoint.snapshot as SandboxWorldSnapshot;
@@ -3802,7 +3802,7 @@ export function forkSandboxCheckpoint(source: OpenPresenceState, sessionId: stri
     })])),
   };
   forked.digest = sandboxWorldDigest(forked);
-  return restoreSandboxWorld(source, forked, { restoreLearning: true, learningSessionId: forkedSessionId, namespaceUnscopedLearning: true });
+  return restoreSandboxWorld(source, forked, { restoreLearning: options.learning !== "removed", learningSessionId: forkedSessionId, namespaceUnscopedLearning: true });
 }
 
 export function syncPlaygroundTime(source: OpenPresenceState, sessionId: string) {
