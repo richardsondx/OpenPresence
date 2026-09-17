@@ -74,6 +74,20 @@ intervention. Evidence is recorded in
 promoted solely from the composed run; each remaining PARTIAL row retains its
 explicit missing gate.
 
+Current release-candidate delta: immutable candidate `82214e7` passed the
+canonical composed seven-day Sandbox trajectory, the exact-candidate
+independent verifier (including cross-process replay and cross-rate checks),
+and final broad release health (lint 0 errors / existing warnings; production
+build; typecheck; 130 files / 1,210 tests). The canonical test now starts from
+the public Sandbox control and proves that startup itself materializes the
+first Agent-owned plan; it no longer calls the harness-only `replanPublishing`
+operation. Evidence is recorded in
+`qa-learnings/release-candidate-82214e7-2026-09-17.md`. No capability is
+promoted from this run: every remaining PARTIAL row retains an explicit
+behavioral gate, including independent research/delivery, dependent-work
+reconsideration, complete causal reconstruction, media interpretation, and
+full independent natural-supervision/adversarial review.
+
 ## Current ledger
 
 Proof-gate shorthand used in the closure manifest: `I` implemented, `P`
