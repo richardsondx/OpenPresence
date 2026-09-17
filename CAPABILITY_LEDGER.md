@@ -285,6 +285,11 @@ verification; confidence decrease, contradictory evidence, stale-pattern
 retirement, and independent learning-adversary review; and relevant-media
 learning.
 
+The implementation commit `e4cc6de` then passed the real canonical public
+seven-day trajectory, the independent verifier (8 files / 90 tests), and the
+broad suite (130 files / 1,217 tests). This integration result is recorded in
+`qa-learnings/sandbox-learning-materialization-integration-2026-09-17.md`.
+
 Latest integrated Sandbox evidence (2026-09-16): the real CLI-launched
 mandatory trajectory began with zero user Assignments, materialized one
 session-scoped Agent-owned Sandbox responsibility, ran for 10,080 virtual
