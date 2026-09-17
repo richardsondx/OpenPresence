@@ -145,12 +145,12 @@ describe("runtime learning boundary", () => {
     let state = startPlaygroundSession(createAgent({ name: "Sandbox learning replay", description: "A paired-world learning fixture.", audience: "AI builders", mode: "agent", handle: "@sandbox_learning_replay", accent: "#7c3aed" }));
     const source = state.playgroundSessions[0]!;
     const presence = state.presence!;
-    const strategyId = "social.x.v1.proof-led-original";
+    const strategyId = "social.x.v1.useful-disagreement";
     const hypothesisId = "sandbox-learning-hypothesis";
     const evidence = ["sandbox-outcome-a", "sandbox-outcome-b"].map((id, index) => ({ id, agentId: state.agent!.id, presenceId: presence.id, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Verified proof-led outcome", sourceRefs: [], verified: true, causalDecisionIds: [`sandbox-decision-${index + 1}`], createdAt: `2026-09-1${index + 1}T12:00:00.000Z` }));
     state.growthEvidenceRecords = evidence;
     state.socialDecisions = evidence.map((item, index) => ({ id: `sandbox-decision-${index + 1}`, agentId: state.agent!.id, presenceId: presence.id, environment: "sandbox" as const, focalMirrorObjectIds: [], decision: "original_post" as const, summary: "Proof-led decision", influences: [], socialStrategy: { retrievalRunId: `sandbox-run-${index + 1}`, consideredPatternIds: [strategyId], selectedByAct: [{ act: "original_post", patternId: strategyId }] }, createdAt: item.createdAt }));
-    state.growthHypotheses = [{ id: hypothesisId, agentId: state.agent!.id, originatingPresenceId: presence.id, scope: "presence", channelId: presence.channel, statement: "Proof-led posts help this audience.", status: "supported", confidence: "high", patternIds: [strategyId], decisionTargets: [{ strategyId, action: "reply", effect: 5 }], supportingEvidenceIds: evidence.map((item) => item.id), contradictingEvidenceIds: [], derivedFrom: [], reviewHistory: [], createdAt: evidence[0]!.createdAt, updatedAt: evidence[1]!.createdAt }];
+    state.growthHypotheses = [{ id: hypothesisId, agentId: state.agent!.id, originatingPresenceId: presence.id, scope: "presence", channelId: presence.channel, statement: "Useful disagreement helps this audience.", status: "supported", confidence: "high", patternIds: [strategyId], decisionTargets: [{ strategyId, action: "reply", effect: 10 }], supportingEvidenceIds: evidence.map((item) => item.id), contradictingEvidenceIds: [], derivedFrom: [], reviewHistory: [], createdAt: evidence[0]!.createdAt, updatedAt: evidence[1]!.createdAt }];
 
     state = createSandboxCheckpoint(state, source.id, "after learning event");
     const checkpoint = state.sandboxCheckpoints?.[0]!;
@@ -171,6 +171,8 @@ describe("runtime learning boundary", () => {
     const learningCheckpoint = captureLearningCheckpoint(worldA, presence, "2026-09-16T12:30:00.000Z").checkpoint;
     const situation: LearningDecisionSituation = { id: `paired:${fork.id}`, scope: presence.id, candidates: [{ id: "reply", action: "reply", baseScore: 1, strategyId }, { id: "repost", action: "repost", baseScore: 2, strategyId: "social.x.v1.selective-amplification" }] };
     const replay = projectLearningCounterfactual({ checkpoint: learningCheckpoint, situation, altered: { label: "World B without retained learning", hypotheses: removedLearning.hypotheses, evidence: removedLearning.evidence } });
+    const runtimeA = compileSocialStrategyContext(worldA, presence, { invocation: "paired-world later decision", objective: "neutral situation", availableActions: ["reply"] });
+    const runtimeB = compileSocialStrategyContext(worldB, presence, { invocation: "paired-world later decision", objective: "neutral situation", availableActions: ["reply"] });
 
     expect(fork).toBeDefined();
     expect(branchSnapshotB).toEqual(branchSnapshotA);
@@ -181,6 +183,8 @@ describe("runtime learning boundary", () => {
     expect(replay.projections.removed.decision.action).toBe("repost");
     expect(replay.comparisons.presentVsRemoved.decisionsDiffer).toBe(true);
     expect(replay.lineage.presentCheckpointId).toBe(learningCheckpoint.id);
+    expect(runtimeA.retrievalRun.consideredPatterns[0]?.id).toBe(strategyId);
+    expect(runtimeB.retrievalRun.consideredPatterns[0]?.id).not.toBe(strategyId);
   });
 
   it("persists a checkpoint comparison from a real strategy decision and requires repeated world outcomes", () => {
