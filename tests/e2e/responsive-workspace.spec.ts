@@ -37,7 +37,7 @@ test("chat remains usable with media picker, durable messages, and reload", asyn
   const compose = page.getByLabel("Message Jenny", { exact: true });
   await compose.fill("Keep this conversation private. What can you help me with?");
   await page.getByRole("button", { name: "Attach media or files" }).click();
-  await expect(page.getByRole("dialog", { name: "Add to your message" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Add an image" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Upload an image" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Your uploaded images" })).toBeVisible();
   await page.keyboard.press("Escape");
@@ -70,6 +70,8 @@ test("existing media survives send and reload, and Agent details stay compact", 
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await navigation(page).getByRole("button", { name: "Artifacts", exact: true }).click();
+  await page.getByRole("tab", { name: "Media", exact: true }).click();
+  await expect(page.getByRole("tabpanel", { name: "Media", exact: true })).toBeVisible();
   await page.getByLabel("Upload assets", { exact: true }).setInputFiles("docs/social-post-assets/agent-and-presence.png");
   await expect(page.locator(".asset-card")).toHaveCount(1, { timeout: 60000 });
   await page.reload();

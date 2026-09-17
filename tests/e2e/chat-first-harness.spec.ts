@@ -10,7 +10,7 @@ test("Chat is the default Agent workspace and the single main chat survives relo
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
 
   await expect(page).toHaveURL(/\/chat/);
-  await expect(page.getByRole("heading", { name: "Chat", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Chat with Jenny", exact: true })).toBeVisible();
   await expect(page.getByText("Projects", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /New project/i })).toHaveCount(0);
   await expect(page.getByText("New conversation", { exact: true })).toHaveCount(0);
@@ -29,7 +29,7 @@ test("Chat is the default Agent workspace and the single main chat survives relo
   await page.reload();
   await expect(page).toHaveURL(threadUrl);
   await expect(page.locator(".operator-chat-message.is-operator p").filter({ hasText: /^What are you working on\?$/ })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Chat", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Chat with Jenny", exact: true })).toBeVisible();
 });
 
 test("Chat keeps durable responsibilities quiet until work is actually active", async ({ page, request }) => {

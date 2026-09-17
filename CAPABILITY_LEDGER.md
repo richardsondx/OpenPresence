@@ -7,6 +7,9 @@ baseline and must be re-verified against the current checkout before release.
 
 `FEATURES_MAP.md` owns product navigation and feature reachability.
 `qa-learnings/` owns project-specific QA memory and regression rules.
+`qa-learnings/certification-closure-manifest-2026-09-16.md` records the
+mechanical proof gates, dependencies, and exact closure gaps for the current
+candidate. It does not replace this ledger's capability definitions or status.
 
 ## Status vocabulary
 
@@ -15,6 +18,12 @@ Use only `UNPROVEN`, `PARTIAL`, `PROVEN`, `REGRESSED`, and `BLOCKED`.
 presence, a prompt, or a passing unit test alone is not enough.
 
 ## Current ledger
+
+Proof-gate shorthand used in the closure manifest: `I` implemented, `P`
+publicly exercisable, `O` observable/persisted, `A` adversarially challenged,
+`C` composition-certified, `V` independently verified, and `H` release-health
+passed. `PARTIAL` means at least one required gate is missing; it is not a
+confidence estimate.
 
 | ID | Capability / user outcome | Protected invariant | Evidence / verification | Status | Known gap / next action |
 |---|---|---|---|---|---|

@@ -7146,6 +7146,13 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .sidebar-collapsed .portfolio-agent-row { box-sizing: border-box; padding: 6px 4px; }
 .sidebar-collapsed .portfolio-agent-select { box-sizing: border-box; }
 .sidebar-collapsed .sidebar-resource-menu { box-sizing: border-box; width: 100%; }
+.sidebar-collapsed .agent-switcher-menu { width: 100%; min-width: 0; overflow: hidden; }
+.sidebar-collapsed .agent-switcher-menu > summary { box-sizing: border-box; width: 100%; justify-content: center; padding-inline: 0; overflow: hidden; }
+.sidebar-collapsed .agent-portfolio .portfolio-section-heading { display: none; }
+.sidebar-collapsed .agent-portfolio .portfolio-agent-row { grid-template-columns: 1fr; justify-items: center; padding: 6px 4px; }
+.sidebar-collapsed .agent-portfolio .portfolio-agent-select { grid-template-columns: 1fr; justify-items: center; width: 100%; }
+.sidebar-collapsed .agent-portfolio .portfolio-agent-copy, .sidebar-collapsed .agent-portfolio .portfolio-agent-state-label { display: none; }
+.sidebar-collapsed .agent-portfolio .portfolio-agent-toggle { position: absolute; right: 0; bottom: 0; min-height: 22px; padding: 0; }
 .topbar .context-controls { margin-left: auto; }
 @media (max-width: 680px) {
   .sidebar { display: block; overflow: visible; }
