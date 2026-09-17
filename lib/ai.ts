@@ -1496,6 +1496,9 @@ function assignmentMockCandidates(state: OpenPresenceState, instruction: string)
 function mockSocialDecision(state: OpenPresenceState, instruction: string, actions: string[]): AgentSocialDecision {
   const normalized = instruction.toLowerCase();
   const can = (action: string) => actions.includes(action);
+  if (can("post") && /do not use screenshots unless .*inspected and grounded/.test(normalized)) {
+    return { action: "no_op", text: "", rationale: "The explicit Presence correction rules out an uninspected screenshot." };
+  }
   if (normalized.includes("on-demand attention test")) {
     if (normalized.includes("attention-test-repost") && can("repost")) return { action: "repost", text: "", rationale: "The observed post stands on its own and is worth passing along." };
     if (normalized.includes("attention-test-quote") && can("quote")) return { action: "quote", text: "The detail carries more weight than the headline here.", rationale: "The observed post earns a short, concrete addition." };
