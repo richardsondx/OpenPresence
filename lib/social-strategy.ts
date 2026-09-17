@@ -809,15 +809,13 @@ export function materializeSandboxOutcomeLearning(source: OpenPresenceState, pre
   }
   const decisionIdsByPattern = new Map<string, Set<string>>();
   for (const outcome of sessionOutcomes) {
-    for (const decisionId of [outcome.socialIntentId, ...((state.socialDecisions.find((decision) => decision.socialIntentId === outcome.socialIntentId)?.id) ? [state.socialDecisions.find((decision) => decision.socialIntentId === outcome.socialIntentId)!.id] : [])]) {
-      const decision = state.socialDecisions.find((item) => item.id === decisionId || item.socialIntentId === decisionId);
-      if (!decision) continue;
-      for (const selected of decision?.socialStrategy?.selectedByAct ?? []) {
-        if (!selected.patternId || !knownPatternIds.has(selected.patternId)) continue;
-        const ids = decisionIdsByPattern.get(selected.patternId) ?? new Set<string>();
-        ids.add(decision.id);
-        decisionIdsByPattern.set(selected.patternId, ids);
-      }
+    const decision = state.socialDecisions.find((item) => item.socialIntentId === outcome.socialIntentId);
+    if (!decision) continue;
+    for (const selected of decision.socialStrategy?.selectedByAct ?? []) {
+      if (!selected.patternId || !knownPatternIds.has(selected.patternId)) continue;
+      const ids = decisionIdsByPattern.get(selected.patternId) ?? new Set<string>();
+      ids.add(decision.id);
+      decisionIdsByPattern.set(selected.patternId, ids);
     }
   }
   for (const [patternId, decisionIds] of decisionIdsByPattern) {
