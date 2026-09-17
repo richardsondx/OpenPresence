@@ -721,6 +721,12 @@ export async function generateAgentReply(state: OpenPresenceState, content: stri
     if (options?.operatorConversation) {
       const lower = content.toLowerCase().replace(/\s+/g, " ").trim();
       const speaker = options.presence?.publicSelf?.displayName ?? options.presence?.name ?? state.agent?.name ?? "your Agent";
+      if (options.operatorToolHistory?.some((item) => /record_preference/.test(item.result))) {
+        return "Got it. I’ll keep screenshots out unless their contents have been inspected and grounded.";
+      }
+      if (/\b(?:don't|do not|never)\b[^.?!]{0,120}\bscreenshots?\b/i.test(lower)) {
+        return JSON.stringify({ kind: "record_preference", note: "Do not use screenshots unless their contents have been inspected and grounded.", reasons: ["format"], scopeHint: "presence" });
+      }
       if (/\b(?:recent|recently|lately|update|what did you do|what have you done)\b/.test(lower)) {
         const latest = state.events[0];
         return latest ? `Recently I was focused on ${latest.title.toLowerCase()}. ${latest.detail}` : "I am here and ready for the next thing that catches our attention.";

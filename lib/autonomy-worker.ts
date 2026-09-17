@@ -658,7 +658,9 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
         operational: true,
       });
       if (wasCancelled()) return readStateSnapshotForContext({ presenceId: run.presenceId });
-      let step = isAiMockEnabled() ? { kind: "answer" as const, text: raw } : parseOperatorChatStep(raw);
+      let step = isAiMockEnabled() && !raw.trim().startsWith("{") && !raw.trim().startsWith("[")
+        ? { kind: "answer" as const, text: raw }
+        : parseOperatorChatStep(raw);
       // A clear outcome-ownership request must not degrade into ordinary
       // conversation just because a provider returned prose instead of the
       // structured assignment tool call. This fallback is deliberately

@@ -209,6 +209,13 @@ describe("Agent social decision parsing", () => {
     expect(howAreYou).not.toContain("posting plan");
   });
 
+  it("returns a typed preference step for an explicit supervisory correction", async () => {
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    const state = createAgent({ name: "Jenny", description: "Help founders think clearly.", mode: "agent", handle: "@jenny_preference", accent: "#D68754" });
+    const raw = await generateAgentReply(state, "Please don't use screenshots unless we have inspected and grounded them.", undefined, { operatorConversation: true, presence: state.presence! });
+    expect(JSON.parse(raw)).toEqual({ kind: "record_preference", note: "Do not use screenshots unless their contents have been inspected and grounded.", reasons: ["format"], scopeHint: "presence" });
+  });
+
   it("never enables deterministic AI output in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("OPENPRESENCE_TEST_MODE", "1");
