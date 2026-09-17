@@ -52,6 +52,9 @@ test.describe("Independent public causal-trace verifier", () => {
     await runCli(baseUrl, ["inject", "--actor", "Trace Author", "--handle", "@trace_author", "--action", "post", "--content", "A public event that must remain causally reconstructable.", "--session", sessionId]);
     await runCli(baseUrl, ["inject", "--actor", "Trace Break", "--handle", "@trace_break", "--action", "post", "--content", "Breaking evidence invalidates the previous plan; reassess it.", "--session", sessionId]);
     await runCli(baseUrl, ["advance", "--minutes", "1440", "--session", sessionId]);
+    await runCli(baseUrl, ["retry", "--operation", "independent-causal-retry", "--max-attempts", "2", "--initial-delay", "60", "--session", sessionId]);
+    await runCli(baseUrl, ["cancel-retry", "--operation", "independent-causal-retry", "--session", sessionId]);
+    await runCli(baseUrl, ["advance", "--minutes", "120", "--session", sessionId]);
 
     const state = asRecord(await (await request.get("/api/state")).json());
     const session = asRecords(state.playgroundSessions).find((item) => item.id === sessionId);
@@ -59,7 +62,7 @@ test.describe("Independent public causal-trace verifier", () => {
     const trace = asRecords(asRecord(session?.temporalSnapshot).trajectory);
     expect(trace.length).toBeGreaterThan(0);
 
-    const transitionKinds = new Set(["event_fired", "event_stale", "observation", "decision", "intent", "permission_decision", "execution", "result", "outcome", "learning", "replan", "retry_scheduled", "retry_attempted", "retry_failed", "retry_succeeded", "retry_exhausted"]);
+    const transitionKinds = new Set(["event_fired", "event_stale", "event_cancelled", "observation", "decision", "intent", "permission_decision", "execution", "result", "outcome", "learning", "replan", "retry_scheduled", "retry_attempted", "retry_failed", "retry_succeeded", "retry_exhausted", "outcome_cancelled"]);
     const parentTypes = new Set(["mirror_object", "sandbox_event", "social_intent", "execution", "outcome", "permission_decision", "temporal_event", "learning_update", "plan_mutation", "assignment"]);
     const traceIds = new Set<string>();
     const traceEventIds = new Set<string>();

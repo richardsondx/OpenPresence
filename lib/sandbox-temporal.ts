@@ -662,11 +662,11 @@ export class SandboxTemporalKernel {
       if (!sameLineage(event, id) || event.status !== "pending") continue;
       event.status = "cancelled";
       count += 1;
-      this.addTrajectory("event_cancelled", { reason }, event.id);
+      this.addTrajectory("event_cancelled", temporalCausalData({ reason }, [event.id]), event.id);
       const outcome = this.outcomesValue.find((item) => item.eventId === event.id && item.status === "scheduled");
       if (outcome) {
         outcome.status = "cancelled";
-        this.addTrajectory("outcome_cancelled", { outcomeId: outcome.id, reason }, event.id);
+        this.addTrajectory("outcome_cancelled", temporalCausalData({ outcomeId: outcome.id, reason }, [event.id]), event.id);
       }
     }
     return count;
