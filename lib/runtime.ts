@@ -3534,6 +3534,21 @@ export function setSandboxPaused(source: OpenPresenceState, sessionId: string, p
   return state;
 }
 
+/** Stage external world truth for release at a future virtual time. The value
+ * stays in the temporal kernel's deferred store and is never exposed to
+ * cognition or the public projection before the release event fires. */
+export function stageSandboxOutcome(source: OpenPresenceState, sessionId: string, causeEventId: string, visibleAfterMinutes: number, value: unknown) {
+  const state = cloneState(source);
+  const session = sandboxSessionFor(state, sessionId);
+  if (!Number.isInteger(visibleAfterMinutes) || visibleAfterMinutes < 0) throw new Error("Sandbox outcome release delay must be a non-negative integer number of minutes.");
+  const kernel = temporalKernelForSession(session);
+  kernel.scheduleDelayedOutcome({ causeEventId, offsetMs: visibleAfterMinutes * 60_000, value });
+  session.temporalSnapshot = kernel.snapshot();
+  session.virtualTimeMode = "manual";
+  session.updatedAt = now();
+  return state;
+}
+
 export function syncPlaygroundTime(source: OpenPresenceState, sessionId: string) {
   const state = cloneState(source);
   const session = sandboxSessionFor(state, sessionId);

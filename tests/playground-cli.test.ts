@@ -64,14 +64,17 @@ describe("Playground CLI", () => {
     const rate = await runCli(server.url, ["rate", "--session", "session-1", "--factor", "24"]);
     const pause = await runCli(server.url, ["pause", "--session", "session-1"]);
     const resume = await runCli(server.url, ["resume", "--session", "session-1"]);
+    const staged = await runCli(server.url, ["stage-outcome", "--session", "session-1", "--cause-event", "cause-1", "--visible-after", "15", "--value-json", '{"score":7}']);
     await server.close();
     expect(rate.code).toBe(0);
     expect(pause.code).toBe(0);
     expect(resume.code).toBe(0);
+    expect(staged.code).toBe(0);
     expect(operations).toEqual([
       expect.objectContaining({ type: "setSandboxAcceleration", sessionId: "session-1", factor: 24 }),
       expect.objectContaining({ type: "setSandboxPaused", sessionId: "session-1", paused: true }),
       expect.objectContaining({ type: "setSandboxPaused", sessionId: "session-1", paused: false }),
+      expect.objectContaining({ type: "stageSandboxOutcome", sessionId: "session-1", causeEventId: "cause-1", visibleAfterMinutes: 15, value: { score: 7 } }),
     ]);
   });
 

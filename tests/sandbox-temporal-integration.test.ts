@@ -6,6 +6,7 @@ import {
   resetPlaygroundSession,
   setSandboxAcceleration,
   setSandboxPaused,
+  stageSandboxOutcome,
   startPlaygroundSession,
 } from "../lib/runtime";
 import { SandboxTemporalKernel } from "../lib/sandbox-temporal";
@@ -33,6 +34,21 @@ describe("Playground temporal integration boundary", () => {
     state = setSandboxPaused(state, session.id, false);
     expect(state.playgroundSessions[0]!.status).toBe("active");
     expect(state.playgroundSessions[0]!.temporalSnapshot?.paused).toBe(false);
+  });
+
+  it("stages outcome truth without exposing it before virtual release", () => {
+    let state = startPlaygroundSession(fixtureState());
+    const session = state.playgroundSessions[0]!;
+    const kernel = SandboxTemporalKernel.fromSnapshot(session.temporalSnapshot!);
+    const cause = kernel.scheduleEvent({ id: "integration:outcome-cause", offsetMs: 60_000, type: "measurement_due" });
+    state = { ...state, playgroundSessions: state.playgroundSessions.map((item) => item.id === session.id ? { ...item, temporalSnapshot: kernel.snapshot() } : item) };
+    state = stageSandboxOutcome(state, session.id, cause.id, 2, { qualifiedFollowers: 7, hidden: "until-release" });
+    const staged = state.playgroundSessions[0]!.temporalSnapshot!;
+    expect(staged.outcomes).toEqual([expect.objectContaining({ status: "scheduled", causeEventId: cause.id })]);
+    expect(staged.deferredOutcomeValues).toMatchObject({});
+    const advanced = advanceSandboxTimeWithTemporalEvents(state, session.id, 3);
+    expect(advanced.state.playgroundSessions[0]!.temporalSnapshot?.outcomes[0]).toMatchObject({ status: "recorded" });
+    expect(advanced.state.playgroundSessions[0]!.temporalSnapshot?.trajectory.some((item) => item.kind === "outcome_recorded")).toBe(true);
   });
 
   it("round-trips a queued event and trajectory through the persisted session shape", () => {

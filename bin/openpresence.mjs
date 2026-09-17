@@ -25,6 +25,7 @@ Playground commands:
   rate        Set the Sandbox acceleration factor for explicit tick controls
   pause       Pause Sandbox virtual-time processing
   resume      Resume Sandbox virtual-time processing
+  stage-outcome  Stage hidden world truth for later virtual-time release
   schedule    Add a Calendar Standing Intent used by later Playground time advances
   timeline    Return the session's auditable event/intent/execution timeline
   rehearse    Consider an original publication and record the result
@@ -53,6 +54,9 @@ Common options:
   --presence <id>      Presence id when starting a session
   --seed <value>       Deterministic scenario seed recorded in the Sandbox session
   --factor <number>     Positive Sandbox acceleration factor (for rate)
+  --cause-event <id>    Temporal cause event for stage-outcome
+  --visible-after <n>   Minutes until staged outcome is observable
+  --value-json <json>   JSON value held until staged outcome release
   --responsibility <mode>  Schedule mode: consider (default) or assign
   --id <id>            Existing Watch, Assignment, Calendar, or rehearsal id
   --reasons <list>     Comma-separated preference reasons for feedback
@@ -655,6 +659,14 @@ async function executePlayground(baseUrl, command, options, positionals) {
       return projectState(await postOperation(baseUrl, { type: "setSandboxAcceleration", sessionId: session.id, factor }), session.id, command);
     }
     return projectState(await postOperation(baseUrl, { type: "setSandboxPaused", sessionId: session.id, paused: command === "pause" }), session.id, command);
+  }
+  if (command === "stage-outcome") {
+    const current = await getState(baseUrl);
+    const session = sessionForOperation(current, options);
+    const causeEventId = required(options, "cause-event");
+    const visibleAfterMinutes = parseInteger(options["visible-after"] ?? positionals[0], "visible-after");
+    const value = typeof options["value-json"] === "string" ? parseJsonOption(options["value-json"], "value-json") : undefined;
+    return projectState(await postOperation(baseUrl, { type: "stageSandboxOutcome", sessionId: session.id, causeEventId, visibleAfterMinutes, value }), session.id, command);
   }
   if (command === "schedule") {
     const current = await getState(baseUrl);
