@@ -228,9 +228,40 @@ describe("Sandbox and Playground boundaries", () => {
     state = startPlaygroundSession(state);
     const session = state.playgroundSessions[0]!;
     const presenceId = session.presenceId;
+    const fixtureNow = new Date().toISOString();
+    const mediaAsset = (id: string, name: string, semanticKind: "chart" | "photo", visualRole: "evidence" | "atmosphere", decorative: boolean) => ({
+      id,
+      agentId: state.agent!.id,
+      presenceId,
+      type: "image" as const,
+      semanticKind,
+      status: "ready" as const,
+      dataUrl: "data:image/png;base64,fixture",
+      retention: "preserved" as const,
+      rights: { status: "owned" as const },
+      provenance: { origin: "sandbox", importedAt: fixtureNow },
+      perception: { observation: decorative ? "A generic decorative photo is visible." : "A legible evidence chart is visible.", likelyMeaning: decorative ? "It does not support the claim." : "It directly supports the claim.", uncertainty: ["low"] },
+      description: name,
+      visibility: "public" as const,
+      shareability: "presence-only" as const,
+      environment: "sandbox" as const,
+      createdAt: fixtureNow,
+      updatedAt: fixtureNow,
+    });
+    state.assets.unshift(mediaAsset("learning-relevant-chart", "Relevant evidence chart", "chart", "evidence", false), mediaAsset("learning-irrelevant-photo", "Irrelevant decorative photo", "photo", "atmosphere", true));
+    state.perceptions.unshift(
+      { id: "learning-relevant-perception", assetId: "learning-relevant-chart", presenceId, level: "inspect", result: { observation: "A legible evidence chart is visible.", uncertainty: "low", visualForm: "chart", visualRole: "evidence", decorative: false }, sourceAssetVersion: fixtureNow, createdAt: fixtureNow, environment: "sandbox", sessionId: session.id },
+      { id: "learning-irrelevant-perception", assetId: "learning-irrelevant-photo", presenceId, level: "inspect", result: { observation: "A generic decorative photo is visible.", uncertainty: "low", visualForm: "photo", visualRole: "atmosphere", decorative: true }, sourceAssetVersion: fixtureNow, createdAt: fixtureNow, environment: "sandbox", sessionId: session.id },
+    );
     const executions = [] as OpenPresenceState["executions"];
-    for (const text of ["A measured proof point for builders.", "A second measured proof point for builders."]) {
-      state = formSandboxIntent(state, { sessionId: session.id, affordance: "post", text });
+    const variants = [
+      { text: "A measured proof point with a relevant chart.", assetId: "learning-relevant-chart" },
+      { text: "A measured proof point with an irrelevant photo.", assetId: "learning-irrelevant-photo" },
+      { text: "A measured proof point that stands without media." },
+    ];
+    for (const variant of variants) {
+      state = formSandboxIntent(state, { sessionId: session.id, affordance: "post", text: variant.text, ...(variant.assetId ? { assets: [{ name: variant.assetId, kind: "image", existingAssetId: variant.assetId }] } : {}) });
+      expect(state.executions[0], `Sandbox media variant was not executable: ${JSON.stringify({ variant, intents: state.socialIntents.slice(0, 2), events: state.events.slice(0, 2) })}`).toBeDefined();
       const execution = state.executions[0]!;
       state = deliverSandboxExecution(state, execution.id);
       executions.push(state.executions.find((item) => item.id === execution.id)!);
@@ -242,16 +273,22 @@ describe("Sandbox and Playground boundaries", () => {
       decision.socialStrategy = { ...(decision.socialStrategy ?? { retrievalRunId: "runtime-test", consideredPatternIds: ["social.x.v1.proof-led-original"] }), selectedByAct: [{ act: "original_post", patternId: "social.x.v1.proof-led-original", mechanismId: "proof-led original" }] };
     }
     const mirrors = state.mirrorObjects.filter((item) => item.sessionId === session.id && item.actorPresenceId === state.presence?.id);
-    expect(mirrors).toHaveLength(2);
+    expect(mirrors).toHaveLength(3);
     state = recordPublicationMetricSnapshots(state, mirrors.map((mirror, index) => ({ type: "recordPublicationMetricSnapshot" as const, presenceId, mirrorObjectId: mirror.id, publicationAgeSeconds: 60 * 60, metrics: { impressions: index === 0 ? 100 : 240, likes: index === 0 ? 4 : 15 }, source: "sandbox" as const })));
     const metricEvidence = state.growthEvidenceRecords?.filter((record) => record.sourceRefs.some((source) => source.kind === "publication_metric"));
-    expect(metricEvidence).toHaveLength(2);
+    expect(metricEvidence).toHaveLength(3);
     expect(metricEvidence?.every((record) => record.sandboxSessionId === session.id && record.causalDecisionIds?.length === 1)).toBe(true);
-    expect(state.growthHypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ sandboxSessionId: session.id, status: "supported", decisionTargets: [expect.objectContaining({ strategyId: "social.x.v1.proof-led-original" })] })]));
+    const hypothesis = state.growthHypotheses?.find((item) => item.sandboxSessionId === session.id && item.patternIds.includes("social.x.v1.proof-led-original"));
+    expect(hypothesis).toEqual(expect.objectContaining({ sandboxSessionId: session.id, status: "supported", decisionTargets: [expect.objectContaining({ strategyId: "social.x.v1.proof-led-original" })] }));
+    expect(hypothesis?.mediaProfiles).toEqual(expect.arrayContaining([
+      expect.objectContaining({ mode: "media", fit: "relevant", relationship: "proof", semanticKind: "chart" }),
+      expect.objectContaining({ mode: "media", fit: "irrelevant", relationship: "decorative", semanticKind: "photo" }),
+      expect.objectContaining({ mode: "text_only", fit: "unknown", relationship: "unknown" }),
+    ]));
 
     writeState(state);
     const reopened = readStateSnapshot();
-    expect(reopened.growthEvidenceRecords?.filter((record) => record.sourceRefs.some((source) => source.kind === "publication_metric"))).toHaveLength(2);
+    expect(reopened.growthEvidenceRecords?.filter((record) => record.sourceRefs.some((source) => source.kind === "publication_metric"))).toHaveLength(3);
     expect(reopened.growthEvidenceRecords?.filter((record) => record.sourceRefs.some((source) => source.kind === "publication_metric")).every((record) => record.sandboxSessionId === session.id && record.verified && record.causalDecisionIds?.length === 1)).toBe(true);
     expect(reopened.growthHypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ sandboxSessionId: session.id, status: "supported" })]));
   });
