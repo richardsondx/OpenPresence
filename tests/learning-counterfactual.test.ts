@@ -12,6 +12,7 @@ import { compileSocialStrategyContext, materializeSandboxOutcomeLearning, reconc
 import { learningAdjustmentForPattern } from "../lib/learning-runtime";
 import { captureLearningCheckpoint, learningStateForPresence } from "../lib/learning-runtime";
 import { captureSandboxWorld, restoreSandboxWorld, sandboxWorldDigest } from "../lib/sandbox-replay";
+import { generateAgentSocialDecision } from "../lib/ai";
 
 afterEach(() => {
   writeState(initialState());
@@ -55,6 +56,20 @@ const altered = {
 };
 
 describe("pure learning counterfactual", () => {
+  it("preserves mock public strategy attribution when a supplied pattern fits", async () => {
+    const previousMock = process.env.OPENPRESENCE_AI_MOCK;
+    process.env.OPENPRESENCE_AI_MOCK = "1";
+    try {
+    const state = startPlaygroundSession(createAgent({ name: "Mock attribution", description: "Preserve public learning attribution.", audience: "AI builders", mode: "agent", handle: "@mock_attribution", accent: "#7c3aed" }));
+    const presence = state.presence!;
+    const decision = await generateAgentSocialDecision(state, "Evaluate the current simulated X world and choose the smallest useful action for the unjudged post about a benchmark release.", ["reply", "repost", "quote", "like", "follow", "no_op"], { presence, operational: true, presenceId: presence.id, strategyContext: compileSocialStrategyContext(state, presence, { invocation: "public Sandbox verifier", objective: "benchmark release", availableActions: ["reply", "repost", "quote", "like", "follow"] }) });
+    expect(decision.acts?.[0]).toEqual(expect.objectContaining({ strategyId: expect.any(String), mechanismId: expect.any(String) }));
+    } finally {
+      if (previousMock === undefined) delete process.env.OPENPRESENCE_AI_MOCK;
+      else process.env.OPENPRESENCE_AI_MOCK = previousMock;
+    }
+  });
+
   it("materializes cautious session-scoped learning from two attributed Sandbox outcomes", () => {
     const state = startPlaygroundSession(createAgent({ name: "Runtime learning", description: "Learn from verified Sandbox outcomes.", audience: "AI builders", mode: "agent", handle: "@runtime_learning", accent: "#7c3aed" }));
     const presence = state.presence!;

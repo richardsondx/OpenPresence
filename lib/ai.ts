@@ -12,7 +12,7 @@ import { retrievePublicSafeAutobiographicalContext } from "./autobiographical-me
 import { compileSocialStrategyContext, strategyUseFromDecision } from "./social-strategy";
 import { ensurePlayfulToneEmoji, socialReplyQualityIssue } from "./social-quality";
 import { formatSupervisoryChatState, projectSupervisoryChatState } from "./supervisory-chat";
-import type { AssetSemanticKind, Assignment, Conversation, ConversationDisposition, EvidenceNeed, FileKind, GrowthReviewDecision, GrowthReviewKind, KnowledgeContextPacket, KnowledgeEvidence, ModelProvider, OpenPresenceState, OperatorConversationMessage, PlaygroundStimulusResult, PlaygroundStimulusTarget, Presence, PresenceBrief, PresenceChatMessage, PublishingPlanDraft, ResourceUsageEvent, SocialAssetKind, StoryCandidate, VisualBrief, VisualNeed } from "./types";
+import type { AssetSemanticKind, Assignment, Conversation, ConversationDisposition, EvidenceNeed, FileKind, GrowthReviewDecision, GrowthReviewKind, KnowledgeContextPacket, KnowledgeEvidence, ModelProvider, OpenPresenceState, OperatorConversationMessage, PlaygroundStimulusResult, PlaygroundStimulusTarget, Presence, PresenceBrief, PresenceChatMessage, PublishingPlanDraft, ResourceUsageEvent, SocialAssetKind, SocialStrategyPattern, StoryCandidate, VisualBrief, VisualNeed } from "./types";
 
 const REQUEST_TIMEOUT_MS = 60_000;
 const OLLAMA_CATALOG_CACHE_MS = 15_000;
@@ -1707,8 +1707,18 @@ export async function generateAgentSocialDecision(state: OpenPresenceState, inst
   if (isAiMockEnabled()) {
     const mock = mockSocialDecision(state, [instruction, strategyContext?.prompt].filter(Boolean).join("\n\n"), actions);
     const mockActs = mock.acts ?? (mock.action === "no_op" ? [] : [{ action: mock.action, text: mock.text, rationale: mock.rationale }]);
+    // The deterministic provider still exercises the same learning contract
+    // as a real model: when the compiled public strategy context contains a
+    // compatible pattern, preserve the selected pattern on the act. Without
+    // this attribution, public Sandbox outcomes can be measured but can never
+    // become attributable learning, making the test-mode public path weaker
+    // than the runtime it is meant to certify.
     const strategyActs = mockActs.map((act) => {
-      return act;
+      if (act.action === "no_op" || act.strategyId || act.noStrategyReason) return act;
+      const pattern = strategyContext?.retrievalRun.consideredPatterns.find((candidate) => candidate.supportedActs.includes(act.action as SocialStrategyPattern["supportedActs"][number]));
+      return pattern
+        ? { ...act, strategyId: pattern.id, mechanismId: pattern.mechanism }
+        : { ...act, noStrategyReason: "No supplied strategy pattern matched this act." };
     });
     return {
       ...mock,
