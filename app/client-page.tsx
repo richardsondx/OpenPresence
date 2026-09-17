@@ -1812,6 +1812,31 @@ function AgentPortfolio({
 
 type InspectorPanel = "today" | "needs_you" | "settings";
 
+const activityLineageKeys = ["runId", "executionId", "invocationId", "attentionEpisodeId", "sourceTemporalEventId", "intentId", "decisionId", "outcomeId", "sessionId", "sourceObjectId"] as const;
+
+type ActivityTimelinePhase = "started" | "step" | "tool" | "completed";
+
+function activityTimelinePhase(event: LiveEvent): ActivityTimelinePhase {
+  const title = event.title.toLocaleLowerCase();
+  if (/\b(start|started|begin|began|queued|requested|resumed|woke|joined)\b/.test(title)) return "started";
+  if (/\b(complet|deliver|verif|publish|finish|succeed|restored|closed|settled)\w*\b/.test(title)) return "completed";
+  if (/\b(search|read|load|call|list|create|update|inspect|check|fetch|query|download|generate)\w*\b/.test(title)) return "tool";
+  return "step";
+}
+
+function activityTimelineLabel(phase: ActivityTimelinePhase) {
+  return phase === "started" ? "Started" : phase === "completed" ? "Completed" : phase === "tool" ? "Tool call" : "Step";
+}
+
+function relatedActivityEvents(events: LiveEvent[], selectedEvent: LiveEvent) {
+  const links = activityLineageKeys
+    .map((key) => [key, selectedEvent[key]] as const)
+    .filter((entry): entry is readonly [typeof activityLineageKeys[number], string] => Boolean(entry[1]));
+  return events
+    .filter((candidate) => candidate.id === selectedEvent.id || links.some(([key, value]) => candidate[key] === value))
+    .sort((left, right) => left.time.localeCompare(right.time));
+}
+
 function ContextInspector({ panel, state, presence, onClose, onPanelChange, onNavigate }: {
   panel: InspectorPanel;
   state: OpenPresenceState;
@@ -1836,17 +1861,7 @@ function ContextInspector({ panel, state, presence, onClose, onPanelChange, onNa
   const todayEvents = state.events
     .filter((event) => event.presenceId === presence.id && new Date(event.time).toLocaleDateString("en-CA") === todayKey)
     .sort((left, right) => right.time.localeCompare(left.time));
-  const eventDetails = selectedEvent
-    ? state.events
-      .filter((event) => {
-        if (event.id === selectedEvent.id) return true;
-        if (selectedEvent.runId && event.runId === selectedEvent.runId) return true;
-        if (selectedEvent.executionId && event.executionId === selectedEvent.executionId) return true;
-        if (selectedEvent.invocationId && event.invocationId === selectedEvent.invocationId) return true;
-        return false;
-      })
-      .sort((left, right) => left.time.localeCompare(right.time))
-    : [];
+  const eventDetails = selectedEvent ? relatedActivityEvents(state.events, selectedEvent) : [];
   const taskRow = (task: Assignment, label: string) => <button type="button" className="inspector-list-row" key={task.id} onClick={() => onNavigate("schedule", task.id)}><span className={`inspector-status-dot ${label === "Working" ? "is-live" : "is-warn"}`} /><span><strong>{task.title ?? task.instruction}</strong><small>{label}</small></span><ChevronRight size={16} /></button>;
   return <>
   <aside ref={inspectorRef} className="workspace-context-inspector agent-activity-inspector" aria-label={`${panel === "settings" ? "About" : panel === "needs_you" ? "Needs you" : "Today"} inspector`}>
@@ -1876,21 +1891,44 @@ function ContextInspector({ panel, state, presence, onClose, onPanelChange, onNa
       <div className="inspector-shortcuts"><button onClick={() => onNavigate("brain")}><Settings2 size={18} /> Agent settings <ChevronRight size={16} /></button><button onClick={() => onNavigate("knowledge")}><BookOpen size={18} /> Knowledge <ChevronRight size={16} /></button><button onClick={() => onNavigate("rehearsal")}><FlaskConical size={18} /> Test agent <ChevronRight size={16} /></button><button onClick={() => onNavigate("usage")}><BarChart3 size={18} /> Usage <ChevronRight size={16} /></button></div>
     </>}
   </aside>
-  {selectedEvent && <AgentActivityDetailDialog agentName={agent.name} event={selectedEvent} details={eventDetails} onClose={() => setSelectedEvent(null)} />}
+  {selectedEvent && <AgentActivityDetailDialog key={selectedEvent.id} agentName={agent.name} event={selectedEvent} details={eventDetails} onClose={() => setSelectedEvent(null)} />}
   </>;
 }
 
 function AgentActivityDetailDialog({ agentName, event, details, onClose }: { agentName: string; event: LiveEvent; details: LiveEvent[]; onClose: () => void }) {
+  const [expandedStepId, setExpandedStepId] = useState(event.id);
   useEffect(() => {
     const onKeyDown = (keyEvent: KeyboardEvent) => { if (keyEvent.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
+  const hasCompletion = details.some((item) => activityTimelinePhase(item) === "completed");
+  const hasStart = details.some((item) => activityTimelinePhase(item) === "started");
+  const statusLabel = hasCompletion ? "Completed" : hasStart ? "In progress" : "Recorded activity";
   return <div className="modal-backdrop agent-activity-detail-backdrop" role="presentation" onMouseDown={(mouseEvent) => { if (mouseEvent.target === mouseEvent.currentTarget) onClose(); }}>
     <section className="agent-activity-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-activity-detail-title">
-      <header><div><span className="inspector-detail-status">Recorded activity</span><h2 id="agent-activity-detail-title">{event.title}</h2><p>{agentName} · {formatDateTime(event.time)}</p></div><button type="button" className="icon-button" aria-label="Close activity details" onClick={onClose}><X size={18} /></button></header>
+      <header><div><span className="inspector-detail-status">{statusLabel}</span><h2 id="agent-activity-detail-title">{event.title}</h2><p>{agentName} · {formatDateTime(event.time)}</p></div><button type="button" className="icon-button" aria-label="Close activity details" onClick={onClose}><X size={18} /></button></header>
       <section className="agent-activity-detail-summary"><span className="inspector-event-icon inspector-event-icon-system"><Terminal size={16} /></span><div><strong>Summary</strong><p>{event.detail || "No additional summary was recorded."}</p></div></section>
-      <div className="agent-activity-detail-timeline" aria-label="Activity evidence"><strong>Evidence</strong>{details.map((item) => <div className="agent-activity-detail-row" key={item.id}><span className={`inspector-event-icon inspector-event-icon-${item.type}`} aria-hidden="true"><Circle size={8} /></span><div><strong>{item.title}</strong><p>{item.detail}</p><time dateTime={item.time}>{formatDateTime(item.time)}</time></div></div>)}</div>
+      <div className="agent-activity-detail-timeline" aria-label="Activity timeline"><strong>Run timeline</strong><p className="agent-activity-detail-hint">Select a step to see what happened and any recorded context.</p>{details.map((item, index) => {
+        const phase = activityTimelinePhase(item);
+        const expanded = expandedStepId === item.id;
+        const technicalContext = activityLineageKeys
+          .map((key) => [key, item[key]] as const)
+          .filter((entry): entry is readonly [typeof activityLineageKeys[number], string] => Boolean(entry[1]));
+        const icon = phase === "started" ? <Play size={13} /> : phase === "completed" ? <Check size={14} /> : phase === "tool" ? <Terminal size={13} /> : <Circle size={9} />;
+        return <div className={`agent-activity-detail-step is-${phase}${expanded ? " is-expanded" : ""}`} key={item.id}>
+          <span className="agent-activity-detail-rail" aria-hidden="true"><span className="agent-activity-detail-marker">{icon}</span>{index < details.length - 1 && <span className="agent-activity-detail-line" />}</span>
+          <div className="agent-activity-detail-step-content">
+            <button type="button" className="agent-activity-detail-step-button" aria-expanded={expanded} aria-controls={`activity-step-${item.id}`} onClick={() => setExpandedStepId(expanded ? "" : item.id)}>
+              <span><small>{activityTimelineLabel(phase)}</small><strong>{item.title}</strong><time dateTime={item.time}>{formatDateTime(item.time)}</time></span><ChevronDown size={15} aria-hidden="true" />
+            </button>
+            {expanded && <div className="agent-activity-detail-step-output" id={`activity-step-${item.id}`}>
+              <div><strong>{phase === "completed" ? "Outcome" : phase === "tool" ? "What this checked" : "What happened"}</strong><p>{item.detail || "No additional context was recorded."}</p></div>
+              {technicalContext.length > 0 && <details><summary>Technical context</summary><dl>{technicalContext.map(([key, value]) => <div key={key}><dt>{key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase())}</dt><dd>{value}</dd></div>)}</dl></details>}
+            </div>}
+          </div>
+        </div>;
+      })}</div>
     </section>
   </div>;
 }

@@ -16,8 +16,10 @@ test("Agent inspector shows today's work, opens evidence, and keeps Needs you se
     const response = await route.fetch();
     const body = await response.json();
     body.events = [
-      { id: "today-run", type: "execution", title: "Reviewed the morning feed", detail: "Inspected 4 new posts and chose one useful next step.", time: now, tone: "positive", presenceId, runId: "run-today" },
-      { id: "today-tool", type: "system", title: "Searched the connected channel", detail: "Loaded the latest feed for the current attention pass.", time: now, tone: "neutral", presenceId, runId: "run-today" },
+      { id: "today-completed", type: "system", title: "Attention pass completed", detail: "Inspected 4 new posts and chose one useful next step.", time: new Date(Date.parse(now) + 3_000).toISOString(), tone: "positive", presenceId, runId: "run-today" },
+      { id: "today-run", type: "execution", title: "Reviewed the morning feed", detail: "Inspected 4 new posts and chose one useful next step.", time: new Date(Date.parse(now) + 2_000).toISOString(), tone: "positive", presenceId, runId: "run-today" },
+      { id: "today-tool", type: "system", title: "Searched the connected channel", detail: "Loaded the latest feed for the current attention pass.", time: new Date(Date.parse(now) + 1_000).toISOString(), tone: "neutral", presenceId, runId: "run-today", invocationId: "invocation-today" },
+      { id: "today-started", type: "system", title: "Attention pass started", detail: "The Agent began a bounded review of the connected feed.", time: now, tone: "positive", presenceId, runId: "run-today" },
     ];
     await route.fulfill({ response, json: body });
   });
@@ -37,6 +39,11 @@ test("Agent inspector shows today's work, opens evidence, and keeps Needs you se
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("Summary", { exact: true })).toBeVisible();
   await expect(dialog.getByText("Searched the connected channel", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Started Attention pass started/ })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Completed Attention pass completed/ })).toBeVisible();
+  await dialog.getByRole("button", { name: /Searched the connected channel/ }).click();
+  await expect(dialog.getByText("What this checked", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Technical context", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Close activity details" }).click();
   await expect(dialog).toHaveCount(0);
 
