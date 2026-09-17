@@ -123,6 +123,7 @@ import {
   targetIsBlockedByPerson,
   unblockNativeExecutions,
   defaultSelfDirectedAttentionPolicy,
+  inferGrowthContextAnswer,
   syncPublishingInitiativeAssignment,
   applyOperation,
 } from "./runtime";
@@ -210,6 +211,23 @@ function missingGrowthContextQuestion(state: OpenPresenceState, message: string,
   // strategy, plan, and execution choices to the Agent once that context is
   // supplied. This is a durable onboarding boundary, not a task prompt.
   return "I can take that on. Before I choose the direction, who are we trying to reach and what should this account be known for?";
+}
+
+function applyGrowthContextAnswer(state: OpenPresenceState, conversation: import("./types").OperatorConversation, operatorMessage: import("./types").OperatorConversationMessage) {
+  const ordered = orderedOperatorChatMessages(conversation.messages);
+  const index = ordered.findIndex((item) => item.id === operatorMessage.id);
+  const previous = index > 0 ? ordered[index - 1] : undefined;
+  if (!previous || previous.role !== "presence" || !/who are we trying to reach[\s\S]*known for/i.test(previous.content)) return state;
+  const presence = state.presences.find((item) => item.id === operatorMessage.presenceId) ?? state.presence;
+  if (!presence) return state;
+  const brief = inferGrowthContextAnswer(operatorMessage.content, presence.brief);
+  if (!brief || JSON.stringify(brief) === JSON.stringify(presence.brief)) return state;
+  let next = applyOperation(state, { type: "setPresence", patch: { brief } });
+  // The answer supplies context; the Agent immediately owns the resulting
+  // responsibility. Reuse the canonical executable Publishing Initiative so
+  // Chat never becomes a user-facing task-entry or activation workflow.
+  next = syncPublishingInitiativeAssignment(next, presence.id);
+  return next;
 }
 
 /**
@@ -590,7 +608,7 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
   ) ?? base.operatorConversations?.find((item) => item.presenceId === run.presenceId);
   const messageIndex = messageId ? conversation?.messages.findIndex((item) => item.id === messageId) ?? -1 : -1;
   const operatorMessage = messageIndex >= 0 ? conversation?.messages[messageIndex] : undefined;
-  const presence = base.presences.find((item) => item.id === run.presenceId) ?? base.presence;
+  let presence = base.presences.find((item) => item.id === run.presenceId) ?? base.presence;
   if (!conversation || !operatorMessage || operatorMessage.role !== "operator" || !presence) {
     run.state = "failed";
     run.stage = "operator_chat.missing_message";
@@ -637,6 +655,8 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
     if (wasCancelled()) return readStateSnapshotForContext({ presenceId: run.presenceId });
     const knowledge = compileKnowledgeContext(base, { presenceId: run.presenceId, query: operatorMessage.content, purpose: "operator_chat" });
     next = knowledge.state;
+    next = applyGrowthContextAnswer(next, conversation, operatorMessage);
+    presence = next.presences.find((item) => item.id === run.presenceId) ?? next.presence ?? presence;
     const strategy = compileSocialStrategyContext(next, presence, { invocation: "operator_chat", objective: operatorMessage.content, availableActions: ["original_post", "reply", "quote", "like", "repost", "follow"] });
     next.socialStrategyRetrievalRuns = [strategy.retrievalRun, ...(next.socialStrategyRetrievalRuns ?? [])].slice(0, 200);
     // Every tool result is persisted on this exact turn. Restarting after a

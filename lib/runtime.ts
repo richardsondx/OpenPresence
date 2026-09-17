@@ -5211,6 +5211,27 @@ function inferPresenceBriefChange(content: string, current: PresenceBrief): { br
   return undefined;
 }
 
+/**
+ * Extract the minimum durable growth context from an answer to the Agent's
+ * onboarding question. The caller must prove that the immediately preceding
+ * Agent turn asked for this context.
+ */
+export function inferGrowthContextAnswer(content: string, current: PresenceBrief): PresenceBrief | undefined {
+  const clean = (value: string) => value.trim().replace(/[.!?]+$/, "").trim();
+  const normalized = content.trim();
+  if (normalized.length < 8 || /\?$/.test(normalized)) return undefined;
+  const audience = normalized.match(/\b(?:we\s+(?:want|aim|plan)(?:\s+to\s+reach)?|(?:our|the)\s+audience\s+is|(?:we\s+)?(?:target|serve|reach))\s+(.+?)(?=,?\s+(?:and\s+)?(?:we\s+should\s+)?(?:be\s+)?known\s+for\b|[.;]|$)/i)?.[1];
+  const territory = normalized.match(/\b(?:be\s+)?known\s+for\s+(.+?)(?:[.;]|$)/i)?.[1]
+    ?? normalized.match(/\b(?:focus|focused)\s+on\s+(.+?)(?:[.;]|$)/i)?.[1];
+  if (!audience && !territory) return undefined;
+  const cleanedTerritory = territory ? clean(territory) : undefined;
+  return {
+    ...current,
+    ...(audience ? { audience: clean(audience) } : {}),
+    ...(cleanedTerritory ? { primaryTerritory: [cleanedTerritory, ...current.primaryTerritory.filter((item) => item.toLowerCase() !== cleanedTerritory.toLowerCase())].slice(0, 8) } : {}),
+  };
+}
+
 function cleanTeachContext(value: string) {
   return value
     .trim()

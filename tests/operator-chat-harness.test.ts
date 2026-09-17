@@ -59,6 +59,24 @@ describe("private operator Chat harness", () => {
     expect(getOperationalRun(run.id)?.state).toBe("succeeded");
   });
 
+  it("persists the onboarding answer and starts Agent-owned executable planning", async () => {
+    const original = fixture("Grow my account toward 100,000 followers.");
+    const firstRun = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(firstRun.id);
+    let saved = readStateSnapshotForContext({ presenceId: original.presenceId });
+    const followUp = recordOperatorConversationMessage(saved, { presenceId: original.presenceId, content: "We want founders building AI products, and we should be known for practical agent architecture.", clientRequestId: "growth-context-answer" });
+    writeState(followUp, { force: true });
+    const answer = followUp.operatorConversations!.flatMap((item) => item.messages).find((item) => item.clientRequestId === "growth-context-answer")!;
+    vi.stubGlobal("fetch", vi.fn(async () => modelResponse({ kind: "answer", text: "Got it. I’m using that direction to shape the plan." })));
+    const secondRun = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: answer.id } }).run;
+    await executeAutonomyRun(secondRun.id);
+    saved = readStateSnapshotForContext({ presenceId: original.presenceId });
+    expect(saved.presence?.brief.audience).toBe("founders building AI products");
+    expect(saved.presence?.brief.primaryTerritory[0]).toBe("practical agent architecture");
+    expect(saved.assignments).toEqual([expect.objectContaining({ createdBy: "agent", status: "active", activation: { type: "continuous" } })]);
+    expect(saved.operatorConversations!.flatMap((item) => item.messages)).toContainEqual(expect.objectContaining({ role: "presence", replyToMessageId: answer.id, content: "Got it. I’m using that direction to shape the plan." }));
+  });
+
   it("continues a promise-only answer into actual research before completing, and persists choices", async () => {
     const original = fixture("Find a current startup participation format and draft two options. Do not publish.");
     const steps = [
