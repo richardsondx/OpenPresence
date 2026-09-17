@@ -887,7 +887,7 @@ export function reconcileSandboxPerformanceLearning(source: OpenPresenceState, p
     if (samples.length >= 2) averages.set(patternId, samples.reduce((sum, sample) => sum + sample.signal, 0) / samples.length);
   }
   for (const hypothesis of state.growthHypotheses ?? []) {
-    if (hypothesis.sandboxSessionId !== sessionId || hypothesis.originatingPresenceId !== presenceId || !["supported", "weakened"].includes(hypothesis.status)) continue;
+    if (hypothesis.sandboxSessionId !== sessionId || hypothesis.originatingPresenceId !== presenceId || !["supported", "weakened", "disfavored"].includes(hypothesis.status)) continue;
     const patternId = hypothesis.decisionTargets?.find((target) => target.strategyId)?.strategyId ?? hypothesis.patternIds[0];
     const ownAverage = patternId ? averages.get(patternId) : undefined;
     if (ownAverage === undefined) continue;
@@ -899,7 +899,11 @@ export function reconcileSandboxPerformanceLearning(source: OpenPresenceState, p
     hypothesis.contradictingEvidenceIds = [...new Set([...hypothesis.contradictingEvidenceIds, ...newContradictions])];
     hypothesis.confidence = "low";
     const contradictingDecisions = new Set(hypothesis.contradictingEvidenceIds.flatMap((evidenceId) => (state.growthEvidenceRecords ?? []).find((record) => record.id === evidenceId)?.causalDecisionIds ?? []));
-    const nextStatus = contradictingDecisions.size >= 3 ? "disfavored" as const : "weakened" as const;
+    const nextStatus = contradictingDecisions.size >= 4
+      ? "retired" as const
+      : contradictingDecisions.size >= 3
+        ? "disfavored" as const
+        : "weakened" as const;
     hypothesis.status = nextStatus;
     hypothesis.updatedAt = observedAt;
     hypothesis.reviewHistory = [...hypothesis.reviewHistory, { reviewId: `sandbox-performance:${sessionId}:${patternId}:${hypothesis.contradictingEvidenceIds.length}`, status: nextStatus, at: observedAt }];

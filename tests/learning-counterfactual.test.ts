@@ -123,6 +123,32 @@ describe("pure learning counterfactual", () => {
     expect(learningStateForPresence(state, presence, session.id).hypotheses).toHaveLength(0);
   });
 
+  it("retires a Sandbox hypothesis after repeated measured contradictions", () => {
+    const state = startPlaygroundSession(createAgent({ name: "Retirement learning", description: "Retire stale strategy confidence.", audience: "AI builders", mode: "agent", handle: "@retirement_learning", accent: "#7c3aed" }));
+    const presence = state.presence!;
+    const session = state.playgroundSessions[0]!;
+    const decisions = [0, 1, 2, 3].map((sampleIndex) => ({
+      id: `retire-own-${sampleIndex}`, agentId: state.agent!.id, presenceId: presence.id, environment: "sandbox" as const, sessionId: session.id,
+      focalMirrorObjectIds: [], decision: "original_post" as const, summary: "Measured strategy decision.", influences: [],
+      socialStrategy: { retrievalRunId: `retire-own-run-${sampleIndex}`, consideredPatternIds: ["social.x.v1.proof-led-original"], selectedByAct: [{ act: "original_post", patternId: "social.x.v1.proof-led-original" }] },
+      createdAt: `2026-09-${10 + sampleIndex}T12:00:00.000Z`,
+    })).concat([0, 1].map((sampleIndex) => ({
+      id: `retire-alt-${sampleIndex}`, agentId: state.agent!.id, presenceId: presence.id, environment: "sandbox" as const, sessionId: session.id,
+      focalMirrorObjectIds: [], decision: "original_post" as const, summary: "Measured alternative decision.", influences: [],
+      socialStrategy: { retrievalRunId: `retire-alt-run-${sampleIndex}`, consideredPatternIds: ["social.x.v1.selective-amplification"], selectedByAct: [{ act: "original_post", patternId: "social.x.v1.selective-amplification" }] },
+      createdAt: `2026-09-${14 + sampleIndex}T12:00:00.000Z`,
+    })));
+    state.socialDecisions = decisions;
+    state.publicationMetricSnapshots = decisions.map((decision, index) => ({ id: `retire-metric-${index}`, presenceId: presence.id, mirrorObjectId: `retire-mirror-${index}`, observedAt: decision.createdAt, publicationAgeSeconds: 3600, impressions: index < 4 ? 100 : 800, likes: index < 4 ? 2 : 20, source: "sandbox" as const, observationStatus: "observed" as const }));
+    state.growthEvidenceRecords = state.publicationMetricSnapshots.map((snapshot, index) => ({ id: `retire-evidence-${index}`, agentId: state.agent!.id, presenceId: presence.id, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Measured Sandbox performance.", sourceRefs: [{ kind: "publication_metric" as const, id: snapshot.id, sourcePresenceId: presence.id, observedAt: snapshot.observedAt }], verified: true, causalDecisionIds: [decisions[index]!.id], causalMirrorObjectIds: [], sandboxSessionId: session.id, createdAt: snapshot.observedAt }));
+    state.growthHypotheses = [{ id: `sandbox-learning:${session.id}:social.x.v1.proof-led-original`, agentId: state.agent!.id, originatingPresenceId: presence.id, scope: "presence", statement: "Proof-led originals may work.", status: "supported", confidence: "high", patternIds: ["social.x.v1.proof-led-original"], supportingEvidenceIds: [], contradictingEvidenceIds: [], derivedFrom: [], decisionTargets: [{ strategyId: "social.x.v1.proof-led-original", effect: 1.5 }], reviewHistory: [], createdAt: decisions[0]!.createdAt, updatedAt: decisions[0]!.createdAt, sandboxSessionId: session.id }];
+
+    reconcileSandboxPerformanceLearning(state, presence.id, session.id, "2026-09-17T12:00:00.000Z");
+    expect(state.growthHypotheses[0]?.status).toBe("retired");
+    expect(state.growthHypotheses[0]?.confidence).toBe("low");
+    expect(learningAdjustmentForPattern(state, presence, "social.x.v1.proof-led-original", session.id)).toBe(0);
+  });
+
   it("projects present, removed, and altered learning deterministically", () => {
     const result = projectLearningCounterfactual({ checkpoint, situation, altered });
 
