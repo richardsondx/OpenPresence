@@ -620,3 +620,19 @@ generated-content hash, and delivered a distinct denominator/cohort variation
 inside Sandbox. This is valid partial evidence for the strategy-to-intent and
 generation lineage, not a promotion: measured disposition, later transfer, and
 independent learned-artifact-removed counterfactual gates remain open.
+
+Run 8 exercised the post-extraction state handoff and explicit selected-template
+validator on the rebuilt real OpenAI public Sandbox path. The validator rejected
+the run because the model did not preserve the selected source-backed template
+and learning-hypothesis IDs. The failed-run database is preserved at
+`/tmp/openpresence-learning-canary-real-ff03a5c-rerun21.db`, with the exact
+failure recorded in the canary evidence document. This is a protected failure,
+not a promotion. The runtime handoff, per-act learning ID projection, and
+validator are covered by the focused 125/125 suite and successful production
+build; the real-model selected-template behavior, measured disposition, later
+transfer, and independent removed-artifact counterfactual remain PARTIAL.
+
+Next single highest-impact gate: produce one truthful real-model source-backed
+original that satisfies the selected-template contract, then measure its outcome
+and independently prove retained-versus-removed later decision transfer. Do not
+promote LEARN-002/003/004, AUT-001, EVAL-004/005, or UX-004 from this evidence.

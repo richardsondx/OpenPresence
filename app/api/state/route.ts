@@ -4191,6 +4191,23 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
       }
     }
   }
+  // Source-backed extraction is part of this autonomous consideration pass.
+  // Carry its durable state into the planner so the immediately following
+  // original decision can select the learned hypothesis instead of silently
+  // falling back to the pre-learning context.
+  cognitionSource = actionSource;
+  const requestedSourceBackedTemplate = isOriginalRehearsal && /(?:use|based on|from).*(?:observed|source).*(?:pattern|structure)|(?:pattern|structure).*(?:observed|source)/i.test(rehearsal?.inspiration ?? "")
+    ? (source.growthHypotheses ?? []).find((hypothesis) => hypothesis.sandboxSessionId === sessionId && hypothesis.template?.source === "observed_post" && !["retired", "disfavored"].includes(hypothesis.status))
+    : undefined;
+  const originalStrategyContext = requestedSourceBackedTemplate
+    ? compileSocialStrategyContext(source, presence, {
+      invocation: "original_publication",
+      objective: rehearsal?.inspiration ?? "source-backed original publication",
+      availableActions,
+      sandboxSessionId: sessionId,
+      strategyTemplateId: requestedSourceBackedTemplate.id,
+    })
+    : undefined;
   if (publishingContext) {
     actionSource = recordPublishingPlanWork(actionSource, { ...publishingContext, stage: "considered", detail: `The Agent considered original expression during the ${publishingWindow?.purpose ?? "publishing"} window.` });
   }
@@ -4233,7 +4250,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
         confidence: preliminaryJudgment.confidence,
       }), "neutral", { sessionId, sourceObjectId: inbound?.id });
     }
-    decision = await generateAgentSocialDecision(cognitionSource, `${prompt}${judgmentContext}`, availableActions, { assignmentMode: isAssignment, presence, peopleNote, requireStrategySelection: !inbound && availableActions.includes("post") });
+    decision = await generateAgentSocialDecision(cognitionSource, `${prompt}${judgmentContext}`, availableActions, { assignmentMode: isAssignment, presence, peopleNote, strategyContext: originalStrategyContext, requireStrategySelection: !inbound && availableActions.includes("post"), requireTemplateSelection: Boolean(originalStrategyContext?.retrievalRun.selectedTemplateId) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "The selected Agent runtime could not evaluate this simulated world.";
     const title = inbound ? "Model processing blocked" : "Sandbox evaluation unavailable";

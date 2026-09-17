@@ -949,7 +949,7 @@ export interface SocialStrategyUse {
   playbookId?: string;
   playbookVersion?: string;
   consideredPatternIds: string[];
-  selectedByAct: Array<{ act: string; patternId?: string; mechanismId?: string; reason?: string }>;
+  selectedByAct: Array<{ act: string; patternId?: string; mechanismId?: string; learningHypothesisId?: string; reason?: string }>;
   strategyTemplateId?: string;
   /** Learning artifact selected for this act, when distinct from a bundled pattern. */
   learningHypothesisId?: string;
@@ -2009,6 +2009,7 @@ export interface SocialDecision {
   experimentId?: string;
   learningObjective?: string;
   variationSpecification?: string;
+  generatedContentHash?: string;
   autobiographicalEventIds?: string[];
   createdAt: string;
   attentionEpisodeId?: string;

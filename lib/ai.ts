@@ -1682,9 +1682,11 @@ export type SocialGenerationOptions = {
   strategyContext?: ReturnType<typeof compileSocialStrategyContext>;
   /** Original-post cognition must make learned use vs novel exploration explicit. */
   requireStrategySelection?: boolean;
+  /** When a source-backed template was explicitly selected, preserve its lineage. */
+  requireTemplateSelection?: boolean;
 };
 
-export function validateSocialStrategySelection(decision: AgentSocialDecision, context: SocialGenerationOptions["strategyContext"], requireStrategySelection = false) {
+export function validateSocialStrategySelection(decision: AgentSocialDecision, context: SocialGenerationOptions["strategyContext"], requireStrategySelection = false, requireTemplateSelection = false) {
   // Older/provider-compatible top-level action responses do not carry the
   // structured `acts` envelope. Preserve those valid decisions; strategy
   // attribution is required only for the current multi-act contract.
@@ -1701,6 +1703,13 @@ export function validateSocialStrategySelection(decision: AgentSocialDecision, c
     const postAct = acts.find((act) => act.action === "post" || act.action === "original_post");
     if (!postAct || (!postAct.strategyId && !postAct.noStrategyReason?.trim())) {
       throw new AiRuntimeError("An autonomous original post must declare a supplied strategyId or an explicit noStrategyReason.", { code: "invalid_response" });
+    }
+  }
+  if (requireTemplateSelection && (decision.action === "post" || decision.action === "original_post")) {
+    const postAct = (decision.acts ?? []).find((act) => act.action === "post" || act.action === "original_post");
+    const selectedTemplateId = context?.retrievalRun.selectedTemplateId;
+    if (!selectedTemplateId || decision.strategyTemplateId !== selectedTemplateId || postAct?.learningHypothesisId !== selectedTemplateId) {
+      throw new AiRuntimeError("This source-backed original must preserve the selected template and learning-hypothesis lineage.", { code: "invalid_response" });
     }
   }
   if (!decision.acts || !context?.retrievalRun.consideredPatterns.length || decision.action === "no_op") return;
@@ -1762,7 +1771,7 @@ export async function generateAgentSocialDecision(state: OpenPresenceState, inst
   let parsed: AgentSocialDecision;
   try {
     parsed = parseAgentSocialDecision(raw, actions, { strict: true });
-    validateSocialStrategySelection(parsed, strategyContext, options?.requireStrategySelection);
+    validateSocialStrategySelection(parsed, strategyContext, options?.requireStrategySelection, options?.requireTemplateSelection);
   } catch (error) {
     // A model-owned schema mistake gets one bounded correction pass. Keep the
     // retry at this parse boundary so provider, quota, and network failures
@@ -1792,7 +1801,7 @@ export async function generateAgentSocialDecision(state: OpenPresenceState, inst
       peopleNote: options?.peopleNote,
     });
     parsed = parseAgentSocialDecision(repairRaw, actions, { strict: true });
-    validateSocialStrategySelection(parsed, strategyContext, options?.requireStrategySelection);
+    validateSocialStrategySelection(parsed, strategyContext, options?.requireStrategySelection, options?.requireTemplateSelection);
   }
   if (parsed.strategyTemplateId && strategyContext) strategyContext.retrievalRun.selectedTemplateId = parsed.strategyTemplateId;
   const targetText = options?.socialInput?.trim();

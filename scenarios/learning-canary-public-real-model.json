@@ -10,8 +10,9 @@
       { "command": "metric", "options": { "object": "$latest-object-id", "metrics": { "impressions": 5200, "likes": 180, "replies": 42, "reposts": 31, "quotes": 12 }, "publicationAgeSeconds": 3600 } },
       { "command": "consider" },
       { "command": "original", "options": { "inspiration": "Please make the next original post about why denominator choices can reverse an activation story. Use the strongest observed evidence pattern as a structure, but write a fresh variation with a concrete proof point and do not copy the source wording." } },
-    { "command": "consider" },
-    { "command": "advance", "options": { "minutes": 1440 } },
+      { "command": "consider" },
+      { "command": "metric", "options": { "object": "$latest-object-id", "metrics": { "impressions": 4100, "likes": 140, "replies": 34, "reposts": 24, "quotes": 9 }, "publicationAgeSeconds": 3600 } },
+      { "command": "advance", "options": { "minutes": 10080 } },
     { "command": "consider" },
     { "command": "timeline" }
   ]
