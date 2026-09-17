@@ -291,7 +291,7 @@ export function growthBrowserProjection(state: OpenPresenceState, presenceId?: s
     "networkIntroductions", "recoveryAttempts", "publications", "actions", "operationalRuns", "scheduledWakes",
     "watchSignals", "operatorConversations", "agentWorkspaces", "attentionEpisodes", "socialIntents", "files",
     "socialDecisions", "outcomes", "people", "personIdentities", "relationships", "recoveryIncidents",
-    "growthEvidenceSnapshots", "assignmentPursuitWindows", "standingIntents", "discoveryPlans",
+    "growthEvidenceSnapshots", "growthEvidenceRecords", "growthHypotheses", "assignmentPursuitWindows", "standingIntents", "discoveryPlans",
     "assignmentRuns", "publishingPlans", "playgroundSessions", "perceptions", "capabilityChangeEvents",
     "socialStrategyRetrievalRuns", "knowledgeSegments", "knowledgeDocuments", "knowledgeVersions",
     "scenarioVersions", "conversations", "messages", "operatorNudges", "presenceChatSessions", "agentRequests",
