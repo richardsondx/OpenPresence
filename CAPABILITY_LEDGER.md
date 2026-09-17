@@ -126,6 +126,15 @@ UX-001, and UX-005 but does not upgrade them because independent replay,
 hidden-truth, isolation, and complete causal reconstruction evidence remain
 incomplete.
 
+Final release-candidate delta: immutable candidate `e5ccc10` passed the
+canonical composed seven-day public trajectory, detached independent replay /
+cross-rate / hidden-truth / isolation verification (8 files / 88 tests),
+detached natural-supervision Chromium, and final lint, build, typecheck, and
+full-suite health. The bundle is recorded in
+`qa-learnings/release-candidate-e5ccc10-2026-09-17.md`. `AUT-005` is the only
+new promotion from this delta; every other PARTIAL row retains its exact
+missing proof gate.
+
 After every meaningful implementation or verification cycle, update affected
 rows with the command/scenario and durable evidence path. Mark `REGRESSED`
 explicitly when previously supported behavior fails. The next development slice
