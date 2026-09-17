@@ -3543,6 +3543,17 @@ export function stageSandboxOutcome(source: OpenPresenceState, sessionId: string
   const session = sandboxSessionFor(state, sessionId);
   if (!Number.isInteger(visibleAfterMinutes) || visibleAfterMinutes < 0) throw new Error("Sandbox outcome release delay must be a non-negative integer number of minutes.");
   const kernel = temporalKernelForSession(session);
+  // The public inject control produces a durable world-observation id, while
+  // delayed truth is scheduled by the temporal kernel. Promote that observed
+  // world record into a same-time causal marker at this boundary so the public
+  // CLI can compose inject -> stage-outcome without bypassing provenance.
+  const temporalCause = kernel.events.find((event) => event.id === causeEventId || event.rootId === causeEventId);
+  if (!temporalCause) {
+    const observed = state.events.some((event) => event.sessionId === session.id && event.id === causeEventId)
+      || state.mirrorObjects.some((object) => object.sessionId === session.id && (object.sourceEventId === causeEventId || object.externalRef.id === causeEventId));
+    if (!observed) throw new Error(`Sandbox outcome cause event does not exist: ${causeEventId}.`);
+    kernel.scheduleEvent({ id: causeEventId, type: "world_observation", at: kernel.now, payload: { source: "public-sandbox-control" } });
+  }
   kernel.scheduleDelayedOutcome({ causeEventId, offsetMs: visibleAfterMinutes * 60_000, value });
   session.temporalSnapshot = kernel.snapshot();
   session.virtualTimeMode = "manual";

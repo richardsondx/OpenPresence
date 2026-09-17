@@ -110,7 +110,7 @@ describe("Playground temporal integration boundary", () => {
     const source = state.playgroundSessions[0]!;
     state = {
       ...state,
-      events: [{ id: "integration:source-event", sessionId: source.id, kind: "source_marker", createdAt: source.virtualNow }],
+      events: [{ id: "integration:source-event", sessionId: source.id, type: "system", title: "Source marker", detail: "checkpoint isolation", time: source.virtualNow, tone: "neutral" }],
     };
     state = createSandboxCheckpoint(state, source.id, "branch point");
     const checkpoint = state.sandboxCheckpoints?.[0]!;
@@ -122,7 +122,7 @@ describe("Playground temporal integration boundary", () => {
       expect.objectContaining({ id: "integration:source-event", sessionId: source.id }),
       expect.objectContaining({ id: "integration:source-event", sessionId: fork.id }),
     ]));
-    const forkEvent = { id: "integration:fork-event", sessionId: fork.id, kind: "fork_marker", createdAt: fork.virtualNow };
+    const forkEvent = { id: "integration:fork-event", sessionId: fork.id, type: "system" as const, title: "Fork marker", detail: "branch isolation", time: fork.virtualNow, tone: "neutral" as const };
     const isolated = { ...state, events: [...state.events, forkEvent] };
     expect(isolated.events.filter((event) => event.sessionId === source.id)).toEqual([
       expect.objectContaining({ id: "integration:source-event" }),
