@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildScenarioFromPrompt, validateScenarioFidelity } from "../lib/scenarios";
-import { addSandboxEvent, advanceSandboxTimeWithTemporalEvents, completeScenarioRunState, createAgent, createScenarioFromPrompt, deleteScenario, formSandboxIntent, generateMissingScenarioEvents, importScenarioDefinition, renameScenario, startPlaygroundSession, startScenarioRunState, structuralScenarioEvaluation, updateScenarioEvents } from "../lib/runtime";
+import { addSandboxEvent, advanceSandboxTimeWithTemporalEvents, completeScenarioRunState, createAgent, createScenarioFromPrompt, deleteScenario, formSandboxIntent, generateMissingScenarioEvents, importScenarioDefinition, recordScenarioEvaluation, renameScenario, startPlaygroundSession, startScenarioRunState, structuralScenarioEvaluation, updateScenarioEvents } from "../lib/runtime";
 
 const input = { name: "Alex", description: "Explain useful agent ideas.", mode: "agent" as const, handle: "@richardson", accent: "#D68754" };
 
@@ -225,8 +225,27 @@ describe("Scenario rehearsal boundaries", () => {
     state = startScenarioRunState(state, scenario.scenario.id, state.presence!.id);
     const evaluation = structuralScenarioEvaluation(state, state.scenarioRuns[0]!.id);
     expect(evaluation.status).toBe("needs_review");
+    expect(evaluation.capabilityIds).toContain("EVAL-001");
     expect(evaluation.modelFindings).toEqual([]);
     expect(evaluation.structuralFindings.every((finding) => finding.status === "pass")).toBe(true);
+  });
+
+  it("fails closed when a material evaluation failure has no capability linkage", () => {
+    let state = createAgent(input);
+    const scenario = buildScenarioFromPrompt("Rehearse a prompt injection attempt.", "x", state.agent!.id);
+    state.scenarios.unshift(scenario.scenario);
+    state.scenarioVersions.unshift(scenario.version);
+    state = startScenarioRunState(state, scenario.scenario.id, state.presence!.id);
+    const runId = state.scenarioRuns[0]!.id;
+    expect(() => recordScenarioEvaluation(state, {
+      id: "unlinked-failure",
+      runId,
+      status: "failed",
+      structuralFindings: [],
+      modelFindings: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })).toThrow("must reference at least one capability");
   });
 
   it("deletes an authored Scenario and its isolated rehearsal history without touching built-ins", () => {
