@@ -13,6 +13,7 @@ type CliResult = {
 
 type Snapshot = {
   session: JsonRecord;
+  temporalSnapshot: JsonRecord;
   publishingPlans: JsonRecord[];
   mirrorObjects: JsonRecord[];
   assignments: JsonRecord[];
@@ -195,6 +196,7 @@ async function readSnapshot(request: import("@playwright/test").APIRequestContex
   const session = records(state.playgroundSessions).find((item) => text(item.id) === sessionId) ?? {};
   return {
     session,
+    temporalSnapshot: record(session.temporalSnapshot),
     publishingPlans: records(state.publishingPlans).filter((item) => text(item.presenceId) === text(session.presenceId)),
     mirrorObjects: records(state.mirrorObjects).filter((item) => text(item.sessionId) === sessionId),
     assignments: records(state.assignments).filter((item) => text(item.sessionId) === sessionId || text(item.presenceId) === text(session.presenceId)),
@@ -400,11 +402,13 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     const sessionIntents = current.intents;
     const sessionIntentIds = new Set(sessionIntents.map((intent) => text(intent.id)));
     const sessionExecutionIds = new Set(current.executions.map((execution) => text(execution.id)));
+    const causalTrace = records(current.temporalSnapshot.trajectory);
+    const traceKinds = new Set(causalTrace.map((entry) => text(entry.kind)));
     const causalGraph = {
       observations: current.mirrorObjects.length,
       decisions: sessionIntents.length,
       planMutations: current.events.filter((event) => text(event.title) === "Agent plan changed").length,
-      permissionDecisions: current.events.filter((event) => /permission|authorized|envelope/i.test(`${text(event.title)} ${text(event.detail)}`)).length,
+      permissionDecisions: causalTrace.filter((entry) => text(entry.kind) === "permission_decision").length,
       executions: current.executions.length,
       verifiedResults: current.outcomes.filter((outcome) => text(outcome.status) === "succeeded").length,
       learningUpdates: current.events.filter((event) => /learning|strategy/i.test(`${text(event.title)} ${text(event.detail)}`)).length,
@@ -416,6 +420,19 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     expect(causalGraph.decisions).toBeGreaterThan(0);
     expect(causalGraph.executions).toBeGreaterThan(0);
     expect(causalGraph.verifiedResults).toBeGreaterThan(0);
+    for (const kind of ["observation", "decision", "intent", "execution", "permission_decision", "plan_mutation", "result", "outcome", "learning", "replan"]) {
+      expect(traceKinds.has(kind), `The persisted causal trace is missing ${kind}.`).toBe(true);
+    }
+    // A self-directed wake may legitimately be the root of a causal cone, so
+    // its decision/intent records have no world parent. Every downstream
+    // transition must still point back to an existing cause.
+    const missingCausalParents = causalTrace.filter((entry) => ["execution", "permission_decision", "result", "outcome", "learning", "replan"].includes(text(entry.kind) ?? "")).filter((entry) => {
+      const data = record(entry.data);
+      const causal = record(data.causal);
+      return !(Array.isArray(causal.parentIds) && causal.parentIds.length > 0);
+    });
+    expect(missingCausalParents, `Causal trace transitions are missing parent links: ${JSON.stringify(missingCausalParents)}`).toHaveLength(0);
+    expect(causalTrace.every((entry, index) => index === 0 || Number(entry.time) >= Number(causalTrace[index - 1]?.time)), "The persisted causal trace is not monotonic in virtual time.").toBe(true);
     const startMs = startAt ? Date.parse(startAt) : Number.NaN;
     const endMs = endAt ? Date.parse(endAt) : Number.NaN;
     const dailyTrajectory = Array.from({ length: 7 }, (_, index) => {

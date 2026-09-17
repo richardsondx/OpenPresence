@@ -1226,6 +1226,18 @@ export function replacePublishingPlan(source: OpenPresenceState, input: { presen
   };
   state.publishingPlans.unshift(plan);
   state.events.unshift(event("decision", "Publishing plan created", `${presence.name} created a visible working plan for its ${initiative.mode === "pace" ? "operator publishing expectation" : "adaptive publishing responsibility"}.`, "positive", { presenceId: presence.id }));
+  const sandboxSession = environment === "sandbox"
+    ? state.playgroundSessions.find((session) => session.presenceId === presence.id && session.status === "active")
+    : undefined;
+  if (sandboxSession) {
+    recordSandboxTrajectoryInPlace(state, sandboxSession.id, "plan_mutation", {
+      mutation: "publishing_plan_replaced",
+      planId: plan.id,
+      previousPlanIds: previous.map((item) => item.id),
+      revision: plan.revision,
+      causal: { parentIds: previous.map((item) => item.id) },
+    }, timestamp);
+  }
   return state;
 }
 
@@ -4039,6 +4051,12 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
       dedupeKey: learningDedupeKey,
     });
     if (communication.recorded) state = communication.state;
+    recordSandboxTrajectoryInPlace(state, session.id, "learning", {
+      executionId: execution.id,
+      outcomeId: outcome.id,
+      lesson: "Repeated verified outcomes changed the Agent's next strategy allocation.",
+      causal: { parentIds: [outcome.id, execution.socialIntentId] },
+    }, outcome.observedAt);
   }
   if (repliedToId) {
     const repliedTo = state.mirrorObjects.find((item) => item.externalRef.id === repliedToId && item.actorPresenceId !== presence.id);
