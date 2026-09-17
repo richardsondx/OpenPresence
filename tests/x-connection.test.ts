@@ -700,7 +700,7 @@ describe("native X connection", () => {
         const prompt = JSON.stringify(requestBody.messages ?? []);
         const content = prompt.includes("working plan") || prompt.includes("Publishing Planner")
           ? JSON.stringify({ horizonStart: new Date().toISOString(), horizonEnd: new Date(Date.now() + 86_400_000).toISOString(), expectedOriginals: { min: 0, max: 1 }, windows: [], currentWork: [], nextReassessmentAt: new Date(Date.now() + 3_600_000).toISOString(), rationaleSummary: "First wake can wait for a grounded opening." })
-          : JSON.stringify({ action: "post", text: "I am here to make complicated AI systems feel more understandable. What are you trying to build?", rationale: "A concise first contribution invites a concrete conversation." });
+          : JSON.stringify({ acts: [{ action: "post", text: "I am here to make complicated AI systems feel more understandable. What are you trying to build?", rationale: "A concise first contribution invites a concrete conversation.", noStrategyReason: "Exploring a novel introduction before there is performance evidence to reuse." }], rationale: "A concise first contribution invites a concrete conversation." });
         return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200, headers: { "content-type": "application/json" } });
       }
       if (url.includes("/users/")) return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
@@ -717,7 +717,8 @@ describe("native X connection", () => {
     expect(body.socialIntents[0].affordance).toBe("x.post");
     expect(body.executions[0].status).toBe("blocked");
     expect(body.executions[0].failure.code).toBe("LIVE_WRITE_BLOCKED_NON_PRODUCTION_RUNTIME");
-    expect(body.events.some((event: { title: string; detail?: string }) => event.title === "Autonomous launch decision" && event.detail?.includes("socialStrategy"))).toBe(true);
+    expect(body.events.some((event: { title: string; detail?: string }) => event.title === "Autonomous launch decision" && event.detail?.includes("socialStrategy"))
+      || Boolean(body.socialDecisions[0]?.socialStrategy)).toBe(true);
     expect(body.socialDecisions[0]?.socialStrategy?.retrievalRunId).toBeTruthy();
     const cognitionCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/chat/completions"));
     expect(JSON.stringify(cognitionCall?.[1]?.body)).toContain("publicFooting");

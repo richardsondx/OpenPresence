@@ -1984,7 +1984,7 @@ export interface SocialDecision {
   origin?: SocialOrigin;
   decision: SocialDecisionKind;
   /** A decision may express several independent, compatible social acts. */
-  acts?: Array<{ decision: Exclude<SocialDecisionKind, "no_op" | "original_post">; text?: string; rationale?: string }>;
+  acts?: Array<{ decision: Exclude<SocialDecisionKind, "no_op">; text?: string; rationale?: string; strategyId?: string; mechanismId?: string; noStrategyReason?: string }>;
   conversationDisposition?: ConversationDisposition;
   /** Natural private response to the operator when this decision came from Chat. */
   operatorReaction?: string;
@@ -2115,6 +2115,7 @@ export interface PresenceChatMessage { id: string; role: "presence" | "user"; co
 export interface PresenceChatSession { id: string; presenceId: string; title: string; createdAt: string; updatedAt: string; messages: PresenceChatMessage[]; }
 
 export type OperatorNudgeStatus = "queued" | "acknowledged" | "working" | "resolved" | "held_paused" | "assignment_created" | "failed";
+export type OperatorChatReaction = "👍" | "❤️" | "😂" | "🎉" | "🙌" | "👀";
 export interface OperatorNudge {
   id: string;
   /** Private Chat owns this note; ambient attention must never claim it. */
@@ -2140,6 +2141,7 @@ export interface OperatorNudge {
 }
 export interface OperatorConversationMessage {
   choices?: Array<{ label: string; content: string }>;
+  reaction?: OperatorChatReaction;
   id: string;
   /** The durable operator turn this reply or tool receipt belongs to. */
   replyToMessageId?: string;

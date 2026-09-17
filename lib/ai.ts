@@ -1679,14 +1679,23 @@ export type SocialGenerationOptions = {
   peopleNote?: { presenceId: string; personId: string; markdown: string; revision: number; updatedAt: string };
   /** Shared strategy context compiled for this social cognition invocation. */
   strategyContext?: ReturnType<typeof compileSocialStrategyContext>;
+  /** Original-post cognition must make learned use vs novel exploration explicit. */
+  requireStrategySelection?: boolean;
 };
 
-export function validateSocialStrategySelection(decision: AgentSocialDecision, context: SocialGenerationOptions["strategyContext"]) {
+export function validateSocialStrategySelection(decision: AgentSocialDecision, context: SocialGenerationOptions["strategyContext"], requireStrategySelection = false) {
   // Older/provider-compatible top-level action responses do not carry the
   // structured `acts` envelope. Preserve those valid decisions; strategy
   // attribution is required only for the current multi-act contract.
   if (decision.strategyTemplateId && !context?.retrievalRun.relevantSocialTemplateIds?.includes(decision.strategyTemplateId)) {
     throw new AiRuntimeError("The selected strategyTemplateId was not supplied by the current strategy retrieval run.", { code: "invalid_response" });
+  }
+  if (requireStrategySelection && (decision.action === "post" || decision.action === "original_post")) {
+    const acts = decision.acts ?? [];
+    const postAct = acts.find((act) => act.action === "post" || act.action === "original_post");
+    if (!postAct || (!postAct.strategyId && !postAct.noStrategyReason?.trim())) {
+      throw new AiRuntimeError("An autonomous original post must declare a supplied strategyId or an explicit noStrategyReason.", { code: "invalid_response" });
+    }
   }
   if (!decision.acts || !context?.retrievalRun.consideredPatterns.length || decision.action === "no_op") return;
   const patterns = context.retrievalRun.consideredPatterns;
@@ -1742,12 +1751,12 @@ export async function generateAgentSocialDecision(state: OpenPresenceState, inst
     ? `\n- Operator reaction: also return operatorReaction as one brief, natural private response about what you think of the post itself. Speak to the operator like a person. Do not narrate your decision, selected action, evidence process, or internal rationale; never say “I chose to,” “I decided to,” or “no public act is warranted.” This private reaction is separate from any public reply text.\n\nInclude "operatorReaction":"one natural sentence" in the top-level JSON.`
     : "";
     const plannerInstruction = `${instruction}\n\nThe rationale and no_op reason may be shown to the operator. Write them as a short, plain-language explanation of the concrete choice, not an evaluation rubric. For example: “I don’t have anything useful to add to this post” or “The numbers in this post have no source.” Avoid abstract phrases such as “truthful specific contribution,” “amplify a product claim,” “concrete mechanism,” and “implementation nuance.” Do not list hidden reasoning or claim checks you did not perform. Preserve your actual judgment and the facts.\n\nEvaluate the social candidate and choose zero or more compatible acts from: ${actions.join(", ")}.\n- Repost: choose repost when the post is valuable as-is and should be shared directly with your audience.\n- Quote: choose quote only when a short, concrete response makes this specific source post more useful to this audience. Anchor the words to the source's claim, tension, or moment; never write a generic essay, product pitch, discovery brief, or abstract lesson. Keep the quote under 240 characters (the channel limit is 280).\n- Reply: choose reply when a direct conversational response to the author adds value; keep it specific and under 240 characters.\n- Like: choose like for quiet appreciation without needing to speak.\n- Follow: choose follow for continued awareness of this author.\n- Silence: return an empty acts array ([]) when sufficient context is present and no outward action earned its place.${operatorReactionInstruction}\n\n${personToPersonLanguageGuidance} Language quality: follow BRAIN.md for the Agent's reasoning stance and TASTE.md plus active Style Guidance for voice and surface choices. When BRAIN.md does not specify a stance, use the realistic-optimist default in AI-SLOP AVOIDANCE. Name the concrete detail first. Be honest about limits when that fits the selected stance. Avoid teacher voice, canned empathy, slang, workplace jargon, bureaucratic phrasing, stock formulas, repeated contrasts, negative parallelism (\"isn't X, it's Y\" and \"not just X, but Y\"), vague frames such as \"the interesting/useful bit\" or \"the real test\", and phrases about doing heroic or heavy lifting.\n\nReturn JSON only in this shape:\n{"acts":[{"action":"${actions.join("|")}","text":"reply or quote text when needed, otherwise empty","rationale":"concise reason for this act","strategyId":"supplied pattern ID when suitable","mechanismId":"that pattern’s mechanism","noStrategyReason":"required instead of strategyId when no pattern fits"}],"conversationDisposition":"continue|react_only|close_with_reply|close_silently|defer","rationale":"concise summary of the decision"}.`;
-  const templateSelectionGuidance = "For an original post, include strategyTemplateId only when one of the supplied reusable templates materially shaped the draft; omit it when exploring a novel format. Never invent an ID.";
-  const raw = await generateAgentReply(state, options?.socialInput ?? plannerInstruction, undefined, { social: true, presence, socialHistory: options?.socialHistory, socialGuidance: [options?.socialInput ? plannerInstruction : undefined, options?.socialInput ? templateSelectionGuidance : undefined, options?.socialGuidance, strategyContext?.prompt].filter(Boolean).join("\n\n"), socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, autobiographicalContext: options?.autobiographicalContext ?? autobiography?.text, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, originId: options?.originId, operatorConversation: options?.operatorConversation, maxOutputTokens: options?.maxOutputTokens ?? SOCIAL_DECISION_MAX_OUTPUT_TOKENS, peopleNote: options?.peopleNote });
+  const templateSelectionGuidance = `${options?.requireStrategySelection ? "For every original post, return the structured acts envelope and explicitly distinguish learned use from exploration: select one supplied strategyId and its mechanismId when a supplied pattern materially shaped the post, or omit strategyId and provide noStrategyReason when deliberately exploring a novel format. " : ""}For an original post, include strategyTemplateId only when one of the supplied reusable templates materially shaped the draft; omit it when exploring a novel format. Never invent an ID.`;
+  const raw = await generateAgentReply(state, options?.socialInput ?? plannerInstruction, undefined, { social: true, presence, socialHistory: options?.socialHistory, socialGuidance: [options?.socialInput ? plannerInstruction : undefined, templateSelectionGuidance, options?.socialGuidance, strategyContext?.prompt].filter(Boolean).join("\n\n"), socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, autobiographicalContext: options?.autobiographicalContext ?? autobiography?.text, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, originId: options?.originId, operatorConversation: options?.operatorConversation, maxOutputTokens: options?.maxOutputTokens ?? SOCIAL_DECISION_MAX_OUTPUT_TOKENS, peopleNote: options?.peopleNote });
   let parsed: AgentSocialDecision;
   try {
     parsed = parseAgentSocialDecision(raw, actions, { strict: true });
-    validateSocialStrategySelection(parsed, strategyContext);
+    validateSocialStrategySelection(parsed, strategyContext, options?.requireStrategySelection);
   } catch (error) {
     // A model-owned schema mistake gets one bounded correction pass. Keep the
     // retry at this parse boundary so provider, quota, and network failures
@@ -1777,7 +1786,7 @@ export async function generateAgentSocialDecision(state: OpenPresenceState, inst
       peopleNote: options?.peopleNote,
     });
     parsed = parseAgentSocialDecision(repairRaw, actions, { strict: true });
-    validateSocialStrategySelection(parsed, strategyContext);
+    validateSocialStrategySelection(parsed, strategyContext, options?.requireStrategySelection);
   }
   if (parsed.strategyTemplateId && strategyContext) strategyContext.retrievalRun.selectedTemplateId = parsed.strategyTemplateId;
   const targetText = options?.socialInput?.trim();

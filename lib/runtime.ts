@@ -773,7 +773,7 @@ function event(type: LiveEvent["type"], title: string, detail: string, tone: Liv
 
 export interface SocialDecisionInput {
   decision: SocialDecisionKind;
-  acts?: Array<{ decision: Exclude<SocialDecisionKind, "no_op" | "original_post">; text?: string; rationale?: string; strategyId?: string; mechanismId?: string; noStrategyReason?: string }>;
+  acts?: Array<{ decision: Exclude<SocialDecisionKind, "no_op">; text?: string; rationale?: string; strategyId?: string; mechanismId?: string; noStrategyReason?: string }>;
   conversationDisposition?: import("./types").ConversationDisposition;
   focalMirrorObjectIds?: string[];
   origin?: SocialOrigin;
@@ -843,7 +843,7 @@ function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInp
     focalMirrorObjectIds: [...new Set((input.focalMirrorObjectIds ?? []).filter(Boolean))].slice(0, 6),
     origin: input.origin,
     decision: input.decision,
-    acts: input.acts?.length ? input.acts.map((act) => ({ decision: act.decision, text: act.text?.trim() || undefined, rationale: act.rationale?.trim() || undefined })) : undefined,
+    acts: input.acts?.length ? input.acts.map((act) => ({ decision: act.decision, text: act.text?.trim() || undefined, rationale: act.rationale?.trim() || undefined, strategyId: act.strategyId, mechanismId: act.mechanismId, noStrategyReason: act.noStrategyReason?.trim() || undefined })) : undefined,
     conversationDisposition: input.conversationDisposition,
     operatorReaction: input.operatorReaction?.trim() || undefined,
     summary: input.summary?.trim() || `The Presence selected ${socialDecisionLabel(input.decision)} from the available channel context.`,

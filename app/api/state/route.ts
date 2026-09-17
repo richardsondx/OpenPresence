@@ -2020,7 +2020,7 @@ async function runScheduledLiveAssignments(source: OpenPresenceState, presenceId
   );
   let decision: AgentSocialDecision;
   try {
-    decision = await generateAgentSocialDecision(next, promptForPublicExpression, ["post", "no_op"], { assignmentMode: true, presence, usageOrigin: "assignment", attentionSource: "assignment", runId: options?.runId, presenceId, invocationId: options?.runId, originId: currentAssignment.id });
+    decision = await generateAgentSocialDecision(next, promptForPublicExpression, ["post", "no_op"], { assignmentMode: true, presence, requireStrategySelection: true, usageOrigin: "assignment", attentionSource: "assignment", runId: options?.runId, presenceId, invocationId: options?.runId, originId: currentAssignment.id });
   } catch (error) {
     currentAssignment.lastOutcome = { class: "evaluation_failed", message: error instanceof Error ? error.message : "The Agent could not evaluate this scheduled Assignment.", at: new Date().toISOString() };
     currentAssignment.systemFailures += 1;
@@ -2029,7 +2029,7 @@ async function runScheduledLiveAssignments(source: OpenPresenceState, presenceId
   if (decision.action === "no_op") {
     next = recordRuntimeEvent(next, presenceId, "Assignment candidate recovery", `${presence.name} is making a second, evidence-backed attempt because silence does not satisfy this explicit Assignment.`, "positive");
     try {
-      const recovered = await generateAgentSocialDecision(next, `${promptForPublicExpression}\n\nThe first judgment returned no_op. This is the recovery pass for an explicit user-assigned deliverable. Draft the best useful general-knowledge answer now; do not wait for more context. Do not invent current facts, but missing niche context is not a blocker for a clear educational explanation. Return a complete action=post candidate unless a hard safety or channel constraint makes publication impossible.`, ["post"], { assignmentMode: true, presence, usageOrigin: "assignment", attentionSource: "assignment", runId: options?.runId, presenceId, invocationId: options?.runId, originId: currentAssignment.id });
+      const recovered = await generateAgentSocialDecision(next, `${promptForPublicExpression}\n\nThe first judgment returned no_op. This is the recovery pass for an explicit user-assigned deliverable. Draft the best useful general-knowledge answer now; do not wait for more context. Do not invent current facts, but missing niche context is not a blocker for a clear educational explanation. Return a complete action=post candidate unless a hard safety or channel constraint makes publication impossible.`, ["post"], { assignmentMode: true, presence, requireStrategySelection: true, usageOrigin: "assignment", attentionSource: "assignment", runId: options?.runId, presenceId, invocationId: options?.runId, originId: currentAssignment.id });
       if (recovered.action === "post" && recovered.text.trim()) decision = recovered;
     } catch {
       // Keep the original judgment when the recovery pass cannot run.
@@ -2038,7 +2038,7 @@ async function runScheduledLiveAssignments(source: OpenPresenceState, presenceId
   if (decision.action === "post" && decision.text.trim().length > 280) {
     next = recordRuntimeEvent(next, presenceId, "Assignment candidate repair", `${presence.name} received an overlong draft and is asking the Agent for one bounded rewrite within X's limit.`, "positive");
     try {
-      const repaired = await generateAgentSocialDecision(next, `${promptForPublicExpression}\n\nThe previous candidate was over X's 280-character limit. Rewrite the same useful idea as one complete post under 250 characters. Preserve the substance, remove padding, and return only a post candidate.`, ["post"], { assignmentMode: true, presence, usageOrigin: "assignment", attentionSource: "assignment", runId: options?.runId, presenceId, invocationId: options?.runId, originId: currentAssignment.id });
+      const repaired = await generateAgentSocialDecision(next, `${promptForPublicExpression}\n\nThe previous candidate was over X's 280-character limit. Rewrite the same useful idea as one complete post under 250 characters. Preserve the substance, remove padding, and return only a post candidate.`, ["post"], { assignmentMode: true, presence, requireStrategySelection: true, usageOrigin: "assignment", attentionSource: "assignment", runId: options?.runId, presenceId, invocationId: options?.runId, originId: currentAssignment.id });
       if (repaired.action === "post" && repaired.text.trim().length <= 280) decision = repaired;
     } catch {
       // Keep the original candidate and record a bounded rejection below.
@@ -2595,7 +2595,7 @@ async function runPublishingAssignmentPulse(source: OpenPresenceState, presenceI
   );
   let decision: AgentSocialDecision;
   try {
-    decision = await generateAgentSocialDecision(next, promptForPublicExpression, ["post", "no_op"], { assignmentMode: true, presence, usageOrigin: "assignment", attentionSource: "assignment", presenceId, originId: assignment.id });
+    decision = await generateAgentSocialDecision(next, promptForPublicExpression, ["post", "no_op"], { assignmentMode: true, presence, requireStrategySelection: true, usageOrigin: "assignment", attentionSource: "assignment", presenceId, originId: assignment.id });
   } catch (error) {
     assignment.nextDueAt = new Date(Date.now() + 15 * 60_000).toISOString();
     return recordRuntimeEvent(next, presenceId, "Publishing Assignment unavailable", error instanceof Error ? error.message : "The Agent could not evaluate the publishing responsibility.", "warning");
@@ -2603,7 +2603,7 @@ async function runPublishingAssignmentPulse(source: OpenPresenceState, presenceI
   if (decision.action === "no_op") {
     next = recordRuntimeEvent(next, presenceId, "Publishing candidate recovery", `${presence.name} is making a second, evidence-backed attempt because the recurring publishing responsibility still needs a candidate.`, "positive");
     try {
-      const recovered = await generateAgentSocialDecision(next, `${promptForPublicExpression}\n\nThe first judgment returned no_op. Make a best-effort candidate now from general knowledge and the Mission. Do not wait for more context. Return a complete action=post candidate unless a hard safety or channel constraint makes publication impossible.`, ["post"], { assignmentMode: true, presence, usageOrigin: "assignment", attentionSource: "assignment", presenceId, originId: assignment.id });
+      const recovered = await generateAgentSocialDecision(next, `${promptForPublicExpression}\n\nThe first judgment returned no_op. Make a best-effort candidate now from general knowledge and the Mission. Do not wait for more context. Return a complete action=post candidate unless a hard safety or channel constraint makes publication impossible.`, ["post"], { assignmentMode: true, presence, requireStrategySelection: true, usageOrigin: "assignment", attentionSource: "assignment", presenceId, originId: assignment.id });
       if (recovered.action === "post" && recovered.text.trim()) decision = recovered;
     } catch {
       // Keep the original judgment when the recovery pass cannot run.
@@ -2612,7 +2612,7 @@ async function runPublishingAssignmentPulse(source: OpenPresenceState, presenceI
   if (decision.action === "post" && decision.text.trim().length > 280) {
     next = recordRuntimeEvent(next, presenceId, "Publishing candidate repair", `${presence.name} received an overlong draft and is asking the Agent for one bounded rewrite within X's limit.`, "positive");
     try {
-      const repaired = await generateAgentSocialDecision(next, `${promptForPublicExpression}\n\nThe previous candidate was over X's 280-character limit. Rewrite the same useful idea as one complete post under 250 characters. Preserve the substance, remove padding, and return only a post candidate.`, ["post"], { assignmentMode: true, presence, usageOrigin: "assignment", attentionSource: "assignment", presenceId, originId: assignment.id });
+      const repaired = await generateAgentSocialDecision(next, `${promptForPublicExpression}\n\nThe previous candidate was over X's 280-character limit. Rewrite the same useful idea as one complete post under 250 characters. Preserve the substance, remove padding, and return only a post candidate.`, ["post"], { assignmentMode: true, presence, requireStrategySelection: true, usageOrigin: "assignment", attentionSource: "assignment", presenceId, originId: assignment.id });
       if (repaired.action === "post" && repaired.text.trim().length <= 280) decision = repaired;
     } catch {
       // Keep the original candidate and record a bounded hold below.
@@ -3257,7 +3257,7 @@ async function runNativePulse(source: OpenPresenceState, presenceId: string) {
   next = recordRuntimeEvent(next, presenceId, "Considering first public move", "Jenny found a new Presence with no public footing and is choosing how to arrive from Mission, Taste, and the current channel context.", "positive");
   let launchDecision: AgentSocialDecision;
   try {
-    launchDecision = await generateAgentSocialDecision(next, "Choose the strongest first public move for the active Presence from its Mission, Taste, Soul, and channel context. Return post only when a complete, truthful first contribution is ready; otherwise choose no_op. Keep the public expression under X's single-post limit.", ["post", "no_op"], { presence: next.presence ?? undefined, socialEvidence: JSON.stringify({ schema: "openpresence.public-social-evidence.v1", kind: "launch", publicFooting: next.presence?.context.publicFooting ?? { postsPublished: 0 }, trust: "No private operator transcript or runtime metadata is public expression context." }) });
+    launchDecision = await generateAgentSocialDecision(next, "Choose the strongest first public move for the active Presence from its Mission, Taste, Soul, and channel context. Return post only when a complete, truthful first contribution is ready; otherwise choose no_op. Keep the public expression under X's single-post limit.", ["post", "no_op"], { presence: next.presence ?? undefined, requireStrategySelection: true, socialEvidence: JSON.stringify({ schema: "openpresence.public-social-evidence.v1", kind: "launch", publicFooting: next.presence?.context.publicFooting ?? { postsPublished: 0 }, trust: "No private operator transcript or runtime metadata is public expression context." }) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "The selected Agent runtime could not evaluate the launch move.";
     return complete(recordRuntimeEvent(next, presenceId, "Launch evaluation unavailable", message, "warning"), "The Presence observed X but could not complete its first-move evaluation.");
@@ -4203,7 +4203,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
         confidence: preliminaryJudgment.confidence,
       }), "neutral", { sessionId, sourceObjectId: inbound?.id });
     }
-    decision = await generateAgentSocialDecision(cognitionSource, `${prompt}${judgmentContext}`, availableActions, { assignmentMode: isAssignment, presence, peopleNote });
+    decision = await generateAgentSocialDecision(cognitionSource, `${prompt}${judgmentContext}`, availableActions, { assignmentMode: isAssignment, presence, peopleNote, requireStrategySelection: !inbound && availableActions.includes("post") });
   } catch (error) {
     const message = error instanceof Error ? error.message : "The selected Agent runtime could not evaluate this simulated world.";
     const title = inbound ? "Model processing blocked" : "Sandbox evaluation unavailable";
@@ -4231,7 +4231,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
   // otherwise the early no-op branch bypasses assignment delivery entirely.
   if (isAssignment && decision.action === "no_op" && availableActions.includes("post")) {
     try {
-      const recovered = await generateAgentSocialDecision(cognitionSource, `${prompt}${judgmentContext}\n\nThis is an explicit exact-quantity posting Assignment. A no_op does not satisfy this Assignment. Produce the next original post now, grounded in the supplied Presence context. Return action=post with the complete publication text; do not return no_op merely because the world is quiet or because the operator asked for a batch.`, availableActions, { assignmentMode: true, presence });
+      const recovered = await generateAgentSocialDecision(cognitionSource, `${prompt}${judgmentContext}\n\nThis is an explicit exact-quantity posting Assignment. A no_op does not satisfy this Assignment. Produce the next original post now, grounded in the supplied Presence context. Return action=post with the complete publication text; do not return no_op merely because the world is quiet or because the operator asked for a batch.`, availableActions, { assignmentMode: true, presence, requireStrategySelection: true });
       if (recovered.action === "post" && cleanSandboxDraft(recovered.text)) decision = recovered;
     } catch {
       // The normal no-op/rejection path below records the failed candidate.
@@ -4511,7 +4511,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
   if (socialDecisionKind) {
     next = recordSocialDecision(next, {
       decision: socialDecisionKind as "reply" | "like" | "follow" | "quote" | "repost" | "original_post",
-      acts: (decision.acts ?? []).filter((act) => ["reply", "like", "follow", "quote", "repost"].includes(act.action)).map((act) => ({ decision: act.action as "reply" | "like" | "follow" | "quote" | "repost", text: act.text, rationale: act.rationale, strategyId: act.strategyId, mechanismId: act.mechanismId, noStrategyReason: act.noStrategyReason })),
+      acts: (decision.acts ?? []).filter((act) => ["post", "original_post", "reply", "like", "follow", "quote", "repost"].includes(act.action)).map((act) => ({ decision: (act.action === "post" ? "original_post" : act.action) as "original_post" | "reply" | "like" | "follow" | "quote" | "repost", text: act.text, rationale: act.rationale, strategyId: act.strategyId, mechanismId: act.mechanismId, noStrategyReason: act.noStrategyReason })),
       focalMirrorObjectIds: inbound ? [inbound.id] : [],
       origin: assignment ? { kind: "assignment", refId: assignment.id } : publishingContext ? { kind: "publishing_initiative", planId: publishingContext.planId, planRevision: publishingContext.planRevision, planWindowId: publishingContext.windowId } : rehearsal ? { kind: "other" } : { kind: "self_directed_discovery", refId: sessionId },
       summary: decision.rationale,

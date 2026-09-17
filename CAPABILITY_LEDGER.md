@@ -578,3 +578,10 @@ This is a boundary repair, not learning proof. No capability is promoted. A
 real-model, isolated public-runtime canary still must prove pattern/template
 selection, grounded traceable variation, publication/result/learning lineage,
 later decision transfer, and a retained-vs-removed independent counterfactual.
+## 2026-09-17 autonomous learning canary delta (candidate e6b9f22)
+
+- Preserved failed public real-model canary runs in `qa-learnings/autonomous-learning-canary-e6b9f22-2026-09-17.md`.
+- Runtime artifact localized the first failure to `consideration → strategy/template decision`: the original-post decision had a strategy retrieval run but no selected pattern/template and no explicit exploration reason. The prior decision → intent propagation repair remains valid.
+- Added validation for autonomous original-post cognition so learned use versus novel exploration is explicit; no template is forced.
+- Real-model public Sandbox partial run completed with OpenAI `gpt-5.6-luna` low, auto execution, simulated delivery, and a strategy learning update, but it did not include the full composed learning canary (own weak post, delayed measurement, transfer/retirement/media ablations, or independent counterfactual). No status changed to PROVEN.
+- Next single highest-impact gate: rerun the real public-runtime canary on the repaired candidate and complete the causal learning lineage through measurement, disposition, later decision, and learned-artifact-removed counterfactual.
