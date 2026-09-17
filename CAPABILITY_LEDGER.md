@@ -248,6 +248,25 @@ independent adversarial threshold review or complete causal-provenance gate;
 
 ## Update protocol
 
+## Immutable candidate reassessment — `bc735ab` — 2026-09-17
+
+The frozen candidate `bc735ab0648e34b9118900e3b2eea81c5cceac8d` passed the
+canonical composed seven-day public Sandbox trajectory, the exact-candidate
+independent verifier (8 files / 90 tests, including cross-process replay and
+cross-rate verification), and final release health (lint with zero errors,
+typecheck, production build, and 130 files / 1,216 tests). Evidence is
+recorded in `qa-learnings/release-candidate-bc735ab-2026-09-17.md`.
+
+This delta reuses all prior passing evidence and validates the new fork-local
+strategy attribution and goal-anchored Sandbox outcome provenance in the
+composed system. No additional capability is promoted by this checkpoint:
+the remaining PARTIAL rows retain their exact gates for independent
+research/delivery, complete causal-cone reconstruction, autonomous
+milestone/interruption-threshold review, goal-attributed learning and future
+allocation difference, action-faithful ablation, stale-pattern retirement,
+relevant-media learning, adversarial natural-supervision review, and
+independent legacy-migration ablation. Replay closure remains complete.
+
 Latest integrated Sandbox evidence (2026-09-16): the real CLI-launched
 mandatory trajectory began with zero user Assignments, materialized one
 session-scoped Agent-owned Sandbox responsibility, ran for 10,080 virtual
