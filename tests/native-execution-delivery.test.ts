@@ -77,6 +77,29 @@ describe("Autonomous native execution delivery", () => {
     expect(x.likeXPost).toHaveBeenCalledTimes(1);
   });
 
+  it("does not cross the connector boundary while a native retry is in backoff", async () => {
+    const targetId = `post_backoff_test_${Date.now()}_${Math.random()}`;
+    let state = createAgent({ name: "Backoff Test", description: "Test", audience: "Testers", mode: "agent", handle: "@backoff_test", accent: "#777777" });
+    const presence = { ...state.presence!, id: "presence_backoff_test", status: "live" as const, channel: "x" as const, environment: "live" as const, execution: { ...state.presence!.execution, like: "auto" as const } };
+    const connection: NativeChannelConnection = { id: "native_backoff_test", presenceId: presence.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account_backoff_test", username: "backoff_test", name: "Backoff Test" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    state.presence = presence;
+    state.presences = [presence];
+    state.nativeConnections = [connection];
+    state.mirrorObjects = [{ id: "mirror_backoff_test", bridgeId: connection.id, presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: targetId }, objectType: "post", language: "en", content: { text: "A target during retry backoff", language: "en" }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", archived: false, environment: "live" } as never];
+    state = formXActionIntent(state, { affordance: "x.like", target: { type: "x.post", id: targetId } });
+    const execution = state.executions[0]!;
+    execution.retryAt = new Date(Date.now() + 60_000).toISOString();
+
+    vi.spyOn(x, "readNativeXCredentials").mockReturnValue({ apiKey: "key", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" });
+    const like = vi.spyOn(x, "likeXPost").mockResolvedValue({ type: "x.like", id: "should-not-exist" });
+    process.env.OPENPRESENCE_TEST_MODE = "0";
+
+    const delivered = await deliverNativeExecutions(state, new Set([execution.id]));
+
+    expect(delivered.executions.find((item) => item.id === execution.id)).toMatchObject({ status: "queued", retryAt: execution.retryAt });
+    expect(like).not.toHaveBeenCalled();
+  });
+
   it("allows only one Native write when concurrent stale workers generated different replies to one target", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
