@@ -5892,7 +5892,7 @@ export async function POST(request: Request) {
         const action = /\b(cancel|remove|don't do|do not do)\b/.test(lowered) ? "cancel" : /\b(pause|hold)\b/.test(lowered) ? "pause" : "constrain";
         let next = recordOperatorConversationMessage(current, { presenceId: parsed.presenceId, threadId: parsed.threadId, content: note, assignmentId: assignment.id, clientRequestId: parsed.clientRequestId });
         next = applyOperation(next, { type: "planIntervention", assignmentId: assignment.id, action, note, ...(action === "constrain" ? { instruction: note } : {}) });
-        next = recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, threadId: parsed.threadId, role: "presence", content: action === "cancel" ? "Got it. I closed that responsibility and will keep the rest of the plan coherent." : action === "pause" ? "Got it. I paused that responsibility; I’ll keep it available until you want it resumed." : "Got it. I updated the responsibility with that guidance and will carry it into the next step." });
+        next = recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, threadId: parsed.threadId, role: "presence", content: action === "cancel" ? (assignment.origin === "publishing_initiative" ? "Got it. I canceled that planned item and will keep the rest of the plan coherent." : "Got it. I closed that responsibility and will keep the rest of the plan coherent.") : action === "pause" ? "Got it. I paused that responsibility; I’ll keep it available until you want it resumed." : "Got it. I updated the responsibility with that guidance and will carry it into the next step." });
         writeState(next);
         return stateResponse(request, next);
       }

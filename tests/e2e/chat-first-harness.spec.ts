@@ -109,6 +109,51 @@ test("Calendar intervention updates Agent-owned work and survives reload", async
   await expect(page.getByLabel("Tell Jenny something about this")).toHaveValue("");
 });
 
+test("Canceling an Agent-owned publishing item preserves the responsibility and successor plan", async ({ page, request }) => {
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Jenny");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+
+  const before = await request.get("/api/state").then((response) => response.json());
+  const configured = await request.post("/api/state", {
+    data: {
+      type: "setPresence",
+      patch: {
+        connectionMode: "sandbox",
+        publishingInitiative: { ...before.presence.publishingInitiative, mode: "pace", target: { count: 1, period: "day" } },
+      },
+    },
+  });
+  expect(configured.ok()).toBeTruthy();
+  const planned = await request.post("/api/state", { data: { type: "replanPublishing", presenceId: before.presence.id } });
+  expect(planned.ok()).toBeTruthy();
+  const plannedState = await planned.json();
+  const priorPlan = plannedState.publishingPlans.find((item: { status?: string }) => item.status === "active");
+  expect(priorPlan?.id).toBeTruthy();
+  expect(priorPlan?.windows?.some((item: { status?: string }) => item.status === "future")).toBe(true);
+
+  await page.getByRole("button", { name: "Tasks", exact: true }).click();
+  const projectedItem = page.locator(".schedule-plan-projection-item").first();
+  await expect(projectedItem).toBeVisible();
+  await projectedItem.click();
+  await expect(page.getByRole("button", { name: "Cancel planned item", exact: true })).toBeVisible();
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "Cancel planned item", exact: true }).click();
+
+  await expect.poll(async () => {
+    const next = await request.get("/api/state").then((response) => response.json());
+    const active = next.publishingPlans.filter((item: { status?: string }) => item.status === "active");
+    const prior = next.publishingPlans.find((item: { id?: string }) => item.id === priorPlan.id);
+    const assignment = next.assignments.find((item: { origin?: string }) => item.origin === "publishing_initiative");
+    return { activePlans: active.length, priorStatus: prior?.status, assignmentStatus: assignment?.status, planRevision: active[0]?.revision };
+  }).toEqual({ activePlans: 1, priorStatus: "superseded", assignmentStatus: "active", planRevision: priorPlan.revision + 1 });
+
+  await page.reload();
+  await expect.poll(async () => page.locator(".schedule-plan-projection-item").count()).toBeGreaterThan(0);
+  await page.locator(".schedule-plan-projection-item").first().click();
+  await expect(page.getByRole("button", { name: "Cancel planned item", exact: true })).toBeVisible();
+});
+
 test("Context sidebar owns its view controls and the workspace theme toggles", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");

@@ -13727,11 +13727,14 @@ function ScheduleView({
     return isProcessing;
   });
   const cancelAssignment = async (assignment: OpenPresenceState["assignments"][number]) => {
-    if (!window.confirm(`Cancel this Assignment?\n\n${cleanUserFacingAssignmentInstruction(assignment.instruction)}`)) return;
+    const publishingItem = assignment.origin === "publishing_initiative";
+    if (!window.confirm(`${publishingItem ? "Cancel the next planned publishing item?" : "Cancel this Assignment?"}\n\n${cleanUserFacingAssignmentInstruction(assignment.instruction)}`)) return;
     setCancellingId(assignment.id);
     try {
-      const next = await mutate({ type: "cancelAssignment", id: assignment.id });
-      if (next) setSelectedAssignmentId(null);
+      const next = publishingItem
+        ? await mutate({ type: "sendPresenceNudge", presenceId, assignmentId: assignment.id, content: "Cancel the next planned publishing item and keep the rest of the plan coherent.", clientRequestId: `schedule-cancel-${assignment.id}-${Date.now()}` })
+        : await mutate({ type: "cancelAssignment", id: assignment.id });
+      if (next && !publishingItem) setSelectedAssignmentId(null);
     } finally {
       setCancellingId(null);
     }
@@ -13917,7 +13920,7 @@ function ScheduleView({
             )}
             {!["completed", "completed_with_adaptation", "cancelled", "failed", "expired_incomplete"].includes(selectedAssignment.status) && (
               <Button variant="danger" disabled={cancellingId === selectedAssignment.id} onClick={() => void cancelAssignment(selectedAssignment)}>
-                {cancellingId === selectedAssignment.id ? <><LoaderCircle size={14} className="spin" /> Closing…</> : selectedAssignment.status === "needs_operator" || selectedAssignment.status === "blocked" ? "Close Assignment" : "Cancel Assignment"}
+                {cancellingId === selectedAssignment.id ? <><LoaderCircle size={14} className="spin" /> {selectedAssignment.origin === "publishing_initiative" ? "Canceling…" : "Closing…"}</> : selectedAssignment.origin === "publishing_initiative" ? "Cancel planned item" : selectedAssignment.status === "needs_operator" || selectedAssignment.status === "blocked" ? "Close Assignment" : "Cancel Assignment"}
               </Button>
             )}
           </div>
