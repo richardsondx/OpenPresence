@@ -124,6 +124,13 @@ function assertPersistedGraphIsCoherent(state: OpenPresenceState, sessionId: str
   expect(trajectory.some((record) => record.kind === "retry_failed")).toBe(true);
   expect(trajectory.some((record) => record.kind === "retry_exhausted")).toBe(true);
   expect(trajectory.some((record) => record.kind === "outcome_recorded")).toBe(true);
+  const measuredFollowThrough = state.assignments.filter((item) => item.sessionId === sessionId && item.followThrough?.status === "measured");
+  for (const assignment of measuredFollowThrough) {
+    const learning = trajectory.filter((record) => record.kind === "learning" && record.data && typeof record.data === "object" && (record.data as { assignmentId?: unknown }).assignmentId === assignment.id);
+    const replans = trajectory.filter((record) => record.kind === "replan" && record.data && typeof record.data === "object" && (record.data as { assignmentId?: unknown }).assignmentId === assignment.id);
+    expect(learning).toHaveLength(1);
+    expect(replans.length).toBeGreaterThanOrEqual(1);
+  }
 }
 
 async function runAtRate(rateMinutes: number): Promise<RunSummary> {

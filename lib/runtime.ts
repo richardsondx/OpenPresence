@@ -3432,7 +3432,7 @@ function temporalKernelForSession(session: PlaygroundSession) {
 }
 
 /** Join the persisted Sandbox temporal evidence to domain-record IDs. */
-function recordSandboxTrajectoryInPlace(state: OpenPresenceState, sessionId: string, kind: string, data: Record<string, unknown>, at?: string) {
+export function recordSandboxTrajectoryInPlace(state: OpenPresenceState, sessionId: string, kind: string, data: Record<string, unknown>, at?: string) {
   const session = state.playgroundSessions.find((item) => item.id === sessionId);
   if (!session) return;
   let kernel: SandboxTemporalKernel;
@@ -3989,14 +3989,32 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
     const assignment = state.assignments.find((item) => item.id === execution.assignmentId);
     if (assignment) {
       assignment.progress.verified += 1;
-      assignment.status = assignmentIsSatisfied(assignment) ? "completed" : "active";
-      assignment.work = { ...(assignment.work ?? { phase: "publishing", attempts: 0, maxAttempts: 4, storiesResearched: 0 }), phase: assignmentIsSatisfied(assignment) ? "completed" : "candidate_review" };
+      const measuredOutcomeEventId = `assignment-measurement:${assignment.id}:${outcome.id}`;
+      const satisfied = assignmentIsSatisfied(assignment);
+      if (satisfied && (!assignment.followThrough || assignment.followThrough.deliveryOutcomeId !== outcome.id)) {
+        const kernel = temporalKernelForSession(session);
+        // Domain outcomes are not temporal kernel events. Create an explicit
+        // same-time causal bridge so delayed measurement remains valid across
+        // persistence/replay and cannot be scheduled against a phantom cause.
+        const deliveryCauseEventId = `assignment-delivery:${outcome.id}`;
+        kernel.scheduleEvent({ id: deliveryCauseEventId, type: "world_observation", at: kernel.now, payload: { assignmentId: assignment.id, deliveryOutcomeId: outcome.id } });
+        kernel.scheduleDelayedOutcome({ id: measuredOutcomeEventId, causeEventId: deliveryCauseEventId, offsetMs: 60 * 60_000, value: { assignmentId: assignment.id, deliveryOutcomeId: outcome.id, measured: true } });
+        session.temporalSnapshot = kernel.snapshot();
+        assignment.followThrough = { status: "awaiting_measurement", deliveryOutcomeId: outcome.id, measurementEventId: measuredOutcomeEventId };
+      }
+      const awaitingMeasurement = assignment.followThrough?.status === "awaiting_measurement";
+      assignment.status = satisfied && !awaitingMeasurement ? "completed" : "active";
+      assignment.work = { ...(assignment.work ?? { phase: "publishing", attempts: 0, maxAttempts: 4, storiesResearched: 0 }), phase: satisfied && !awaitingMeasurement ? "completed" : "candidate_review" };
       assignment.updatedAt = now();
-      assignment.lastOutcome = { class: assignmentIsSatisfied(assignment) ? "assignment_completed" : "incomplete", message: assignmentIsSatisfied(assignment) ? "Verified publication satisfied the requested deliverable." : "Verified publication recorded; more work remains.", at: now() };
+      assignment.lastOutcome = { class: satisfied && !awaitingMeasurement ? "assignment_completed" : "incomplete", message: satisfied && awaitingMeasurement ? "Delivery was verified. I’m watching the delayed outcome before closing this responsibility." : satisfied ? "Verified publication satisfied the requested deliverable." : "Verified publication recorded; more work remains.", at: now() };
       assignment.attemptHistory = [...(assignment.attemptHistory ?? []), { id: id("assignment-attempt"), attempt: assignment.work.attempts, phase: assignment.work.phase, outcome: assignment.lastOutcome.class, message: assignment.lastOutcome.message, at: assignment.lastOutcome.at }].slice(-24);
-      state.events.unshift({ ...event("execution", assignmentIsSatisfied(assignment) ? "Assignment complete" : "Assignment progress updated", `${assignment.progress.verified} / ${assignment.progress.required} verified publications.`, "positive", { presenceId: presence.id, executionId: execution.id }), sessionId: session.id });
-      recordSandboxTrajectoryInPlace(state, session.id, "learning", { assignmentId: assignment.id, outcomeId: outcome.id, verified: assignment.progress.verified, required: assignment.progress.required, lesson: "Sandbox outcome verified in the simulated world.", causal: { parentIds: [outcome.id] } }, now());
-      if (!assignmentIsSatisfied(assignment)) recordSandboxTrajectoryInPlace(state, session.id, "replan", { assignmentId: assignment.id, outcomeId: outcome.id, reason: "The verified outcome did not yet satisfy the Assignment; more work remains.", causal: { parentIds: [outcome.id] } }, now());
+      state.events.unshift({ ...event("execution", satisfied && !awaitingMeasurement ? "Assignment complete" : "Assignment progress updated", `${assignment.progress.verified} / ${assignment.progress.required} verified publications.`, "positive", { presenceId: presence.id, executionId: execution.id }), sessionId: session.id });
+      if (!satisfied) {
+        recordSandboxTrajectoryInPlace(state, session.id, "learning", { assignmentId: assignment.id, outcomeId: outcome.id, verified: assignment.progress.verified, required: assignment.progress.required, lesson: "Sandbox outcome verified in the simulated world.", causal: { parentIds: [outcome.id] } }, now());
+        recordSandboxTrajectoryInPlace(state, session.id, "replan", { assignmentId: assignment.id, outcomeId: outcome.id, reason: "The verified outcome did not yet satisfy the Assignment; more work remains.", causal: { parentIds: [outcome.id] } }, now());
+      } else if (awaitingMeasurement) {
+        recordSandboxTrajectoryInPlace(state, session.id, "measurement_scheduled", { assignmentId: assignment.id, deliveryOutcomeId: outcome.id, measurementEventId: measuredOutcomeEventId, causal: { parentIds: [outcome.id] } }, now());
+      }
 
     }
   }

@@ -10630,15 +10630,6 @@ function MirrorPanel({
                       >
                         Ask Genny to evaluate
                       </button>
-                      <button
-                        type="button"
-                        className="mirror-reply-action"
-                        onClick={() => onContext(item)}
-                        title="Create an explicit operator assignment for this observed post"
-                        style={{ fontSize: "11px", color: "var(--text-muted, #777)", background: "transparent", border: "none", cursor: "pointer" }}
-                      >
-                        Assignment…
-                      </button>
                     </div>
                   )}
                 </div>
@@ -13705,6 +13696,9 @@ function ScheduleView({
   const selectedPresence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   const presenceName = selectedPresence?.name ?? "this Presence";
   const timezone = presenceTimezone(selectedPresence);
+  // Legacy task-entry/editor state remains quarantined below for persisted
+  // compatibility. It is intentionally unreachable from the primary UX;
+  // Chat owns new work and plan interventions.
   const assetCollections = (state.assetCollections ?? []).filter((collection) => collection.agentId === state.agent?.id && collection.status === "active");
   const [showForm, setShowForm] = useState(false);
   const [instruction, setInstruction] = useState("");

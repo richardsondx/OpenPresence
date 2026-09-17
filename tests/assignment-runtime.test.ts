@@ -433,7 +433,12 @@ describe("Sandbox assignment runtime", () => {
     const result = await waitForAssignment(assignmentId);
     const assignment = result.assignments.find((item) => item.id === assignmentId);
     expect(assignment).toMatchObject({ status: "completed", progress: { verified: 1 }, rejectedCandidates: 2 });
-    expect(assignment?.attemptHistory?.map((item) => item.outcome)).toEqual(["candidate_rejected", "candidate_rejected", "assignment_completed"]);
+    expect(assignment?.attemptHistory?.map((item) => item.outcome)).toEqual(["candidate_rejected", "candidate_rejected", "incomplete", "assignment_completed"]);
+    expect(assignment?.followThrough).toMatchObject({ status: "measured", deliveryOutcomeId: expect.any(String), measurementEventId: expect.any(String), planRevision: expect.any(Number) });
+    const trajectory = result.playgroundSessions.find((item) => item.id === sessionId)?.temporalSnapshot?.trajectory ?? [];
+    expect(trajectory.filter((item) => item.kind === "measurement_scheduled")).toHaveLength(1);
+    expect(trajectory.filter((item) => item.kind === "learning" && item.data && typeof item.data === "object" && (item.data as { assignmentId?: unknown }).assignmentId === assignmentId)).toHaveLength(1);
+    expect(trajectory.some((item) => item.kind === "replan" && item.data && typeof item.data === "object" && (item.data as { assignmentId?: unknown }).assignmentId === assignmentId)).toBe(true);
     expect(result.publications.some((item) => item.assignmentId === assignmentId)).toBe(true);
   });
 

@@ -2427,6 +2427,15 @@ export interface Assignment {
     at: string;
   }>;
   lastOutcome?: { class: AssignmentOutcomeClass; message: string; at: string };
+  /** Verified delivery remains an owned responsibility until delayed outcome measurement. */
+  followThrough?: {
+    status: "awaiting_measurement" | "measured";
+    deliveryOutcomeId: string;
+    measurementEventId: string;
+    measuredAt?: string;
+    learningRecordedAt?: string;
+    planRevision?: number;
+  };
   completionReport?: string;
   lastEvaluatedAt?: string;
   nextDueAt?: string;

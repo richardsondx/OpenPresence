@@ -24,7 +24,7 @@ import { scheduleSandboxRetry } from "@/lib/runtime";
 import { cancelSandboxRetry } from "@/lib/runtime";
 import { createSandboxCheckpoint, forkSandboxCheckpoint, restoreSandboxCheckpoint } from "@/lib/runtime";
 import { SandboxTemporalKernel } from "@/lib/sandbox-temporal";
-import { assignmentPublicExpressionLeakageReason } from "@/lib/runtime";
+import { assignmentPublicExpressionLeakageReason, recordSandboxTrajectoryInPlace } from "@/lib/runtime";
 import { activeAssignmentPursuitWindow, assignmentPursuitBlocksNormalScheduling, assignmentPursuitHasHardResourceCapacity, assignmentPursuitUsage, assignmentPursuitVerifiedCounts, isPromotionBurstWindow, promotionBurstHasVerifiedDirectSource, promotionExpressionIssue, settlePromotionBurstProgress } from "@/lib/runtime";
 import { attentionGovernorSnapshot, requestAttentionCapacity } from "@/lib/attention-governor";
 import { requestAttention } from "@/lib/attention-coordinator";
@@ -3523,6 +3523,8 @@ function mergeAssignmentWorkerResult(latest: OpenPresenceState, worked: OpenPres
   const next = JSON.parse(JSON.stringify(latest)) as OpenPresenceState;
   const workedAssignment = worked.assignments.find((item) => item.id === assignmentId);
   if (workedAssignment) next.assignments = next.assignments.map((item) => item.id === assignmentId ? workedAssignment : item);
+  const workedSession = workedAssignment?.sessionId ? worked.playgroundSessions.find((item) => item.id === workedAssignment.sessionId) : undefined;
+  if (workedSession) next.playgroundSessions = next.playgroundSessions.map((item) => item.id === workedSession.id ? workedSession : item);
   const mergeById = <T extends { id: string }>(current: T[], incoming: T[]) => {
     const incomingIds = new Set(incoming.map((item) => item.id));
     return [...incoming, ...current.filter((item) => !incomingIds.has(item.id))];
@@ -4604,6 +4606,9 @@ async function runSandboxAssignment(source: OpenPresenceState, assignmentId: str
     if (!updated || updated.status === "completed" || updated.status === "blocked" || updated.status === "cancelled") return next;
     const latestExecution = next.executions.find((item) => item.assignmentId === assignmentId && item.sessionId === sessionId && !initialExecutions.has(item.id));
     if (latestExecution && latestExecution.status !== "succeeded") return recordAssignmentDecision(next, assignmentId, latestExecution.failure?.code === "LANGUAGE_POLICY_VIOLATION" ? "language_policy_failed" : "delivery_failed", latestExecution.failure?.message ?? "The candidate was formed, but Sandbox delivery did not complete. No publication was counted.");
+    // Delivery has satisfied the requested act. Follow-through is settled by
+    // the delayed measurement boundary, not by asking the worker to publish
+    // additional actions in the same run.
     if (assignmentIsSatisfied(updated)) return next;
     if (updated.lastOutcome?.class !== "candidate_rejected") {
       updated.status = "active";
@@ -4649,11 +4654,20 @@ async function processAssignmentRun(runId: string) {
   }
   const onProgress = (phase: "researching" | "visual_research" | "publishing") => persistAssignmentProgress(runId, phase, owner);
   try {
-    const worked = await runSandboxAssignment(claimed, assignment.id, session.id, { assignmentRunId: runId, onProgress });
+    let worked = await runSandboxAssignment(claimed, assignment.id, session.id, { assignmentRunId: runId, onProgress });
+    const workedAssignment = worked.assignments.find((item) => item.id === assignment.id);
+    if (workedAssignment?.followThrough?.status === "awaiting_measurement") {
+      // Worker-owned Sandbox runs must exercise the same delayed measurement
+      // boundary as public virtual-time control before settling the durable
+      // AssignmentRun. This keeps delivery and outcome ownership distinct
+      // without leaving the worker to misclassify a pending measurement.
+      const advanced = advanceSandboxTimeWithTemporalEvents(worked, session.id, 60);
+      worked = await applySandboxTemporalEvents(advanced.state, session.id, advanced.processed);
+    }
     const latest = readState();
     let merged = mergeAssignmentWorkerResult(latest, worked, assignment.id, runId);
     const completedAssignment = merged.assignments.find((item) => item.id === assignment.id);
-    const published = Boolean(completedAssignment && assignmentIsSatisfied(completedAssignment));
+    const published = Boolean(completedAssignment && assignmentIsSatisfied(completedAssignment) && completedAssignment.followThrough?.status !== "awaiting_measurement");
     const terminalStatus: AssignmentRunStatus = published ? "published" : completedAssignment?.status === "blocked" ? "blocked" : "failed";
     const completedWork = completedAssignment ? assignmentWorkDefaults(completedAssignment) : undefined;
     merged = checkpointAssignmentRun(merged, runId, { status: terminalStatus, currentStage: published ? "completed" : "blocked", attempts: completedWork?.attempts ?? 0, rejectedCandidates: completedAssignment?.rejectedCandidates ?? 0, completedAt: new Date().toISOString(), heartbeatAt: new Date().toISOString(), leaseOwner: undefined, leaseExpiresAt: undefined, lastError: completedAssignment?.lastOutcome?.message }, published ? { status: "completed", work: { ...completedWork!, phase: "completed" } } : undefined);
@@ -4702,6 +4716,37 @@ async function applySandboxTemporalEvents(source: OpenPresenceState, sessionId: 
   if (deferredAdvance) eventTrajectory = eventTrajectory.filter((record) => record.sequence !== deferredAdvance.sequence);
   try {
     for (const event of processed) {
+      if (event.type === "outcome") {
+        const session = next.playgroundSessions.find((item) => item.id === sessionId);
+        const outcomeId = event.payload && typeof event.payload === "object" && "outcomeId" in event.payload
+          ? String((event.payload as { outcomeId: unknown }).outcomeId)
+          : undefined;
+        const temporalOutcome = session?.temporalSnapshot?.outcomes.find((item) => item.id === outcomeId && item.eventId === event.id && item.status === "recorded");
+        const value = temporalOutcome?.value && typeof temporalOutcome.value === "object"
+          ? temporalOutcome.value as { assignmentId?: unknown; deliveryOutcomeId?: unknown }
+          : undefined;
+        if (typeof value?.assignmentId === "string" && typeof value.deliveryOutcomeId === "string") {
+          const assignment = next.assignments.find((item) => item.id === value.assignmentId && item.sessionId === sessionId);
+          if (assignment?.followThrough?.status === "awaiting_measurement" && assignment.followThrough.measurementEventId === outcomeId && assignment.followThrough.deliveryOutcomeId === value.deliveryOutcomeId) {
+            const measuredAt = new Date(event.at).toISOString();
+            assignment.followThrough = { ...assignment.followThrough, status: "measured", measuredAt, learningRecordedAt: measuredAt, planRevision: (assignment.revision ?? 0) + 1 };
+            assignment.revision = (assignment.revision ?? 0) + 1;
+            assignment.status = "completed";
+            assignment.work = { ...assignmentWorkDefaults(assignment), phase: "completed" };
+            assignment.lastOutcome = { class: "assignment_completed", message: "The delayed outcome was measured and incorporated into the plan. This responsibility is complete.", at: measuredAt };
+            assignment.updatedAt = measuredAt;
+            assignment.attemptHistory = [...(assignment.attemptHistory ?? []), { id: `attempt-${randomUUID()}`, attempt: assignment.work.attempts, phase: "completed" as const, outcome: "assignment_completed" as const, message: assignment.lastOutcome.message, at: measuredAt }].slice(-24);
+            recordSandboxTrajectoryInPlace(next, sessionId, "learning", { assignmentId: assignment.id, deliveryOutcomeId: value.deliveryOutcomeId, measurementEventId: outcomeId, lesson: "Measured outcome evidence revised the next decision for this responsibility.", causal: { parentIds: [value.deliveryOutcomeId, event.id] } }, measuredAt);
+            recordSandboxTrajectoryInPlace(next, sessionId, "replan", { assignmentId: assignment.id, measurementEventId: outcomeId, planRevision: assignment.revision, reason: "The measured outcome closed delivery follow-through and revised the next plan decision.", causal: { parentIds: [event.id] } }, measuredAt);
+            const updatedSession = next.playgroundSessions.find((item) => item.id === sessionId);
+            if (updatedSession?.temporalSnapshot) {
+              eventTrajectory = updatedSession.temporalSnapshot.trajectory;
+              nextTrajectoryNumber = updatedSession.temporalSnapshot.nextTrajectoryNumber;
+            }
+          }
+        }
+        continue;
+      }
       if (event.type === "scenario_stimulus") {
         if (event.status && event.status !== "fired") continue;
         if (!event.payload || typeof event.payload !== "object") continue;
