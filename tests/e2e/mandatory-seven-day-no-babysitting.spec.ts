@@ -13,6 +13,7 @@ type CliResult = {
 
 type Snapshot = {
   session: JsonRecord;
+  publishingPlans: JsonRecord[];
   mirrorObjects: JsonRecord[];
   assignments: JsonRecord[];
   intents: JsonRecord[];
@@ -194,6 +195,7 @@ async function readSnapshot(request: import("@playwright/test").APIRequestContex
   const session = records(state.playgroundSessions).find((item) => text(item.id) === sessionId) ?? {};
   return {
     session,
+    publishingPlans: records(state.publishingPlans).filter((item) => text(item.presenceId) === text(session.presenceId)),
     mirrorObjects: records(state.mirrorObjects).filter((item) => text(item.sessionId) === sessionId),
     assignments: records(state.assignments).filter((item) => text(item.sessionId) === sessionId || text(item.presenceId) === text(session.presenceId)),
     intents: records(state.socialIntents).filter((item) => text(item.sessionId) === sessionId),
@@ -308,6 +310,14 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     expect(sessionId).toBeTruthy();
     expect(startSession.seed).toBe(seed);
 
+    // Materialize the Agent-owned plan through the public state path so the
+    // breaking-world stimulus below can prove plan invalidation, successor
+    // creation, and continued Calendar/Assignment projection coherency.
+    const planResponse = await request.post("/api/state", { data: { type: "replanPublishing", presenceId } });
+    expect(planResponse.ok(), "The Agent-owned publishing plan was not materialized.").toBeTruthy();
+    const planned = record(await planResponse.json());
+    expect(records(planned.publishingPlans).some((plan) => text(plan.status) === "active"), "The Agent-owned plan was not active before the breaking event.").toBe(true);
+
     const trajectory: TrajectoryStep[] = [];
     let previous = await readSnapshot(request, sessionId!);
     let current = previous;
@@ -385,6 +395,8 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     const measurementCount = current.outcomes.length + current.growthReviews.length + current.evidenceRecords.length + current.publicationMetrics.length;
     const blockers = current.events.filter(isExplicitBlocker).map(eventProjection);
     const autonomousWakeCount = current.events.filter((event) => event.title === "Sandbox autonomous attention wake" && event.sessionId === sessionId).length;
+    const activePlans = current.publishingPlans.filter((plan) => text(plan.status) === "active");
+    const supersededPlans = current.publishingPlans.filter((plan) => text(plan.status) === "superseded");
     const sessionIntents = current.intents;
     const sessionIntentIds = new Set(sessionIntents.map((intent) => text(intent.id)));
     const sessionExecutionIds = new Set(current.executions.map((execution) => text(execution.id)));
@@ -441,7 +453,7 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
       virtualDurationMinutes: elapsedMinutes,
       requiredVirtualDurationMinutes: dayMinutes,
       baseline: { goal: text(record(created.agent).description), userAssignmentCount: baselineAssignments.length, presence: { connectionMode: text(record(baseline.presence).connectionMode), environment: text(record(baseline.presence).environment) } },
-      totals: { agentAssignments: agentAssignments.length, autonomousIntents: autonomousIntents.length, autonomousExecutions: autonomousExecutions.length, outcomes: current.outcomes.length, measurements: measurementCount, blockers: blockers.length, autonomousWakeCount, causalGraph },
+      totals: { agentAssignments: agentAssignments.length, autonomousIntents: autonomousIntents.length, autonomousExecutions: autonomousExecutions.length, outcomes: current.outcomes.length, measurements: measurementCount, blockers: blockers.length, autonomousWakeCount, activePlans: activePlans.length, supersededPlans: supersededPlans.length, causalGraph },
       assertions: { sevenDaysAdvanced: (elapsedMinutes ?? 0) >= dayMinutes, dailyAutonomousWakes: autonomousWakeCount >= 7, noUserAssignment: baselineAssignments.length === 0, seededLaunch: text(startSession.seed) === seed, relevantMediaObserved: current.events.some((event) => /evaluation-chart|media/i.test(`${text(event.title) ?? ""} ${text(event.detail) ?? ""}`)), irrelevantMediaObserved: current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("unrelated product photo")), breakingEventObserved: current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("withdrawn")), selfGeneratedWork: agentAssignments.length > 0 || autonomousIntents.length > 0, followThrough: autonomousExecutions.length > 0, measurement: measurementCount > 0, explicitBlocker: blockers.length > 0, unexplainedIdleDays },
       dailyTrajectory,
       trajectory,
@@ -460,6 +472,9 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     expect(current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("baseline, denominator")), `The relevant media stimulus was not persisted. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
     expect(current.executions.every((execution) => text(execution.environment) === "sandbox"), `A live execution escaped the Sandbox. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
     expect(current.events.some((event) => text(event.title) === "Agent plan changed"), `The natural user correction did not mutate the Agent plan. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
+    expect(current.events.some((event) => text(event.title) === "Plan invalidation reviewed"), `The breaking event did not trigger an explicit plan invalidation review. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
+    expect(activePlans.length).toBe(1);
+    expect(supersededPlans.some((plan) => Number(plan.revision) < Number(activePlans[0]?.revision)), `The breaking event did not create a successor plan revision. Evidence: ${JSON.stringify(evidence)}`).toBe(true);
     expect(autonomousWakeCount, `The continuous responsibility did not receive one autonomous wake per simulated day. Evidence: ${JSON.stringify(evidence)}`).toBeGreaterThanOrEqual(7);
     expect(unexplainedIdleDays, `The Agent went idle without work or an explicit blocker. Evidence: ${JSON.stringify(evidence)}`).toEqual([]);
     expect(
