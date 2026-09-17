@@ -71,14 +71,18 @@ confidence estimate.
 | UX-003 | Environment and permission truth stays visible | Sandbox, review-gated, live, and disconnected states are not represented as equivalent | Isolated Chromium 2026-09-16 shows persistent `Sandbox · no public delivery` beside the Presence identity in Chat and Tasks | PARTIAL | Align the badge with Activity and verify live/review/disconnected states across the responsive journey |
 | SIM-001 | Simplification preserves protected behavior | Deletion is preceded by capability-level ablation | `.agents/skills/design-simplifier/SKILL.md`, `CAPABILITY_LEDGER.md` | PARTIAL | Perform one documented reversible ablation |
 
-Latest integrated Sandbox evidence (2026-09-16): the real CLI-launched
+Latest integrated Sandbox evidence (2026-09-17): the real CLI-launched
 mandatory trajectory began with zero user Assignments, materialized one
 Agent-owned Sandbox responsibility, ran for 10,080 virtual minutes, recorded
 seven autonomous wakes, four measured executions, natural user correction, a
 scoped `planIntervention`, and no live-environment execution. This strengthens
-SBX-001, SBX-005, SBX-008, SBX-009, EVAL-001, UX-001, and UX-005 but does not
-upgrade them because independent replay, hidden-truth, isolation, and complete
-causal reconstruction evidence remain incomplete.
+SBX-001, SBX-003, SBX-005, SBX-007, SBX-008, SBX-009, EVAL-001, UX-001, and
+UX-005. The canonical runtime matrix passed at 1x/24x/96x, and the independent
+verifier passed hidden-truth release, reset/session isolation, retry/cancellation
+races, cross-process replay invariants, and production-escape checks on exact
+implementation commit `1df71d1`. These close the corresponding proof gates;
+remaining promotion blockers are recorded in the closure manifest rather than
+being inferred from component tests alone.
 
 ## Update protocol
 

@@ -1,5 +1,7 @@
-import { randomUUID } from "node:crypto";
 import type { OpenPresenceState } from "./types";
+
+const newCommunicationId = () => globalThis.crypto?.randomUUID?.()
+  ?? `local_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 
 /**
  * Decide which completed Agent work deserves an unsolicited operator update.
@@ -222,7 +224,7 @@ export function recordAgentInitiatedUpdate(source: OpenPresenceState, presenceId
   if (!conversation) {
     const timestamp = new Date().toISOString();
     conversation = {
-      id: `operator_conversation_${randomUUID()}`,
+      id: `operator_conversation_${newCommunicationId()}`,
       agentId: state.agent?.id ?? "",
       presenceId,
       threadId: `thread:${presenceId}`,
@@ -240,7 +242,7 @@ export function recordAgentInitiatedUpdate(source: OpenPresenceState, presenceId
   }
   const timestamp = new Date().toISOString();
   conversation.messages.push({
-    id: `presence_message_${randomUUID()}`,
+    id: `presence_message_${newCommunicationId()}`,
     role: "presence",
     content: decision.summary,
     timestamp,
