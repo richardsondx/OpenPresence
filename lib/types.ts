@@ -2546,6 +2546,7 @@ export interface AssignmentPursuitWindow {
 }
 
 export interface SandboxEnvironment { id: string; presenceId: string; channelId: ChannelId; connectorId: string; status: "ready" | "active" | "paused" | "error"; createdAt: string; updatedAt: string; }
+export interface SandboxCheckpointRecord { id: string; sessionId: string; createdAt: string; digest: string; snapshot: unknown; label?: string; }
 export interface PlaygroundSession { id: string; environmentId: string; presenceId: string; channelId: ChannelId; source: "fresh" | "scenario" | "replay"; seed?: string; status: "ready" | "active" | "paused" | "completed"; virtualNow: string; virtualTimeMode?: "realtime" | "manual"; worldRevision?: number; temporalSnapshot?: SandboxTemporalSnapshot; createdAt: string; updatedAt: string; evaluatedSlotIds: string[]; judgedObjectIds?: string[]; scenarioRunId?: string; scenarioVersionId?: string; }
 export type ScenarioOwnerScope = "system" | "agent" | "presence";
 export type ScenarioSource = "builtin" | "natural_language" | "import";
@@ -2916,6 +2917,7 @@ export interface AgentPresenceDirectoryEntry {
 
 export interface OpenPresenceState extends AgentWorkspaceSnapshot {
   agents: Agent[]; activeAgentId: string | null; agentWorkspaces: AgentWorkspaceSnapshot[]; assignmentRuns?: AssignmentRun[];
+  sandboxCheckpoints?: SandboxCheckpointRecord[];
   /** Presence identity/status for Agents outside the currently open workspace. */
   agentPresenceDirectory?: AgentPresenceDirectoryEntry[];
   /** Identifies whether an API response contains the complete workspace or the compact Activity read model. Never persisted. */

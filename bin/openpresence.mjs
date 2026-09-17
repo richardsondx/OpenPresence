@@ -26,6 +26,8 @@ Playground commands:
   pause       Pause Sandbox virtual-time processing
   resume      Resume Sandbox virtual-time processing
   stage-outcome  Stage hidden world truth for later virtual-time release
+  checkpoint  Persist a portable full-world Sandbox checkpoint
+  restore     Restore a persisted Sandbox checkpoint by id
   schedule    Add a Calendar Standing Intent used by later Playground time advances
   timeline    Return the session's auditable event/intent/execution timeline
   rehearse    Consider an original publication and record the result
@@ -57,6 +59,8 @@ Common options:
   --cause-event <id>    Temporal cause event for stage-outcome
   --visible-after <n>   Minutes until staged outcome is observable
   --value-json <json>   JSON value held until staged outcome release
+  --label <text>        Optional checkpoint label
+  --checkpoint <id>     Persisted checkpoint id for restore
   --responsibility <mode>  Schedule mode: consider (default) or assign
   --id <id>            Existing Watch, Assignment, Calendar, or rehearsal id
   --reasons <list>     Comma-separated preference reasons for feedback
@@ -215,6 +219,7 @@ function projectState(state, explicitSessionId, mode = "inspect") {
       updatedAt: session.updatedAt,
       evaluatedSlotIds: session.evaluatedSlotIds ?? [],
       judgedObjectIds: session.judgedObjectIds ?? [],
+      checkpoints: (state.sandboxCheckpoints ?? []).filter((checkpoint) => checkpoint.sessionId === session.id).map(({ snapshot: _snapshot, ...checkpoint }) => checkpoint),
       temporal: session.temporalSnapshot ? {
         now: new Date(session.temporalSnapshot.now).toISOString(),
         paused: session.temporalSnapshot.paused,
@@ -667,6 +672,17 @@ async function executePlayground(baseUrl, command, options, positionals) {
     const visibleAfterMinutes = parseInteger(options["visible-after"] ?? positionals[0], "visible-after");
     const value = typeof options["value-json"] === "string" ? parseJsonOption(options["value-json"], "value-json") : undefined;
     return projectState(await postOperation(baseUrl, { type: "stageSandboxOutcome", sessionId: session.id, causeEventId, visibleAfterMinutes, value }), session.id, command);
+  }
+  if (command === "checkpoint") {
+    const current = await getState(baseUrl);
+    const session = sessionForOperation(current, options);
+    return projectState(await postOperation(baseUrl, { type: "createSandboxCheckpoint", sessionId: session.id, label: typeof options.label === "string" ? options.label : undefined }), session.id, command);
+  }
+  if (command === "restore") {
+    const current = await getState(baseUrl);
+    const session = sessionForOperation(current, options);
+    const checkpointId = required(options, "checkpoint");
+    return projectState(await postOperation(baseUrl, { type: "restoreSandboxCheckpoint", sessionId: session.id, checkpointId }), session.id, command);
   }
   if (command === "schedule") {
     const current = await getState(baseUrl);
