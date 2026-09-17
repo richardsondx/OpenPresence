@@ -3358,6 +3358,40 @@ export function recordPreferenceEvidence(source: OpenPresenceState, input: { ses
   return state;
 }
 
+/** Persist an explicit supervisory correction without treating it as a
+ * performance reward. Chat feedback is scoped to the Presence by default and
+ * remains available after the conversation or Sandbox session ends. */
+export function recordOperatorPreference(source: OpenPresenceState, input: { presenceId: string; note: string; reasons?: PreferenceReason[]; scopeHint?: "agent" | "presence" }) {
+  const state = cloneState(source);
+  const presence = state.presences.find((item) => item.id === input.presenceId) ?? state.presence;
+  const note = input.note.trim();
+  if (!presence || !state.agent || !note) throw new Error("An explicit preference needs a valid Presence and a non-empty correction.");
+  const normalized = note.toLowerCase().replace(/\s+/g, " ");
+  const duplicate = (state.preferenceEvidence ?? []).find((item) => item.source === "operator_explicit"
+    && item.agentId === state.agent?.id
+    && item.presenceId === presence.id
+    && item.note?.toLowerCase().replace(/\s+/g, " ") === normalized);
+  if (duplicate) return state;
+  const activeSession = state.playgroundSessions.find((session) => session.presenceId === presence.id && session.status === "active");
+  const evidence: PreferenceEvidence = {
+    id: id("preference"),
+    agentId: state.agent.id,
+    presenceId: presence.id,
+    sessionId: activeSession?.id ?? `operator-chat:${presence.id}`,
+    source: "operator_explicit",
+    subjectRef: { type: "decision", id: `operator-feedback:${id("decision")}` },
+    reaction: "does_not_fit",
+    reasons: input.reasons?.length ? [...new Set(input.reasons)] : undefined,
+    note,
+    scopeHint: input.scopeHint ?? "presence",
+    environment: presence.environment ?? "sandbox",
+    createdAt: now(),
+  };
+  state.preferenceEvidence.unshift(evidence);
+  state.events.unshift(event("learning", "Operator preference saved", `Saved a ${evidence.scopeHint}-scoped correction for ${presence.name}. It will guide relevant future decisions without becoming a reward score.`, "positive", { presenceId: presence.id, sourceObjectId: evidence.id }));
+  return state;
+}
+
 function sandboxAssetFromInput(state: OpenPresenceState, presence: Presence, session: PlaygroundSession, input: SandboxAssetInput, visibility: "public" | "private-community" | "private-thread" | "direct-message" | "unknown", shareability: "presence-only" | "agent-wide" | "public"): Asset {
   const timestamp = now();
   const sourceUrl = input.sourceUrl?.trim() || undefined;

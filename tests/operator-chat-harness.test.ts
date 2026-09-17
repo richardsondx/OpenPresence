@@ -139,6 +139,25 @@ describe("private operator Chat harness", () => {
     expect(saved.operatorConversations!.flatMap((item) => item.messages)).toContainEqual(expect.objectContaining({ role: "presence", replyToMessageId: original.message.id, content: "The plan is updated." }));
   });
 
+  it("persists an explicit Chat correction as scoped evidence and deduplicates it", async () => {
+    const original = fixture("Please don't use screenshots for this Presence. Keep visuals grounded in inspected evidence.");
+    const steps = [
+      { kind: "record_preference", note: "Do not use screenshots unless their contents have been inspected and grounded.", reasons: ["format"], scopeHint: "presence" },
+      { kind: "answer", text: "Got it — I’ll keep that constraint in mind for this Presence." },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => modelResponse(steps.shift() ?? { kind: "answer", text: "The preference is saved." })));
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+    const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
+    expect(saved.preferenceEvidence).toContainEqual(expect.objectContaining({ source: "operator_explicit", presenceId: original.presenceId, scopeHint: "presence", reaction: "does_not_fit", note: expect.stringContaining("inspected and grounded") }));
+    expect(saved.events).toContainEqual(expect.objectContaining({ title: "Operator preference saved", presenceId: original.presenceId }));
+    const persisted = saved.preferenceEvidence.filter((item) => item.source === "operator_explicit");
+    expect(persisted).toHaveLength(1);
+    const duplicate = applyOperation(saved, { type: "setPresence", patch: {} });
+    expect(duplicate.preferenceEvidence.filter((item) => item.source === "operator_explicit")).toHaveLength(1);
+    expect(getOperationalRun(run.id)?.state).toBe("succeeded");
+  });
+
   it("feeds checks back as tool turns and does not repeat identical external probes", async () => {
     vi.stubEnv("OPENPRESENCE_X_API_MOCK", "0");
     const original = fixture("Check my connection now, read-only.");

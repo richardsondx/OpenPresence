@@ -8,7 +8,7 @@ import { createAssetPerception } from "./perception";
 import { relationshipHistory, peopleForPresence } from "./network-memory";
 import { readNativeXCredentials, testXCredentials, upsertNativeXConnection, readRecentXPosts, searchRecentXPosts } from "./x";
 import { reconcileNativeX } from "./native-x";
-import { markNativeConnectionNeedsAttention, recordNativeObservation, recordResourceUsageEventInPlace, recordNativeMirrors, derivePresenceCapabilityManifest, applyOperation, formChatPostIntent, formXReplyIntent, formXActionIntent, formSandboxIntent, deliverSandboxExecution } from "./runtime";
+import { markNativeConnectionNeedsAttention, recordNativeObservation, recordResourceUsageEventInPlace, recordNativeMirrors, derivePresenceCapabilityManifest, applyOperation, formChatPostIntent, formXReplyIntent, formXActionIntent, formSandboxIntent, deliverSandboxExecution, recordOperatorPreference } from "./runtime";
 import { recordOperationalFailure } from "./incident-engine";
 import { queueOperatorAssignmentRetry } from "./assignment-recovery";
 import { isAgentToolEnabled, type OpenPresenceState, type PresenceChatAttachment } from "./types";
@@ -237,6 +237,11 @@ export async function executeChatRuntimeTool(state: OpenPresenceState, presenceI
     const learned = learnObservedSocialPattern(state, presenceId, step);
     next = learned.state;
     result = { hypothesis: learned.hypothesis, note: "Saved as an unproven strategy hypothesis. Future strategy retrieval can consider it; no public action occurred." };
+  } else if (step.kind === "record_preference") {
+    next = recordOperatorPreference(state, { presenceId, note: step.note, reasons: step.reasons, scopeHint: step.scopeHint });
+    const normalizedNote = step.note.toLowerCase().replace(/\s+/g, " ");
+    const preference = next.preferenceEvidence.find((item) => item.source === "operator_explicit" && item.presenceId === presenceId && item.note?.toLowerCase().replace(/\s+/g, " ") === normalizedNote);
+    result = { preferenceId: preference?.id, status: preference ? "saved" : "already-saved", scopeHint: preference?.scopeHint, note: "Saved as a scoped operator constraint. It does not publish or create work." };
   } else if (step.kind === "save_social_template") {
     const saved = saveSocialTemplate(state, presenceId, step);
     next = saved.state;
