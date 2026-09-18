@@ -339,7 +339,12 @@ const sandboxState = await postOperation({
     // review and autonomous publication loop.
     publishingInitiative: {
       ...(presence.publishingInitiative ?? { mode: "adaptive", timezone: "America/Toronto", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }),
-      mode: presence.publishingInitiative?.mode === "off" ? "adaptive" : (presence.publishingInitiative?.mode ?? "adaptive"),
+      // The canary needs an Agent-owned publishing responsibility with a
+      // bounded pace so a later source-backed variation has a legitimate
+      // autonomous work window. This remains a pace target, not a forced
+      // action quota; Taste and evidence may still reject a candidate.
+      mode: "pace",
+      target: { count: 3, period: "week" },
       updatedAt: new Date().toISOString(),
     },
   },
