@@ -897,3 +897,11 @@ precondition failed with zero measurable own posts
 `supported` disposition, retained-vs-removed counterfactual, or independent
 verification was claimed. The learning criteria remain unchanged and
 LEARN-002/003/004, AUT-001, EVAL-004, EVAL-005, and UX-004 remain PARTIAL.
+
+The canary harness was repaired to persist partial steps, provider events, and
+the failure object before rethrowing. A fresh `kimi-k3:cloud` run exercised
+that path and produced a complete failed artifact with session start followed
+by `Ollama is temporarily at capacity` and zero own posts:
+`/tmp/openpresence-learning-canary-ollama-k3-current.json`. This improves
+failed-run observability only; it does not satisfy the public learning canary,
+and no capability is promoted.
