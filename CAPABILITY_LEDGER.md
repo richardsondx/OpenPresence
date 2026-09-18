@@ -868,3 +868,18 @@ No capability is promoted. LEARN-002/003/004, AUT-001, EVAL-004, EVAL-005,
 and UX-004 remain PARTIAL. Independent verification remains deferred until the
 strict composed canary obtains a genuine supported disposition and a later
 decision difference when the learned artifact is removed.
+
+## 2026-09-18 consideration-to-decision and review-owner repair
+
+The autonomous Sandbox path now passes a session-scoped observed-post template
+into the same planner used for original cognition; previously, the durable
+hypothesis was persisted but only explicit rehearsal attached it as
+`strategyContext`. The public Growth Review route also accepts the active
+Agent-owned publishing responsibility, so a fresh autonomous Presence does not
+require a user-created follower Assignment to review publication evidence.
+
+Focused evidence after the planner repair: 112/112 tests passed and production
+build passed. A fresh real-model rerun reached the provider boundary but Ollama
+reported temporary capacity exhaustion (`/tmp/openpresence-learning-canary-ollama10.stderr`),
+so the repaired canary has not yet established supported transfer. No status
+changed and no capability is promoted.
