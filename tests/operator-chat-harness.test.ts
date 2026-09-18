@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateAgentReply, isAiRateLimitError, promptFor } from "../lib/ai";
 import { dispatchAutonomyWorker, executeAutonomyRun, queueAutonomyRun } from "../lib/autonomy-worker";
 import { getOperationalRun, readStateSnapshotForContext, resolvedDbPath, saveProviderSecret, upsertOperationalRun, writeState } from "../lib/db";
+import { legacyOperatorChatFailureMessage, operatorChatFailureMessage } from "../lib/chat-activity-presentation";
 import { parseOperatorChatStep } from "../lib/operator-chat-harness";
 import { recentChatItems } from "../lib/operator-chat-history";
 import { createOperatorNudge, linkOperatorChatAssignment, recordOperatorConversationMessage, settleNudgeFromAssignment, startQueuedNudge } from "../lib/operator-chat";
@@ -36,6 +37,59 @@ describe("private operator Chat harness", () => {
       strategyTemplateId: "growth-hypothesis:example",
     }));
     expect(parsed).toMatchObject({ kind: "assignment", timeframe: { startsAt: "2026-09-16T05:00:00-04:00", deadline: "2026-09-16T05:45:00-04:00" }, strategyTemplateId: "growth-hypothesis:example" });
+  });
+
+  it("accepts only the small reaction vocabulary on private answers", () => {
+    expect(parseOperatorChatStep(JSON.stringify({ kind: "answer", text: "I’ll make it easier to read.", reaction: "👍" }))).toMatchObject({ reaction: "👍" });
+    expect(() => parseOperatorChatStep(JSON.stringify({ kind: "answer", text: "Done.", reaction: "🚀" }))).toThrow();
+  });
+
+  it("persists a reaction separately from the Agent's prose", () => {
+    const original = fixture("Make this easier to read.");
+    const next = recordOperatorConversationMessage(original.state, { presenceId: original.presenceId, role: "presence", content: "I’ll simplify it now.", reaction: "👍", replyToMessageId: original.message.id });
+    const saved = next.operatorConversations?.flatMap((item) => item.messages).find((item) => item.replyToMessageId === original.message.id && item.role === "presence");
+    expect(saved).toMatchObject({ content: "I’ll simplify it now.", reaction: "👍" });
+  });
+
+  it("normalizes natural preference labels without losing the correction note", () => {
+    const parsed = parseOperatorChatStep(JSON.stringify({
+      kind: "record_preference",
+      note: "Keep OpenPresence workflows private; share the philosophy with indie hackers.",
+      reasons: ["privacy", "audience", "content boundary"],
+      scopeHint: "presence",
+    }));
+    expect(parsed).toMatchObject({ kind: "record_preference", reasons: ["other", "other", "other"], scopeHint: "presence" });
+  });
+
+  it("keeps validation details out of operator-facing failure copy", () => {
+    const failure = new Error(JSON.stringify([{ code: "invalid_enum_value", path: ["reasons", 0], received: "privacy" }]));
+    const message = operatorChatFailureMessage(failure);
+    expect(message).toBe("I hit a temporary problem while processing that. Your message is saved, so nothing was lost. Please retry the response.");
+    expect(message).not.toContain("invalid_enum_value");
+    expect(message).not.toContain("privacy");
+  });
+
+  it("renders an existing persisted validation leak as safe copy", () => {
+    const legacy = `I’m not able to answer yet. ${JSON.stringify([{ code: "invalid_enum_value", received: "privacy" }])}`;
+    expect(legacyOperatorChatFailureMessage(legacy)).toBe("I hit a temporary problem while processing that. Your message is saved, so nothing was lost. Please retry the response.");
+  });
+
+  it("persists readable copy when a structured model step is still invalid", async () => {
+    const original = fixture("Please keep our private workflows private.");
+    vi.stubGlobal("fetch", vi.fn(async () => modelResponse({
+      kind: "record_preference",
+      note: "Keep our private workflows private.",
+      reasons: ["format"],
+      scopeHint: "presence",
+      unsupportedField: "should fail closed",
+    })));
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+    const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
+    const reply = saved.operatorConversations!.flatMap((item) => item.messages).find((item) => item.replyToMessageId === original.message.id && item.role === "system");
+    expect(reply?.content).toBe("I hit a temporary problem while processing that. Your message is saved, so nothing was lost. Please retry the response.");
+    expect(reply?.content).not.toContain("unsupportedField");
+    expect(getOperationalRun(run.id)?.state).toBe("failed");
   });
 
   it("records supervisory turns on the active Sandbox causal clock", () => {

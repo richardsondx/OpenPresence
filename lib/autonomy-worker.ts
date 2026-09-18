@@ -152,7 +152,8 @@ import { requestAttention } from "./attention-coordinator";
 import { settleAttentionResponsibility } from "./attention-responsibility";
 import { executeChatRuntimeTool, chatExecutionReceipt, deliverChatSandboxActions } from "./operator-chat-tools";
 import { orderedOperatorChatMessages } from "./operator-chat-history";
-import { operatorChatHarnessInstructions, parseOperatorChatStep } from "./operator-chat-harness";
+import { operatorChatHarnessInstructions, operatorChatReactions, parseOperatorChatStep } from "./operator-chat-harness";
+import { operatorChatFailureMessage } from "./chat-activity-presentation";
 import { isAiMockEnabled } from "./test-runtime";
 import { linkOperatorChatAssignment, operatorRequestsWatch, recordOperatorConversationMessage, settleNudgeForEpisode, startQueuedNudge } from "./operator-chat";
 import { canonicalUsageEvents, operatorUsageReply } from "./usage";
@@ -674,6 +675,7 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
     // spending another model call to report usage that OpenPresence already
     // knows exactly.
     let finalChoices: Array<{ label: string; content: string }> | undefined;
+    let finalReaction: typeof operatorChatReactions[number] | undefined;
     let completionCandidate: string | undefined;
     let completionReviewed = false;
     let finalReply = completed?.content ?? operatorUsageReply(next, operatorMessage.content, usageEvents);
@@ -725,6 +727,10 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
         }
         finalReply = step.text;
         finalChoices = "choices" in step ? step.choices : undefined;
+        if ("reaction" in step) {
+          const recentAgentReactions = conversation.messages.filter((item) => item.role === "presence" && item.reaction).slice(-3);
+          finalReaction = recentAgentReactions.length > 0 ? undefined : step.reaction;
+        }
         break;
       }
       completionCandidate = undefined;
@@ -850,7 +856,7 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
     if (wasCancelled()) return readStateSnapshotForContext({ presenceId: run.presenceId });
     if (!finalReply) throw new Error("This attempt reached its work limit before producing a complete answer. Recorded work is saved; retry the response to continue.");
     if (!completed) {
-      next = recordOperatorConversationMessage(next, { presenceId: run.presenceId, threadId: conversation.threadId ?? conversation.id, content: formatReplyText(finalReply), choices: finalChoices, role: "presence", replyToMessageId: operatorMessage.id });
+      next = recordOperatorConversationMessage(next, { presenceId: run.presenceId, threadId: conversation.threadId ?? conversation.id, content: formatReplyText(finalReply), choices: finalChoices, reaction: finalReaction, role: "presence", replyToMessageId: operatorMessage.id });
       const nudge = operatorMessage.nudgeId ? next.operatorNudges?.find((item) => item.id === operatorMessage.nudgeId) : undefined;
       if (nudge && !nudge.assignmentId) { nudge.status = "resolved"; nudge.resultSummary = finalReply; nudge.resolvedAt = new Date().toISOString(); }
       await writeStateWithRetry(base, mergeAutonomyState(base, next, readStateSnapshotForContext({ presenceId: run.presenceId })));
@@ -887,12 +893,13 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
     const failedNudge = operatorMessage.nudgeId ? next.operatorNudges?.find((item) => item.id === operatorMessage.nudgeId && item.privateConversation) : undefined;
     if (failedNudge && !failedNudge.assignmentId) { failedNudge.status = "failed"; failedNudge.lastError = detail; failedNudge.updatedAt = new Date().toISOString(); }
     const fallback = typeof run.metadata?.directWatch === "string" ? run.metadata.directWatch : undefined;
+    const userFacingFailure = operatorChatFailureMessage(error);
     next = recordOperatorConversationMessage(next, {
       presenceId: run.presenceId,
       threadId: conversation.threadId ?? conversation.id,
       content: isAiRateLimitError(error)
         ? "Your message is saved. The model provider is still at capacity, so I paused automatic retries to avoid adding more load. Try again after it recovers, or choose a connected local model in Brain → Provider access."
-        : fallback ? `I’ll keep an eye on @${fallback.replace(/^@/, "")}. ${detail}` : `I’m not able to answer yet. ${detail}`,
+        : fallback ? `I’ll keep an eye on @${fallback.replace(/^@/, "")}. I hit a temporary problem while finishing that request. Your message is saved, so nothing was lost. Please retry the response.` : userFacingFailure,
       role: "system",
       replyToMessageId: operatorMessage.id,
     });
@@ -1998,6 +2005,7 @@ export async function runAutonomousAttention(
               publicFooting: launchPresence.context.publicFooting ?? { postsPublished: 0 },
               trust: "No private operator transcript or runtime metadata is public expression context.",
             }),
+            requireStrategySelection: true,
           },
         );
         const draft = launchDecision.action === "post" ? launchDecision.text.trim() : "";

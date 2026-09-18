@@ -104,7 +104,11 @@ test("options submit a durable selection without erasing a draft and completed w
     if (!body.operatorConversations) return route.fulfill({ response });
     const conversation = body.operatorConversations.find((c: OperatorConversation) => c.messages.some((m: OperatorConversationMessage) => m.role === "presence"));
     const answer = conversation?.messages.find((m: OperatorConversationMessage) => m.role === "presence");
-    if (answer) { answer.content = "Choose a private draft approach."; answer.choices = [{ label: "Community showcase", content: "Draft the community showcase; do not publish." }, { label: "Lessons learned", content: "Draft the lessons option; do not publish." }]; }
+    if (answer) {
+      answer.content = "Choose a private draft approach.";
+      answer.choices = [{ label: "Community showcase", content: "Draft the community showcase; do not publish." }, { label: "Lessons learned", content: "Draft the lessons option; do not publish." }];
+      answer.attachments = [{ id: "fixture-image", kind: "image", name: "community-reference.png", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" }];
+    }
     const assignment = body.assignments.find((a: Assignment) => a.instruction === "Prepare a community showcase");
     if (assignment) {
       assignment.status = "completed";
@@ -117,6 +121,13 @@ test("options submit a durable selection without erasing a draft and completed w
     await route.fulfill({ response, json: body });
   });
   await page.reload();
+  await expect(page.getByTestId("operator-chat-decision-media")).toBeVisible();
+  const decisionMessage = page.locator(".operator-chat-message.is-presence").filter({ has: page.getByTestId("operator-chat-decision-media") });
+  await expect(decisionMessage.locator("img")).toHaveCount(1);
+  await expect(page.getByTestId("operator-chat-decision-media").locator("img")).toHaveAttribute("alt", "community-reference.png");
+  await expect(page.getByRole("button", { name: "Community showcase", exact: true })).toHaveCSS("background-color", "rgb(70, 87, 168)");
+  await decisionMessage.screenshot({ path: testInfo.outputPath("decision-surface.png") });
+  await page.screenshot({ path: testInfo.outputPath("choice-preview.png"), fullPage: true });
   await expect(page.getByTestId("operator-approach")).toContainText("Invite builders");
   await expect(page.getByTestId("operator-working-line")).toContainText("Responsibility complete");
   await expect(page.locator(".operator-chat-message.is-tool-activity").filter({ hasText: "Created responsibility" }).locator("xpath=following-sibling::*[1]").getByTestId("operator-approach")).toBeVisible();

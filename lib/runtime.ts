@@ -2630,6 +2630,18 @@ export function createAgent(input: CreateAgentInput): OpenPresenceState {
   const operatorConversationId = id("operator_conversation");
   const mainThreadId = `thread:${operatorConversationId}`;
   const operatorConversation: import("./types").OperatorConversation = { id: operatorConversationId, agentId: agent.id, presenceId: presence.id, threadId: mainThreadId, scope: { kind: "presence", presenceId: presence.id }, status: "active", title: "Main", createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, messages: [] };
+  operatorConversation.messages.push({
+    id: id("onboarding-message"),
+    role: "presence",
+    content: `Hi — I’m ${agent.name}. What would you like me to take off your plate?\n\nYou can answer in your own words, or pick a starting point. We’ll keep this light and figure out the rest as we work together.`,
+    choices: [
+      { label: "Grow my audience", content: "Help me grow my audience, but only through useful, specific work." },
+      { label: "Turn ideas into posts", content: "Help me turn my ideas into good posts without making them generic." },
+      { label: "Find conversations worth joining", content: "Help me find conversations where I genuinely have something to add." },
+      { label: "Something else", content: "I’ll tell you what I need in my own words." },
+    ],
+    timestamp: conversation.createdAt,
+  });
   const operatorThread: import("./types").OperatorThread = { id: mainThreadId, agentId: agent.id, title: "Main", scope: { kind: "presence", presenceId: presence.id }, originThreadId: null, communicationThreadId: operatorConversationId, status: "active", messageIds: [], assignmentIds: [], createdAt: conversation.createdAt, updatedAt: conversation.updatedAt };
   const skills = defaultSkills();
   const environment = makeSandboxEnvironment(presence);

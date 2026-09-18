@@ -3,7 +3,7 @@
 import { SocialPlaybook } from "./social-playbook";
 
 import { useWorkspaceSurface } from "@/lib/use-workspace-surface";
-import { compareRecentChatAssignments, chatToolReceipt, inspectionReportSummary, legacyInspectionEvidence, toolActivitySummary } from "@/lib/chat-activity-presentation";
+import { compareRecentChatAssignments, chatToolReceipt, inspectionReportSummary, legacyInspectionEvidence, legacyOperatorChatFailureMessage, toolActivitySummary } from "@/lib/chat-activity-presentation";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { orderedOperatorChatMessages } from "@/lib/operator-chat-history";
 import { useOperatorChatOutbox } from "@/lib/use-operator-chat-outbox";
@@ -54,6 +54,10 @@ import {
   LoaderCircle,
   MessageCircle,
   MessageSquare,
+  Megaphone,
+  PenLine,
+  Search,
+  Target,
   Moon,
   Newspaper,
   PanelLeft,
@@ -125,6 +129,7 @@ import type {
   GhostRepresentation,
   OpenPresenceState,
   OperatorConversationMessage,
+  PresenceChatAttachment,
   OperatorNudgeStatus,
   PublicHistoryItem,
   PublicDisclosurePosture,
@@ -218,6 +223,7 @@ const viewPaths: Record<View, string> = {
   live: "/activity",
   review: "/review",
   chat: "/chat",
+  delegate: "/delegate",
   rehearsal: "/rehearsal",
   watching: "/watching",
   people: "/people",
@@ -970,10 +976,10 @@ export default function Home() {
     query.set("read", Date.now().toString());
     if (typeof window !== "undefined") {
       const initialView = viewForLocation(window.location);
-      if (initialView === "live" || initialView === "review" || initialView === "chat" || initialView === "growth" || initialView === "analytics" || initialView === "knowledge" || initialView === "assets" || initialView === "people" || initialView === "feed" || initialView === "schedule" || initialView === "work" || initialView === "watching" || initialView === "rehearsal" || initialView === "brain" || initialView === "teach" || initialView === "presence" || initialView === "playground" || initialView === "usage") {
+    if (initialView === "live" || initialView === "review" || initialView === "chat" || initialView === "delegate" || initialView === "growth" || initialView === "analytics" || initialView === "knowledge" || initialView === "assets" || initialView === "people" || initialView === "feed" || initialView === "schedule" || initialView === "work" || initialView === "watching" || initialView === "rehearsal" || initialView === "brain" || initialView === "teach" || initialView === "presence" || initialView === "playground" || initialView === "usage") {
         const activitySurface = query.get("surface");
         const activityProjection = activitySurface === "timeline" || activitySurface === "calendar" ? "feed" : "activity";
-        query.set("projection", initialView === "live" || initialView === "review" ? activityProjection : initialView === "chat" ? "chat" : initialView === "growth" || initialView === "analytics" ? "growth" : initialView === "knowledge" ? "knowledge" : initialView === "assets" ? "assets" : initialView === "people" ? "people" : initialView === "feed" ? "feed" : initialView === "schedule" ? "schedule" : initialView === "work" ? "work" : initialView === "watching" ? "watching" : initialView === "rehearsal" ? "rehearsal" : initialView === "brain" || initialView === "presence" ? "full" : initialView === "teach" ? "teach" : initialView === "playground" ? "playground" : "usage");
+        query.set("projection", initialView === "live" || initialView === "review" ? activityProjection : initialView === "chat" ? "chat" : initialView === "delegate" ? "full" : initialView === "growth" || initialView === "analytics" ? "growth" : initialView === "knowledge" ? "knowledge" : initialView === "assets" ? "assets" : initialView === "people" ? "people" : initialView === "feed" ? "feed" : initialView === "schedule" ? "schedule" : initialView === "work" ? "work" : initialView === "watching" ? "watching" : initialView === "rehearsal" ? "rehearsal" : initialView === "brain" || initialView === "presence" ? "full" : initialView === "teach" ? "teach" : initialView === "playground" ? "playground" : "usage");
       }
     }
     const loadInitialState = async () => {
@@ -1064,7 +1070,7 @@ export default function Home() {
       if (operationType === "lookNow" && typeof window !== "undefined") {
         lookPoll = window.setInterval(async () => {
           try {
-            const query = new URLSearchParams(window.location.search);
+    const query = new URLSearchParams(window.location.search);
             query.set("read", Date.now().toString());
           const pollPayload = await fetchState<OpenPresenceState>(`/api/state?${query.toString()}`);
             if (!pollPayload) return;
@@ -1175,7 +1181,7 @@ export default function Home() {
     const usePresenceProjection = currentView === "presence";
     const useUsageProjection = currentView === "usage";
     const usePlaygroundProjection = currentView === "playground";
-    const requestedProjection = useActivityProjection ? "activity" : useActivityHistoryProjection ? "feed" : useChatProjection ? "chat" : useGrowthProjection || useAnalyticsProjection ? "growth" : useKnowledgeProjection ? "knowledge" : useAssetsProjection ? "assets" : usePeopleProjection ? "people" : useFeedProjection ? "feed" : useScheduleProjection ? (currentView === "work" ? "work" : "schedule") : useWatchingProjection ? "watching" : useRehearsalProjection ? "rehearsal" : useBrainProjection || usePresenceProjection ? "full" : useTeachProjection ? "teach" : usePlaygroundProjection ? "playground" : useUsageProjection ? "usage" : "full";
+    const requestedProjection = useActivityProjection ? "activity" : useActivityHistoryProjection ? "feed" : useChatProjection ? "chat" : currentView === "delegate" ? "full" : useGrowthProjection || useAnalyticsProjection ? "growth" : useKnowledgeProjection ? "knowledge" : useAssetsProjection ? "assets" : usePeopleProjection ? "people" : useFeedProjection ? "feed" : useScheduleProjection ? (currentView === "work" ? "work" : "schedule") : useWatchingProjection ? "watching" : useRehearsalProjection ? "rehearsal" : useBrainProjection || usePresenceProjection ? "full" : useTeachProjection ? "teach" : usePlaygroundProjection ? "playground" : useUsageProjection ? "usage" : "full";
     // A navigation away from Activity must not reuse its smaller in-flight
     // response. That response deliberately omits view-specific collections
     // such as Growth history and is not a complete OpenPresenceState.
@@ -1185,7 +1191,7 @@ export default function Home() {
       const requestedAgentId = query.get("agentId");
       const requestedPresenceId = query.get("presenceId");
       query.set("read", Date.now().toString());
-      if (useActivityProjection || useActivityHistoryProjection || useChatProjection || useGrowthProjection || useAnalyticsProjection || useKnowledgeProjection || useAssetsProjection || usePeopleProjection || useFeedProjection || useScheduleProjection || useWatchingProjection || useRehearsalProjection || useBrainProjection || useTeachProjection || usePresenceProjection || usePlaygroundProjection || useUsageProjection) query.set("projection", requestedProjection);
+      if (useActivityProjection || useActivityHistoryProjection || useChatProjection || currentView === "delegate" || useGrowthProjection || useAnalyticsProjection || useKnowledgeProjection || useAssetsProjection || usePeopleProjection || useFeedProjection || useScheduleProjection || useWatchingProjection || useRehearsalProjection || useBrainProjection || useTeachProjection || usePresenceProjection || usePlaygroundProjection || useUsageProjection) query.set("projection", requestedProjection);
       const payload = await fetchState<OpenPresenceState>(`/api/state?${query.toString()}`);
       if (!payload) {
         if (!state) throw new Error("The workspace state is not available.");
@@ -1597,19 +1603,19 @@ function Onboarding({
   error: string | null;
 }) {
   const [name, setName] = useState("Jenny");
-  const [description, setDescription] = useState(
-    "Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype.",
-  );
-  const [mode, setMode] = useState<PresenceMode>("agent");
-  const [handle, setHandle] = useState("@jenny_ai");
-  const [accent, setAccent] = useState("#D68754");
   const [submitting, setSubmitting] = useState(false);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!name.trim() || !description.trim()) return;
+    if (!name.trim()) return;
     setSubmitting(true);
     try {
-      await onCreate({ name, description, mode, handle, accent });
+      await onCreate({
+        name,
+        description: "Help me become useful to the people and ideas I care about.",
+        mode: "agent",
+        handle: `@${name.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 24) || "agent"}`,
+        accent: "#D68754",
+      });
     } finally {
       setSubmitting(false);
     }
@@ -1622,9 +1628,9 @@ function Onboarding({
           <span>OpenPresence</span>
         </div>
         <div className="onboarding-aside-copy">
-          <SectionEyebrow>Two things are born here</SectionEyebrow>
-          <h1>Put an intelligent presence into the world.</h1>
-          <p>First give the agent a mind. Then give it somewhere to show up.</p>
+          <SectionEyebrow>Start with one conversation</SectionEyebrow>
+          <h1>Meet your Agent.</h1>
+          <p>Give it a name. Then it will ask what you want it to take off your plate.</p>
         </div>
         <div className="aside-footnote">
           <span className="status-dot" /> Local and private by default
@@ -1632,14 +1638,11 @@ function Onboarding({
       </div>
       <div className="onboarding-form-wrap">
         <form className="onboarding-form" onSubmit={submit}>
-          <div className="step-count">
-            01 <span>/ 01 · Agent + first Presence</span>
-          </div>
-          <SectionEyebrow>Start with a point of view</SectionEyebrow>
-          <h2>Give your Presence a point of view.</h2>
+          <div className="step-count">01 <span>/ 01 · Your Agent</span></div>
+          <SectionEyebrow>A small beginning</SectionEyebrow>
+          <h2>What should I call myself?</h2>
           <p className="muted intro-copy">
-            OpenPresence shapes the first version of its mind from this
-            sentence. You can refine it later through conversation.
+            You can change this later. We’ll work out the useful parts together in Chat.
           </p>
           <label>
             Name
@@ -1650,54 +1653,6 @@ function Onboarding({
               placeholder="Jenny"
             />
           </label>
-          <label>
-            What should they become known for?
-            <textarea
-              aria-label="Agent description"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              rows={5}
-              placeholder="A sharp, useful point of view…"
-            />
-          </label>
-          <div className="form-grid">
-            <label>
-              First Presence handle
-              <input
-                aria-label="Presence handle"
-                value={handle}
-                onChange={(event) => setHandle(event.target.value)}
-                placeholder="@yourpresence"
-              />
-            </label>
-            <label>
-              Accent color
-              <div className="color-row">
-                <input
-                  aria-label="Accent color"
-                  type="color"
-                  value={accent}
-                  onChange={(event) => setAccent(event.target.value)}
-                />
-                <span>{accent}</span>
-              </div>
-            </label>
-          </div>
-          <fieldset>
-            <legend>How should they show up?</legend>
-            <div className="mode-options">
-              {presenceModes.map((option) => (
-                <ModeOption
-                  key={option.id}
-                  mode={option.id}
-                  selected={mode === option.id}
-                  name="mode"
-                  accent={accent}
-                  onChange={setMode}
-                />
-              ))}
-            </div>
-          </fieldset>
           {error && (
             <div className="form-error" role="alert">
               <CircleAlert size={16} /> {error}
@@ -1705,16 +1660,15 @@ function Onboarding({
           )}
           <Button variant="primary" type="submit" disabled={submitting}>
             {submitting ? (
-              "Waking Presence…"
+              "Starting your Agent…"
             ) : (
               <>
-                Create Agent + Presence <ArrowUpRight size={16} />
+                Meet my Agent <ArrowUpRight size={16} />
               </>
             )}
           </Button>
           <p className="fine-print">
-            Your first Presence opens in Sandbox. Nothing is published until
-            you connect a channel and approve a live action.
+            Your Agent starts privately. Nothing is published while you’re getting acquainted.
           </p>
         </form>
       </div>
@@ -2118,7 +2072,7 @@ function CreateAgentDialog({
           </label>
         </div>
         <label>
-          First Presence handle
+          Agent handle
           <input
             aria-label="Agent handle"
             value={handle}
@@ -2371,6 +2325,7 @@ function AgentWorkspaceShell({
 }) {
   const agent = state.agent!;
   const presence = state.presence ?? state.presences[0]!;
+  const [delegateDraft, setDelegateDraft] = useState<string | null>(null);
   const nativeXConnection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
   const xCreditsAlert = presence.channel === "x" && presence.environment !== "sandbox" && xCreditsExhausted(nativeXConnection)
     ? nativeXConnection
@@ -2433,6 +2388,7 @@ function AgentWorkspaceShell({
   };
   const destinations: Array<{ view: View; label: string; icon: React.ReactNode }> = [
     { view: "chat", label: "Chat", icon: <MessageCircle size={22} /> },
+    { view: "delegate", label: "Delegate", icon: <span className="delegate-nav-icon" aria-hidden="true">🪄</span> },
     { view: "schedule", label: "Tasks", icon: <CheckCircle2 size={22} /> },
     { view: "people", label: "People", icon: <Users size={22} /> },
     { view: "growth", label: "Growth", icon: <TrendingUp size={22} /> },
@@ -2483,11 +2439,12 @@ function AgentWorkspaceShell({
         {showXCreditsAlert && xCreditsAlert && <XCreditsAlert connection={xCreditsAlert} mutate={mutate} />}
         <div className="workspace-content">
           {switchingAgentId ? <div className="loading-screen agent-switch-loading" role="status" aria-live="polite"><PresenceGlyph accent={state.agents.find((item) => item.id === switchingAgentId)?.accent ?? "#D68754"} pulse size="large" /><p>Opening {state.agents.find((item) => item.id === switchingAgentId)?.name ?? "Agent"}…</p></div> : <>
+          {view === "delegate" && <DelegateView setView={setView} agentName={agent.name} onChoose={setDelegateDraft} />}
           {view === "teach" && <TeachView state={state} mutate={mutate} setView={setView} />}
           {view === "knowledge" && <KnowledgeView state={state} mutate={mutate} refreshState={refreshState} />}
           {view === "assets" && <ArtifactsView state={state} refreshState={refreshState} mutate={mutate} setView={setView} />}
           {view === "usage" && <UsageView state={state} setView={setView} mutate={mutate} />}
-          {view === "chat" && <OperatorChatView key={`${state.activeAgentId}:${state.presence?.id}:${typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("threadId") ?? "main"}`} state={state} mutate={mutate} refreshState={refreshState} operationalHealth={operationalHealth} setView={setView} />}
+          {view === "chat" && <OperatorChatView key={`${state.activeAgentId}:${state.presence?.id}:${typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("threadId") ?? "main"}:${delegateDraft ?? ""}`} state={state} mutate={mutate} refreshState={refreshState} operationalHealth={operationalHealth} setView={setView} draft={delegateDraft} />}
           {view === "rehearsal" && <AgentLabView state={state} mutate={mutate} setView={setView} />}
           {view === "watching" && <WatchingView key={watchingTab} state={state} mutate={mutate} refreshState={refreshState} setView={setView} initialTab={watchingTab} />}
           {view === "people" && <PeopleViewLazy state={state} mutate={mutate} Button={Button} SectionEyebrow={SectionEyebrow} PageHeader={PageHeader} ChannelAvatar={ChannelAvatar} channelLabel={channelLabel} formatDateTime={formatDateTime} watchRelationshipPolicy={watchRelationshipPolicy} watchPolicyFromPurpose={watchPolicyFromPurpose} watchPlanSummary={watchPlanSummary} onOpenWatchlist={() => openWatching("watchlist")} />}
@@ -7323,6 +7280,28 @@ function OperatorChatActionTimelineEvent({ event }: { event: OperatorConversatio
   </div>;
 }
 
+function OperatorChatAttachmentPreview({ attachments }: { attachments: PresenceChatAttachment[] }) {
+  const visualAttachments = attachments.filter((attachment) => ["image", "gif", "chart"].includes(attachment.kind));
+  if (!visualAttachments.length) return null;
+  return <section className="operator-chat-decision-media" aria-label="Image available for this decision" data-testid="operator-chat-decision-media">
+    <div className="operator-chat-decision-media-heading">
+      <strong>Image to review</strong>
+      <span>Use it only if it strengthens the post</span>
+    </div>
+    <div className="operator-chat-decision-media-grid">
+      {visualAttachments.map((attachment) => {
+        const source = attachment.existingAssetId
+          ? `/api/assets/${encodeURIComponent(attachment.existingAssetId)}`
+          : attachment.dataUrl ?? attachment.sourceUrl;
+        return <figure key={attachment.id} className="operator-chat-decision-media-item">
+          {source ? <img src={source} alt={attachment.name} /> : <div className="operator-chat-decision-media-missing">Preview unavailable</div>}
+          <figcaption>{attachment.name}</figcaption>
+        </figure>;
+      })}
+    </div>
+  </section>;
+}
+
 function OperatorChatMessageBody({ message, state }: { message: OperatorConversationMessage; state: OpenPresenceState }) {
   const receipt = chatToolReceipt(message);
   if (receipt) {
@@ -7339,7 +7318,14 @@ function OperatorChatMessageBody({ message, state }: { message: OperatorConversa
   }
   const inspection = message.role === "presence" ? legacyInspectionEvidence(message.content) : undefined;
   if (inspection) return <div className="operator-chat-inspection" data-testid="operator-chat-inspection"><p>{inspectionReportSummary(inspection)}</p><details className="operator-chat-technical"><summary>Saved evidence</summary><pre>{JSON.stringify(inspection, null, 2)}</pre></details></div>;
+  const legacyFailure = message.role === "system" ? legacyOperatorChatFailureMessage(message.content) : undefined;
+  if (legacyFailure) return <p>{legacyFailure}</p>;
   return message.role === "presence" ? <ChatRichText content={message.content} /> : <p>{message.content}</p>;
+}
+
+function OperatorChatReaction({ reaction }: { reaction: NonNullable<OperatorConversationMessage["reaction"]> }) {
+  const labels: Record<NonNullable<OperatorConversationMessage["reaction"]>, string> = { "👍": "thumbs up", "❤️": "heart", "😂": "laughing", "🎉": "celebration", "🙌": "raised hands", "👀": "eyes" };
+  return <span className="operator-chat-reaction" role="img" aria-label={`Agent reaction: ${labels[reaction]}`} data-testid="operator-chat-reaction">{reaction}</span>;
 }
 
 function operatorChatWorkLabel(stage: string | undefined) {
@@ -7452,7 +7438,90 @@ function OperatorSessionBlocks({ state, presence, assignments, runs, actions, on
   </section>;
 }
 
-function OperatorChatView({ state, mutate, refreshState, operationalHealth, setView }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState>; operationalHealth?: OperationalHealthSnapshot | null; setView: (view: View) => void }) {
+type DelegationSuggestion = {
+  icon: string;
+  tone: "coral" | "sky" | "violet" | "mint" | "sun" | "rose" | "blue" | "peach";
+  title: string;
+  description: string;
+  prompt: string;
+};
+
+const DELEGATION_CATEGORIES: Array<{ title: string; suggestions: DelegationSuggestion[] }> = [
+  {
+    title: "Grow my audience",
+    suggestions: [
+      { icon: "📈", tone: "coral", title: "Help me grow around what I care about", description: "Find the conversations, people, and ideas worth paying attention to—and learn what earns the right response.", prompt: "Help me grow around what I care about. Find the conversations, people, and ideas worth paying attention to, and learn what earns the right response. Start by asking what you need to know about my audience and goals." },
+      { icon: "🧭", tone: "sky", title: "Find the people I should know", description: "Surface thoughtful people in my space and explain why a genuine connection might matter.", prompt: "Find the people I should know in my space. Look for thoughtful, relevant people and explain why a genuine connection might matter before suggesting any outreach." },
+    ],
+  },
+  {
+    title: "Find conversations",
+    suggestions: [
+      { icon: "🔎", tone: "violet", title: "Find conversations worth joining", description: "Watch my space and bring me moments where I genuinely have something useful to add.", prompt: "Find conversations worth joining for me. Watch my space and bring me moments where I genuinely have something useful to add. Learn my bar for a worthwhile contribution before acting." },
+      { icon: "💬", tone: "mint", title: "Help me follow up without being awkward", description: "Keep track of promising threads and suggest a thoughtful next step when the timing is right.", prompt: "Help me follow up with people without being awkward. Identify promising conversations, remember the context, and suggest a thoughtful next step only when the timing is right." },
+    ],
+  },
+  {
+    title: "Create better content",
+    suggestions: [
+      { icon: "✍️", tone: "sun", title: "Turn my ideas into things people want to read", description: "Shape my rough notes into useful, distinctive drafts that still sound like me.", prompt: "Help me turn my rough ideas into useful, distinctive drafts that still sound like me. First, learn what I want to be known for and what good content means to me." },
+      { icon: "✨", tone: "peach", title: "Find the stories hiding in my week", description: "Notice patterns in what I’m doing and help me turn the interesting parts into honest stories.", prompt: "Find the stories hiding in my week. Pay attention to what I am working on and help me turn the interesting parts into honest stories, without inventing details." },
+    ],
+  },
+  {
+    title: "Learn what works",
+    suggestions: [
+      { icon: "🧪", tone: "blue", title: "Figure out what’s working", description: "Study my recent activity, form useful hypotheses, and adjust the approach over time.", prompt: "Figure out what is working in my recent activity. Study the evidence, form useful hypotheses, and recommend how my approach should adapt. Be clear about what is known versus uncertain." },
+      { icon: "📚", tone: "sky", title: "Keep a record of what I’m learning", description: "Connect my experiments, responses, and corrections so the next decision gets smarter.", prompt: "Keep a record of what I am learning from my experiments, responses, and corrections. Show me the pattern you see and how it should influence the next decision." },
+    ],
+  },
+  {
+    title: "Learn how I think",
+    suggestions: [
+      { icon: "🧠", tone: "violet", title: "Learn my taste", description: "Pay attention to what I choose, change, and reject so your judgment gets closer to mine.", prompt: "Learn my taste. Pay attention to what I choose, change, and reject, then reflect back the patterns you think should guide your future judgment. Do not change anything without showing me." },
+    ],
+  },
+  {
+    title: "Run a campaign",
+    suggestions: [
+      { icon: "📣", tone: "rose", title: "Help me run a focused campaign", description: "Turn an outcome I care about into a thoughtful plan, steady follow-through, and evidence of what happened.", prompt: "Help me run a focused campaign. Turn the outcome I care about into a thoughtful plan with clear boundaries, steady follow-through, and evidence of what happened. Start by asking the few questions that matter." },
+      { icon: "🎯", tone: "coral", title: "Own one important outcome", description: "Give me a way to hand you responsibility while I stay informed and in control of the decisions that matter.", prompt: "Own one important outcome for me. Help define the result, boundaries, and check-in rhythm, then take responsibility for the work while keeping me informed and in control of consequential decisions." },
+    ],
+  },
+];
+
+function DelegateView({ setView, agentName, onChoose }: { setView: (view: View) => void; agentName: string; onChoose: (prompt: string) => void }) {
+  const choose = (prompt: string) => {
+    onChoose(prompt);
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem("openpresence.delegate.draft", prompt);
+      const url = new URL(window.location.href);
+      url.searchParams.set("draft", prompt);
+      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+    setView("chat");
+  };
+  return <div className="page delegate-page" data-testid="delegate-page">
+    <div className="delegate-intro">
+      <span className="eyebrow">Delegate to your Agent</span>
+      <h1>What should I take on?</h1>
+      <p>A few things you can hand off to {agentName}.</p>
+      <small>Choose a starting point. I’ll open Chat with a draft for you to edit before anything is sent.</small>
+    </div>
+    <div className="delegate-categories">
+      {DELEGATION_CATEGORIES.map((category) => <section className="delegate-category" key={category.title} aria-labelledby={`delegate-${category.title}`}>
+        <h2 id={`delegate-${category.title}`}>{category.title}</h2>
+        <div className="delegate-list">{category.suggestions.map((suggestion) => <button className="delegate-suggestion" type="button" key={suggestion.title} data-testid={`delegate-suggestion-${suggestion.title.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`} onClick={() => choose(suggestion.prompt)}>
+          <span className={`delegate-suggestion-icon delegate-suggestion-icon-${suggestion.tone}`} aria-hidden="true">{suggestion.icon}</span>
+          <span className="delegate-suggestion-copy"><strong>{suggestion.title}</strong><span>{suggestion.description}</span></span>
+          <ArrowUpRight className="delegate-suggestion-arrow" size={16} aria-hidden="true" />
+        </button>)}</div>
+      </section>)}
+    </div>
+  </div>;
+}
+
+function OperatorChatView({ state, mutate, refreshState, operationalHealth, setView, draft }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState>; operationalHealth?: OperationalHealthSnapshot | null; setView: (view: View) => void; draft?: string | null }) {
   const presence = state.presence ?? state.presences[0]!;
   const availableThreads = (state.operatorThreads ?? []).filter((item) => item.agentId === state.agent?.id && item.status !== "archived");
   const requestedThreadId = typeof window === "undefined" ? undefined : new URLSearchParams(window.location.search).get("threadId") ?? undefined;
@@ -7521,13 +7590,22 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
   // The server persists the operator turn before returning. Do not render the
   // optimistic copy beside that acknowledged copy during the refresh window.
   const visiblePendingMessages = pendingMessages.filter((pending) => !persistedVisibleMessages.some((saved) => pending.clientRequestId && saved.clientRequestId === pending.clientRequestId));
-  const visibleMessages = [...persistedVisibleMessages, ...visiblePendingMessages];
+  // Pending turns have a separate visual home above the composer. Keeping them
+  // out of the transcript makes the sent/queued boundary unambiguous while
+  // still allowing choice buttons to know that a selection is already queued.
+  const visibleMessages = persistedVisibleMessages;
+  const allVisibleMessages = [...persistedVisibleMessages, ...visiblePendingMessages];
   const actionAnchorByNudge = new Map<string, string>();
   for (const messageItem of visibleMessages) {
     if (!messageItem.nudgeId) continue;
     if (!actionAnchorByNudge.has(messageItem.nudgeId) || messageItem.role === "presence" && messageItem.milestone !== "acknowledgment") actionAnchorByNudge.set(messageItem.nudgeId, messageItem.id);
   }
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(() => {
+    if (typeof window === "undefined") return "";
+    if (draft) return draft;
+    const queryDraft = new URLSearchParams(window.location.search).get("draft");
+    return queryDraft ?? window.sessionStorage.getItem("openpresence.delegate.draft") ?? "";
+  });
   const [attachments, setAttachments] = useState<SandboxAssetInput[]>([]);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const mediaDialogRef = useRef<HTMLDialogElement>(null);
@@ -7539,6 +7617,15 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
   const followingChatEnd = useRef(true);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const refreshStateRef = useRef(refreshState);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const urlParams = new URLSearchParams(window.location.search);
+    if (!urlParams.has("draft") && !window.sessionStorage.getItem("openpresence.delegate.draft")) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("draft");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    window.sessionStorage.removeItem("openpresence.delegate.draft");
+  }, []);
   useEffect(() => { refreshStateRef.current = refreshState; }, [refreshState]);
   useEffect(() => {
     if (followingChatEnd.current) endRef.current?.scrollIntoView({ block: "end" });
@@ -7597,6 +7684,8 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
   const hasQueuedDraft = chatIsBusy && Boolean(message.trim());
   const queuedRunCount = chatRuns.filter((run) => run.state === "queued").length;
   const unconfirmedSend = pendingMessages[0]?.delivery === "unconfirmed";
+  const shouldShowOperatorChatOutbox = visiblePendingMessages.length > 1
+    || visiblePendingMessages.some((turn) => turn.delivery === "unconfirmed");
   const queueStatusText = unconfirmedSend
     ? "Delivery is unconfirmed. Retry the message above to continue; later messages stay in order."
     : !activeOperatorRun && sending
@@ -7615,7 +7704,7 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
           const history = event.currentTarget;
           followingChatEnd.current = history.scrollHeight - history.scrollTop - history.clientHeight < 80;
         }}>
-        {!visibleMessages.length && <div className="operator-chat-empty"><PresenceGlyph accent={presence.accent} name={presence.name} avatarVariant={state.agent?.avatarVariant} look={presenceAvatarLook(presence)} /><strong>Talk to {presence.name}</strong><span>Ask a question, share context, or give {presence.name} something to work on.</span></div>}
+        {!visibleMessages.length && !visiblePendingMessages.length && <div className="operator-chat-empty"><PresenceGlyph accent={presence.accent} name={presence.name} avatarVariant={state.agent?.avatarVariant} look={presenceAvatarLook(presence)} /><strong>Talk to {presence.name}</strong><span>Ask a question, share context, or give {presence.name} something to work on.</span></div>}
         {visibleMessages.map((item) => {
           const nudge = item.nudgeId ? nudges.find((candidate) => candidate.id === item.nudgeId) : undefined;
           const receipt = chatToolReceipt(item);
@@ -7626,9 +7715,6 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
             : undefined;
           const anchoredActions = item.nudgeId && actionAnchorByNudge.get(item.nudgeId) === item.id ? conversationActionEvents.filter((event) => event.nudgeId === item.nudgeId) : [];
           const isToolActivity = Boolean(chatToolReceipt(item));
-          const pendingMessage = visiblePendingMessages.find((turn) => turn.id === item.id);
-          const deliveryState = pendingMessage?.delivery === "unconfirmed" ? "unconfirmed" : pendingMessage?.delivery === "sending" ? "sending" : "queued";
-          const deliveryLabel = deliveryState === "unconfirmed" ? "Not confirmed · kept on this browser" : deliveryState === "sending" ? "Sending…" : "Waiting to send";
           const firstAssignmentMessage = linkedAssignment ? visibleMessages.findIndex((candidate) => {
             const candidateNudge = candidate.nudgeId ? nudges.find((entry) => entry.id === candidate.nudgeId) : undefined;
             const candidateReceipt = chatToolReceipt(candidate);
@@ -7636,22 +7722,36 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
           }) : -1;
           const anchoredAssignment = linkedAssignment && firstAssignmentMessage === visibleMessages.indexOf(item) && (linkedAssignment.status !== "cancelled" || Boolean(linkedAssignment.plan?.summary || linkedAssignment.lastOutcome?.message)) ? linkedAssignment : undefined;
           const anchoredRuns = anchoredAssignment ? (state.assignmentRuns ?? []).filter((run) => run.assignmentId === anchoredAssignment.id) : [];
+          const conversationMessages = conversation?.messages ?? [];
+          // A reaction is authored by the Agent, but visually belongs to the
+          // operator turn it acknowledges. Keep the provenance on the Agent
+          // reply while anchoring the affordance to the user's bubble.
+          const acknowledgedReaction = item.role === "operator"
+            ? conversationMessages.find((candidate) => candidate.role === "presence" && candidate.replyToMessageId === item.id && candidate.reaction)?.reaction
+            : undefined;
+          const messageIndex = conversationMessages.findIndex((candidate) => candidate.id === item.id);
+          const repliedToMessage = item.replyToMessageId
+            ? conversationMessages.find((candidate) => candidate.id === item.replyToMessageId)
+            : messageIndex > 0
+              ? [...conversationMessages.slice(0, messageIndex)].reverse().find((candidate) => candidate.role === "operator")
+              : undefined;
+          const decisionAttachments = item.role === "presence"
+            ? item.attachments?.length ? item.attachments : repliedToMessage?.attachments ?? []
+            : [];
+          const receiptAttachments = item.attachments?.filter((attachment) => !decisionAttachments.some((decisionAttachment) => decisionAttachment.id === attachment.id)) ?? [];
           return <Fragment key={item.id}><article className={`operator-chat-message is-${item.role}${isToolActivity ? " is-tool-activity" : ""}`}>
             {!isToolActivity && <div className="operator-chat-message-meta"><strong>{item.role === "operator" ? "You" : item.role === "presence" ? presence.name : "OpenPresence"}</strong><span>{formatTime(item.timestamp)}</span></div>}
             <OperatorChatMessageBody message={item} state={state} />
+            {acknowledgedReaction && <OperatorChatReaction reaction={acknowledgedReaction} />}
+            {item.role === "presence" && item.choices?.length && decisionAttachments.length ? <OperatorChatAttachmentPreview attachments={decisionAttachments} /> : null}
             {item.role === "presence" && item.choices?.length ? <div className="operator-chat-choices" role="group" aria-label="Choose an option">{item.choices.map((choice, index) => {
               const requestId = `choice:${item.id}:${index}`;
-              const selected = visibleMessages.some((message) => message.clientRequestId?.startsWith(`choice:${item.id}:`));
-              return <button type="button" key={requestId} disabled={selected} onClick={() => outbox.enqueue({ id: `pending_${requestId}`, role: "operator", content: `I choose “${choice.label}” from your previous options. Keep the existing constraints.\n\n${choice.content}`, timestamp: new Date().toISOString(), clientRequestId: requestId, threadId: operatorThread.id, inputAttachments: [] })}>{choice.label}{visibleMessages.some((message) => message.clientRequestId === requestId) ? " · Selected" : ""}</button>;
+              const selected = allVisibleMessages.some((message) => message.clientRequestId?.startsWith(`choice:${item.id}:`));
+              return <button type="button" key={requestId} disabled={selected} onClick={() => outbox.enqueue({ id: `pending_${requestId}`, role: "operator", content: `I choose “${choice.label}” from your previous options. Keep the existing constraints.\n\n${choice.content}`, timestamp: new Date().toISOString(), clientRequestId: requestId, threadId: operatorThread.id, inputAttachments: [] })}>{choice.label}{allVisibleMessages.some((message) => message.clientRequestId === requestId) ? " · Selected" : ""}</button>;
             })}</div> : null}
-            {pendingMessage && <div className={`operator-chat-message-actions operator-chat-delivery-receipt is-${deliveryState}`} role="status">
-                <span className="operator-chat-delivery-dot" aria-hidden="true" />
-                <span className="operator-chat-delivery-label">{deliveryLabel}</span>
-                {visiblePendingMessages[0]?.id === item.id && deliveryState === "unconfirmed" && <button type="button" onClick={outbox.retry}>Retry send</button>}
-              </div>}
             {failedChatRun && <div className="operator-chat-message-actions operator-chat-retry-actions" role="status"><span className="operator-chat-retry-label">Response not completed</span><button type="button" className="operator-chat-retry-button" disabled={Boolean(activeOperatorRun)} onClick={() => void mutate({ type: "retryOperatorChat", presenceId: presence.id, messageId: item.id })}><RotateCcw size={13} aria-hidden="true" /> Retry response</button></div>}
             {item.role === "operator" && <OperatorChatLinkPreview content={item.content} />}
-            {item.attachments?.length ? <div className="operator-chat-attachments chat-media-receipts">{item.attachments.map((attachment) => <div key={attachment.id}>{["image", "gif", "chart"].includes(attachment.kind) && (attachment.existingAssetId || attachment.dataUrl) ? <img src={attachment.existingAssetId ? `/api/assets/${encodeURIComponent(attachment.existingAssetId)}` : attachment.dataUrl} alt={attachment.name} /> : <FileText size={22} />}<span>{attachment.name}</span></div>)}</div> : null}
+            {receiptAttachments.length ? <div className="operator-chat-attachments chat-media-receipts">{receiptAttachments.map((attachment) => <div key={attachment.id}>{["image", "gif", "chart"].includes(attachment.kind) && (attachment.existingAssetId || attachment.dataUrl) ? <img src={attachment.existingAssetId ? `/api/assets/${encodeURIComponent(attachment.existingAssetId)}` : attachment.dataUrl} alt={attachment.name} /> : <FileText size={22} />}<span>{attachment.name}</span></div>)}</div> : null}
             {item.role === "operator" && nudge && <div className="operator-chat-message-actions">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status) && <span className={`operator-nudge-status is-${nudge.status}`} role="status">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status)}</span>}{nudge.status === "failed" && !nudge.privateConversation && !nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "retryPresenceNudge", presenceId: presence.id, nudgeId: nudge.id })}>Retry look</button>}{!nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "createAssignmentFromNudge", presenceId: presence.id, nudgeId: nudge.id })}>Take this on</button>}</div>}
           </article>{anchoredActions.length > 0 && <div className="operator-chat-action-timeline" aria-label="Actions from this conversation">{anchoredActions.map((event) => <OperatorChatActionTimelineEvent key={event.id} event={event} />)}</div>}
           {anchoredAssignment && <OperatorSessionBlocks state={state} presence={presence} assignments={[anchoredAssignment]} runs={anchoredRuns} actions={anchoredActions} onOpenReview={() => setView("review")} />}</Fragment>;
@@ -7671,8 +7771,26 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
         }} />
         <div ref={endRef} />
         </div>
+        {shouldShowOperatorChatOutbox && <section className="operator-chat-outbox" aria-label={`${visiblePendingMessages.length} queued message${visiblePendingMessages.length === 1 ? "" : "s"}`} data-testid="operator-chat-outbox">
+          <div className="operator-chat-outbox-heading">
+            <div className="operator-chat-outbox-title"><span className="operator-chat-outbox-mark" aria-hidden="true" /><strong>{visiblePendingMessages.length} queued</strong><small>Sent in order · not sent yet</small></div>
+            <span className={`operator-chat-outbox-state is-${visiblePendingMessages[0].delivery}`} role="status">{visiblePendingMessages[0].delivery === "sending" ? "Sending…" : visiblePendingMessages[0].delivery === "unconfirmed" ? "Needs retry" : "Waiting to send"}</span>
+          </div>
+          <ol className="operator-chat-outbox-list">
+            {visiblePendingMessages.map((turn, index) => {
+              const isFirst = index === 0;
+              const deliveryLabel = turn.delivery === "sending" ? "Sending now" : turn.delivery === "unconfirmed" ? "Not sent · retry needed" : "Queued · not sent yet";
+              return <li key={turn.id} className={`operator-chat-outbox-item is-${turn.delivery}${isFirst ? " is-first" : ""}`} data-testid={`operator-chat-queued-message-${index + 1}`}>
+                <span className="operator-chat-outbox-number" aria-hidden="true">{index + 1}</span>
+                <div className="operator-chat-outbox-copy"><strong>{deliveryLabel}</strong><p>{turn.content}</p>{turn.inputAttachments.length > 0 && <small>{turn.inputAttachments.length} attachment{turn.inputAttachments.length === 1 ? "" : "s"} included</small>}</div>
+                {isFirst && turn.delivery === "unconfirmed" && <button type="button" className="operator-chat-outbox-retry" onClick={outbox.retry}>Retry send</button>}
+              </li>;
+            })}
+          </ol>
+          <p className="operator-chat-outbox-help">These messages stay here until OpenPresence confirms each one was saved.</p>
+        </section>}
         {outbox.storageError && <p role="alert" className="operator-chat-send-error">{outbox.storageError}</p>}
-        {queueStatusText && <div className="operator-chat-queue-status" role="status" aria-live="polite" data-testid="operator-chat-queue-status"><span className="operator-chat-queue-dot" aria-hidden="true" />{queueStatusText}</div>}
+        {queueStatusText && (hasQueuedDraft || !visiblePendingMessages.length) && <div className="operator-chat-queue-status" role="status" aria-live="polite" data-testid="operator-chat-queue-status"><span className="operator-chat-queue-dot" aria-hidden="true" />{queueStatusText}</div>}
         {attachments.length > 0 && <div className="attachment-list operator-chat-attachments">{attachments.map((attachment, index) => <span key={`${attachment.name}-${index}`}>{attachment.name}<button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={11} /></button></span>)}</div>}
         <form className="chat-composer operator-chat-composer" onSubmit={send}>
           <button type="button" className="attach-button" aria-label="Attach media or files" onClick={() => setMediaPickerOpen(true)}><Plus size={20} /></button>
@@ -9434,7 +9552,7 @@ function LiveView({
           <div>
             <SectionEyebrow>Start safely</SectionEyebrow>
             <h2 id="activity-first-run-title">Practice before you connect.</h2>
-            <p>Your first Presence is ready in Sandbox. See how it notices, decides, and expresses itself before any live channel is involved.</p>
+            <p>Your Agent is ready in Sandbox. See how it notices, decides, and expresses itself before any live channel is involved.</p>
           </div>
           <div className="activity-first-run-actions">
             <Button variant="primary" onClick={() => setView("playground")}><FlaskConical size={14} /> Practice in Sandbox</Button>
@@ -13908,24 +14026,50 @@ function ScheduleView({
               <small>
                 {selectedAssignment.status === "needs_operator"
                   ? "Fix the account or connector in Settings, then return here and retry the attempt. Any partial activity remains recorded; only verified outcomes count toward completion."
-                  : selectedAssignment.status === "expired_incomplete" ? "Tell Jenny if this needs a new start and finish time. Your previous results stay recorded." : selectedAssignment.status === "failed" ? "This attempt is terminal. Tell Jenny what should change before starting a fresh attempt; previous results stay recorded." : "Review the issue before retrying. Previous results stay recorded."}
+                  : selectedAssignment.status === "expired_incomplete" ? `Tell ${presenceName} if this needs a new start and finish time. Your previous results stay recorded.` : selectedAssignment.status === "failed" ? `This attempt is terminal. Tell ${presenceName} what should change before starting a fresh attempt; previous results stay recorded.` : "Review the issue before retrying. Previous results stay recorded."}
               </small>
             </section>
           )}
           <p className="assignment-inspector-note">{presenceName} chooses the approach. You can follow progress here and change the task when needed.</p>
           <form className="assignment-intervention" onSubmit={(event) => { event.preventDefault(); void sendPlanIntervention(selectedAssignment); }}>
-            <label htmlFor="assignment-intervention-input">Tell Jenny something about this</label>
-            <textarea id="assignment-intervention-input" aria-label="Tell Jenny something about this" value={intervention} onChange={(event) => setIntervention(event.target.value)} placeholder="Push this to tomorrow, cancel it, or focus it more on developers…" rows={2} />
-            <Button type="submit" variant="secondary" disabled={sendingIntervention || !intervention.trim()}>{sendingIntervention ? "Sending…" : "Send guidance"}</Button>
+            <div className="assignment-intervention-heading">
+              <label htmlFor="assignment-intervention-input">Tell {presenceName} something about this</label>
+              <span>Optional</span>
+            </div>
+            <div className="assignment-intervention-composer">
+              <textarea
+                id="assignment-intervention-input"
+                aria-label={`Tell ${presenceName} something about this`}
+                aria-describedby="assignment-intervention-help assignment-intervention-count"
+                value={intervention}
+                onChange={(event) => setIntervention(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    if (intervention.trim()) event.currentTarget.form?.requestSubmit();
+                  }
+                }}
+                placeholder="e.g. Move this to tomorrow and keep the focus on developers."
+                maxLength={500}
+                rows={3}
+              />
+              <div className="assignment-intervention-footer">
+                <span id="assignment-intervention-count">{intervention.length}/500</span>
+                <Button type="submit" variant="primary" disabled={sendingIntervention || !intervention.trim()}>
+                  {sendingIntervention ? <><LoaderCircle size={13} className="spin" /> Sending…</> : <><Send size={13} /> Send guidance</>}
+                </Button>
+              </div>
+            </div>
+            <p id="assignment-intervention-help" className="assignment-intervention-help">{presenceName} will carry this into the next step. Press Enter to send, or Shift+Enter for a new line.</p>
           </form>
           <div className="assignment-inspector-actions">
 
             {! ["completed", "completed_with_adaptation", "cancelled"].includes(selectedAssignment.status) && !getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing && (
-              <Button variant="ghost" onClick={() => setIntervention("Please review this plan and choose the next worthwhile step.")}>Ask Jenny to review this plan</Button>
+              <Button variant="ghost" onClick={() => setIntervention("Please review this plan and choose the next worthwhile step.")}>Ask {presenceName} to review this plan</Button>
             )}
             {!["completed", "completed_with_adaptation", "cancelled", "draft", "expired_incomplete", "failed"].includes(selectedAssignment.status) && (
               <Button variant="primary" disabled={sendingIntervention || getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing} onClick={() => setIntervention("Please prioritize this and decide whether it should happen now.")}>
-                {getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing ? <><LoaderCircle size={14} className="spin" /> Working now…</> : <><Play size={14} /> Ask Jenny to prioritize</>}
+                {getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing ? <><LoaderCircle size={14} className="spin" /> Working now…</> : <><Play size={14} /> Ask {presenceName} to prioritize</>}
               </Button>
             )}
             {!["completed", "completed_with_adaptation", "cancelled", "failed", "expired_incomplete"].includes(selectedAssignment.status) && (

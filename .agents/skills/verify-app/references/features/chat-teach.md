@@ -12,6 +12,7 @@ Chat is the Agent-first continuous operator conversation and persistent session 
 - Teach a preference or memory proposal for review.
 - Open a Presence rehearsal from Chat when the user wants to rehearse.
 - See a durable Assignment's progress and receipts inline in Chat.
+- See an occasional lightweight Agent emoji acknowledgement attached to the user's Chat bubble; reactions use a deliberately small vocabulary and are not part of the prose.
 - Use Agent menu → Teach agent for durable configuration conversation; the Chat composer has no mode selector.
 
 ## How to get to it (user POV)
@@ -94,6 +95,11 @@ Proof must show the submitted operator message and the correct user-facing recei
 - `Queue check` stays usable during another reply. It uses the durable outbox, preserves the unsent draft, and collapses the reminder only after enqueue succeeds. `Dismiss reminder` and `Not now` survive incidental incident-ID/diagnostic changes for the same task and cause; a different task resurfaces.
 - X reminders describe a past billing block and offer a recheck rather than asserting the current credit balance. A verified newer native write resolves its billing incident; reads, browser delivery, and older writes do not.
 - Regression proof: `chat-layout-recovery.spec.ts`, `chat-attention.spec.ts`, and `chat-recovery-health.test.ts`. Desktop and mobile flows use the harness-owned isolated runtime.
+
+### Agent reactions (2026-09-17)
+
+- Private Chat answers may include one of 👍 ❤️ 😂 🎉 🙌 👀 as a separate persisted reaction. The Agent should omit reactions for ordinary questions, complex or ambiguous requests, frustration, sensitive topics, and repeated recent turns; the UI anchors the reaction to the user's acknowledged bubble, and it never replaces substantive prose.
+- Proof: `tests/operator-chat-harness.test.ts` validates the vocabulary and separate persistence. Browser proof should send a simple adjustment through the Chat composer, wait for the Agent bubble, verify `getByTestId("operator-chat-reaction")` when the deterministic fixture chooses one, then reload and verify the reaction remains attached to the same bubble.
 
 ### Initiative and alternatives (2026-09-16)
 

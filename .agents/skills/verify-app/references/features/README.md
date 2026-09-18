@@ -40,6 +40,7 @@ The current shell exposes the Agent portfolio and the active connected channel t
 | `/activity` | Activity / Today | Selected Presence | `Now`, `Timeline`, `Calendar` tabs; current attention, decisions, outcomes |
 | `/review` | Review / Needs You | Selected Presence | Focused operator queue; must not be described as delivery until outcome is verified |
 | `/chat` | Chat | Agent conversation, Presence context where applicable | Private operator conversation and receipts |
+| `/delegate` | Delegate | Selected Agent / Presence context | Delegation suggestions; selecting one opens Chat with an editable unsent draft |
 | `/teach` | Teach | Agent-wide durable judgment | Conversation, proposals/change sets, scope and persistence |
 | `/rehearsal` | Agent Lab | Selected Agent with Presence context, Sandbox | Rehearse social situations or run saved Scenarios; never live delivery or durable identity mutation by default |
 | `/watching` | Watching / Attention | Selected Presence | Watches and Explorations; attention is not authority to speak |
@@ -60,8 +61,8 @@ The current shell exposes the Agent portfolio and the active connected channel t
 
 ## Current navigation shell
 
-Reviewed 2026-09-13: one Agent switcher and five daily destinations — Chat, Tasks,
-People, Growth, Media. Desktop uses a labeled vertical navigation; mobile uses the
+Reviewed 2026-09-17: one Agent switcher and six daily destinations — Chat, Delegate,
+Tasks, People, Growth, Media. Desktop uses a labeled vertical navigation; mobile uses the
 same labeled icons in a bottom dock. Mobile's header menu opens Agent selection and
 settings; the dock hides while the software keyboard is open so the composer retains
 space. Teach agent, Watchlist, Test agent, and Agent settings are in Agent menu.
@@ -77,6 +78,11 @@ button (`Attach media or files`) opens a native dialog offering upload or existi
 eligible Agent media. Closing it preserves the draft. User messages, tool receipts,
 and responses preserve durable ordering and retry behavior. Context inspectors retain
 the selected Agent; Escape closes sheets and restores focus.
+
+Delegate is a discovery surface for handing responsibility to the Agent. Its rows
+are conversational and grouped by outcome. Selecting a row changes to Chat and
+prefills the real composer; no operator message, Assignment, or public action exists
+until the operator submits the draft.
 
 Regression proof: `tests/e2e/responsive-workspace.spec.ts` covers both viewport
 projects, five destinations, legacy Tasks links, composer placement, media dialog
@@ -96,6 +102,7 @@ recovery, durable chat/reload, and setup access.
 - [Activity and verified outcomes](activity.md)
 - [Review and operator queue](review.md)
 - [Chat and Teach](chat-teach.md)
+- [Delegate](delegate.md)
 - [Watching and People](watching-people.md)
 - [Channels and Manage Agent](channels-agent.md)
 - [Playground and Rehearsal](playground-rehearsal.md)

@@ -4,7 +4,7 @@ test.beforeEach(async ({ page, request }) => {
   expect((await request.post("/api/state", { data: { type: "reset" } })).ok()).toBeTruthy();
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Recovery Agent");
-  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await page.getByRole("button", { name: /Create Agent \+ Presence|Meet my Agent/ }).click();
   await page.goto("/chat");
 });
 
@@ -24,7 +24,8 @@ test("an interrupted send keeps the turn and next draft, then retries once after
   const composer = page.getByLabel("Message Recovery Agent");
   await composer.fill("are you struggling");
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  await expect(page.getByText("Sending…", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sending message", exact: true })).toBeVisible();
+  await expect(page.getByTestId("operator-chat-outbox")).toHaveCount(0);
   await expect(page.getByTestId("operator-chat-thinking")).toHaveCount(0);
   await composer.fill("did you post recently?");
   release();
@@ -67,6 +68,19 @@ test("a lost response reconciles the saved turn without a second send", async ({
   expect(sends).toBe(1);
 });
 
+test("a sendable first turn never renders the queue panel", async ({ page }) => {
+  await page.route("**/api/state", async (route) => {
+    if (route.request().method() === "POST" && route.request().postDataJSON().type === "sendPresenceNudge") {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return route.continue();
+  });
+  const composer = page.getByLabel("Message Recovery Agent");
+  await composer.fill("Send immediately");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByTestId("operator-chat-outbox")).toHaveCount(0);
+});
+
 test("an unconfirmed first turn prevents later turns overtaking it", async ({ page, request }) => {
   let fail = true;
   const sends: string[] = [];
@@ -81,14 +95,26 @@ test("an unconfirmed first turn prevents later turns overtaking it", async ({ pa
   await expect(page.getByRole("button", { name: "Retry send" })).toBeVisible();
   await composer.fill("Second private turn");
   await composer.press("Enter");
-  await expect(page.getByText("Waiting to send", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("operator-chat-outbox")).toContainText("2 queued");
+  await expect(page.getByTestId("operator-chat-queued-message-2")).toContainText("Queued · not sent yet");
+  await expect(page.getByTestId("operator-chat-queued-message-1")).toContainText("Not sent · retry needed");
+  const queuedBackground = await page.getByTestId("operator-chat-queued-message-1").evaluate((element) => getComputedStyle(element).backgroundColor);
   expect(sends).toEqual(["First private turn"]);
+  await page.reload();
+  await expect(page.getByTestId("operator-chat-outbox")).toContainText("2 queued");
+  await expect(page.getByTestId("operator-chat-queued-message-1")).toContainText("First private turn");
+  await expect(page.getByTestId("operator-chat-queued-message-2")).toContainText("Second private turn");
   fail = false;
   await page.getByRole("button", { name: "Retry send" }).click();
   await expect.poll(async () => {
     const state = await (await request.get("/api/state?projection=chat")).json();
     return state.operatorConversations.flatMap((item: { messages: { role: string; content: string }[] }) => item.messages).filter((item: { role: string }) => item.role === "operator").map((item: { content: string }) => item.content);
   }).toEqual(["First private turn", "Second private turn"]);
+  await expect(page.getByTestId("operator-chat-outbox")).toHaveCount(0);
+  const sentMessage = page.locator(".operator-chat-message.is-operator").filter({ hasText: "First private turn" }).last();
+  await expect(sentMessage).toBeVisible();
+  const sentBackground = await sentMessage.evaluate((element) => getComputedStyle(element).backgroundColor);
+  expect(sentBackground).not.toBe(queuedBackground);
   expect(sends).toEqual(["First private turn", "First private turn", "Second private turn"]);
 });
 

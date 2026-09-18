@@ -64,7 +64,7 @@ export function useOperatorChatOutbox(
   return {
     turns,
     storageError,
-    enqueue: (turn: Omit<PendingTurn, "delivery">) => update([...current.current, { ...turn, delivery: "pending" }]),
+    enqueue: (turn: Omit<PendingTurn, "delivery">) => update([...current.current, { ...turn, delivery: current.current.length ? "pending" : "sending" }]),
     retry: () => update(current.current.map((turn) => ({ ...turn, delivery: "pending" }))),
   };
 }

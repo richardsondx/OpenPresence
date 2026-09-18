@@ -604,6 +604,14 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.agent?.id).not.toBe(state.presence?.id);
     expect(state.files.map((file) => file.kind)).toEqual(["BRAIN", "SOUL", "MISSION", "TASTE", "MEMORY", "GROWTH", "PULSE", "PRESENCE"]);
     expect(state.files.find((file) => file.kind === "TASTE")?.protected).toBe(true);
+    expect(state.operatorConversations?.[0]?.messages[0]).toMatchObject({
+      role: "presence",
+      content: expect.stringContaining("What would you like me to take off your plate?"),
+      choices: expect.arrayContaining([
+        expect.objectContaining({ label: "Grow my audience" }),
+        expect.objectContaining({ label: "Turn ideas into posts" }),
+      ]),
+    });
   });
 
   it("migrates legacy meaning-file subtitles when an existing workspace is read", () => {

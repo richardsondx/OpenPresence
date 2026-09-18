@@ -75,16 +75,16 @@ test("an explicit ownership request becomes a recurring Agent-owned goal", async
   await expect(page.getByRole("region", { name: "Goals" })).toContainText("Agent-owned goal");
   await page.reload();
   await expect(page.getByRole("region", { name: "Goals" })).toContainText("Agent-owned goal");
-  await expect(page.getByText("Sandbox · no public delivery", { exact: true })).toBeVisible();
+  await expect(page.getByText("Sandbox · simulated", { exact: true })).toBeVisible();
 });
 
 test("Calendar intervention updates Agent-owned work and survives reload", async ({ page, request }) => {
   await page.goto("/");
-  await page.getByLabel("Agent name").fill("Jenny");
+  await page.getByLabel("Agent name").fill("Genny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
 
   const requestText = "Own an ongoing daily responsibility to find and publish useful agent-building insights without asking me to create tasks.";
-  await page.getByLabel("Message Jenny").fill(requestText);
+  await page.getByLabel("Message Genny").fill(requestText);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page.getByText("Assignment queued", { exact: true })).toBeVisible();
   const state = await request.get("/api/state").then((response) => response.json());
@@ -93,9 +93,13 @@ test("Calendar intervention updates Agent-owned work and survives reload", async
 
   await page.getByRole("button", { name: "Tasks", exact: true }).click();
   await page.getByRole("region", { name: "Goals" }).getByRole("button", { name: /Open goal/i }).click();
-  await expect(page.getByLabel("Tell Jenny something about this")).toBeVisible();
-  await page.getByLabel("Tell Jenny something about this").fill("Focus this on developers and never use generic motivational visuals.");
-  await page.getByRole("button", { name: "Send guidance", exact: true }).click();
+  const guidanceInput = page.getByLabel("Tell Genny something about this");
+  await expect(guidanceInput).toBeVisible();
+  await expect(guidanceInput).toHaveAttribute("maxlength", "500");
+  await expect(page.getByText("Press Enter to send, or Shift+Enter for a new line.", { exact: false })).toBeVisible();
+  await guidanceInput.fill("Focus this on developers and never use generic motivational visuals.");
+  await guidanceInput.press("Shift+Enter");
+  await guidanceInput.press("Enter");
   await expect.poll(async () => {
     const next = await request.get("/api/state").then((response) => response.json());
     return next.assignments.find((item: { id?: string }) => item.id === assignment.id)?.instruction ?? "";
@@ -106,7 +110,7 @@ test("Calendar intervention updates Agent-owned work and survives reload", async
   await page.getByRole("region", { name: "Goals" }).getByRole("button", { name: /Open goal/i }).click();
   await page.getByText("Instructions and constraints", { exact: true }).click();
   await expect(page.getByText("generic motivational visuals", { exact: false })).toBeVisible();
-  await expect(page.getByLabel("Tell Jenny something about this")).toHaveValue("");
+  await expect(page.getByLabel("Tell Genny something about this")).toHaveValue("");
 });
 
 test("Canceling an Agent-owned publishing item preserves the responsibility and successor plan", async ({ page, request }) => {

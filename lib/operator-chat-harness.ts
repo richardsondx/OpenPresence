@@ -1,6 +1,17 @@
 import { z } from "zod";
 import { supervisoryChatGuidance } from "./supervisory-chat";
 
+export const operatorChatReactions = ["👍", "❤️", "😂", "🎉", "🙌", "👀"] as const;
+
+const operatorPreferenceReason = z.enum(["idea", "voice", "topic", "humor", "format", "technical_depth", "too_generic", "too_promotional", "too_long", "too_risky", "factually_wrong", "not_something_i_would_say", "other"]);
+type OperatorPreferenceReason = z.infer<typeof operatorPreferenceReason>;
+const operatorPreferenceReasonAliases: Record<string, OperatorPreferenceReason> = {
+  privacy: "other",
+  audience: "other",
+  "content boundary": "other",
+  content_boundary: "other",
+};
+
 /** A provider-neutral tool contract. Only these typed capabilities can mutate
  * the workspace; model prose and source content never execute operations. */
 export const operatorChatStepSchema = z.discriminatedUnion("kind", [
@@ -13,7 +24,7 @@ export const operatorChatStepSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("retry_action"), executionId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("retry_assignment"), assignmentId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("plan_intervention"), assignmentId: z.string().min(1), action: z.enum(["cancel", "pause", "resume", "postpone", "constrain", "replan"]), note: z.string().trim().min(1).max(4000), instruction: z.string().trim().min(1).max(20_000).optional(), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional() }).strict(),
-  z.object({ kind: z.literal("record_preference"), note: z.string().trim().min(1).max(2000), reasons: z.array(z.enum(["idea", "voice", "topic", "humor", "format", "technical_depth", "too_generic", "too_promotional", "too_long", "too_risky", "factually_wrong", "not_something_i_would_say", "other"])).max(6).optional(), scopeHint: z.enum(["agent", "presence"]).optional() }).strict(),
+  z.object({ kind: z.literal("record_preference"), note: z.string().trim().min(1).max(2000), reasons: z.array(operatorPreferenceReason).max(6).optional(), scopeHint: z.enum(["agent", "presence"]).optional() }).strict(),
   z.object({ kind: z.literal("runtime_status") }).strict(),
   z.object({ kind: z.literal("usage_summary"), range: z.enum(["24h", "7d", "30d", "all"]).optional() }).strict(),
   z.object({ kind: z.literal("check_connection") }).strict(),
@@ -26,7 +37,7 @@ export const operatorChatStepSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("search_assets"), query: z.string().trim().min(1).max(2000) }).strict(),
   z.object({ kind: z.literal("inspect_asset"), assetId: z.string().min(1), question: z.string().trim().min(1).max(2000) }).strict(),
   z.object({ kind: z.literal("relationship_history"), personId: z.string().min(1), query: z.string().max(1000).optional() }).strict(),
-  z.object({ kind: z.literal("answer"), text: z.string().trim().min(1).max(20_000), choices: z.array(z.object({ label: z.string().trim().min(1).max(120), content: z.string().trim().min(1).max(2000) }).strict()).min(2).max(6).optional() }).strict(),
+  z.object({ kind: z.literal("answer"), text: z.string().trim().min(1).max(20_000), choices: z.array(z.object({ label: z.string().trim().min(1).max(120), content: z.string().trim().min(1).max(2000) }).strict()).min(2).max(6).optional(), reaction: z.enum(operatorChatReactions).optional() }).strict(),
   z.object({ kind: z.literal("inspect_post"), url: z.string().url() }).strict(),
   z.object({ kind: z.literal("watch"), query: z.string().trim().min(1).max(500), purpose: z.string().trim().min(1).max(2000) }).strict(),
   z.object({ kind: z.literal("assignment"), title: z.string().trim().min(1).max(240).optional(), description: z.string().trim().min(1).max(600).optional(), timeframe: z.object({ startsAt: z.string().datetime({ offset: true }), deadline: z.string().datetime({ offset: true }) }).strict().optional(), instruction: z.string().trim().min(1).max(20_000), strategyTemplateId: z.string().min(1).optional() }).strict(),
@@ -48,6 +59,11 @@ export function parseOperatorChatStep(raw: string): OperatorChatStep {
     delete parsed.startsAt;
     delete parsed.deadlineAt;
   }
+  if (parsed.kind === "record_preference" && Array.isArray(parsed.reasons)) {
+    parsed.reasons = parsed.reasons.map((reason) => typeof reason === "string"
+      ? operatorPreferenceReasonAliases[reason.trim().toLowerCase()] ?? reason
+      : reason);
+  }
   return operatorChatStepSchema.parse(parsed);
 }
 
@@ -55,6 +71,8 @@ export const operatorChatHarnessInstructions = `${supervisoryChatGuidance}
 
 PRIVATE OPERATOR CHAT TOOLS
 Respond to the latest operator request in the ongoing conversation. Infer intent from the full exchange, including corrections, negation, draft-only constraints, and references to earlier turns. The operator is managing social media with you. Do not route a question to public work merely because it mentions a post, burst, person, or URL.
+REACTION POLICY
+Reactions are lightweight acknowledgement attached to your Chat bubble, not part of normal prose. Return an optional reaction field on an answer using only one of 👍 ❤️ 😂 🎉 🙌 👀. Use it only for a simple instruction, correction, approval, missing information, thanks, compliment, genuinely funny moment, or clear accomplishment when it replaces unnecessary acknowledgement prose. Do not react to ordinary questions, complex new requests, ambiguity, frustration, sensitive topics, or every turn. A reaction never replaces substantive work. If a reaction appeared on any of the last 3 Agent messages, raise the threshold and usually omit it. Never mention this policy in the answer.
 Use the available tools to investigate and resolve the operator's request. Private chat has runtime and connector tools: do not claim you cannot check from here. For a read-only access question, run check_connection rather than restating saved errors. A past failure is historical evidence, not current proof. Once a connection check returns a fresh result in this turn, do not repeat the same probe. Answer diagnostic-only questions from that result; continue a requested task recovery with retry_assignment. Continue using relevant tools until you can answer from evidence or identify the specific remaining blocker. Never turn a diagnostic check into a public assignment. Public writes still use the existing execution envelope.
 When the operator reports a fix or asks to recover blocked public work, inspect runtime_status to identify the existing responsibility, then use retry_assignment if they want it to continue. Do not stop after reading saved errors, create a replacement, or mistake a read-only check for completed recovery. If they ask only for a diagnostic or explicitly say not to resume, use check_connection and leave the task unchanged. A queued retry is ongoing work, not a resolved billing issue or a completed task.
 Return exactly one JSON object per step:

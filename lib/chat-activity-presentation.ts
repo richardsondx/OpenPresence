@@ -18,6 +18,31 @@ export function recordValue(value: unknown): Record<string, unknown> | undefined
 const text = (value: unknown) => typeof value === "string" ? value : undefined;
 const records = (value: unknown) => Array.isArray(value) ? value.map(recordValue).filter((item): item is Record<string, unknown> => Boolean(item)) : [];
 
+function operatorChatErrorDetail(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try { return JSON.stringify(error); } catch { return ""; }
+}
+
+/** Keep provider, parser, and schema details out of normal operator Chat. */
+export function operatorChatFailureMessage(error: unknown): string {
+  const detail = operatorChatErrorDetail(error).trim();
+  const technical = /(?:zod|invalid_enum_value|unrecognized_keys|invalid_type|unexpected token|json|parse|stack|\bfetch\b|econn|\bhttp\b|timeout|timed out)/i.test(detail)
+    || /[\[{][\s\S]*[\]}]/.test(detail);
+  if (/work limit/i.test(detail) && !technical) return detail;
+  if (!technical && detail.length > 0 && detail.length <= 240) return detail;
+  return "I hit a temporary problem while processing that. Your message is saved, so nothing was lost. Please retry the response.";
+}
+
+/** Turn already-persisted validation leaks into the same safe copy. */
+export function legacyOperatorChatFailureMessage(content: string): string | undefined {
+  if (/^I[’']m not able to answer yet\.\s*(?:[\[{])/i.test(content.trim())
+    && /(?:invalid_enum_value|unrecognized_keys|zoderror|\"code\"\s*:)/i.test(content)) {
+    return operatorChatFailureMessage(content);
+  }
+  return undefined;
+}
+
 /** Only system-owned tool receipts become activity UI. Unknown tools still get
  * a safe generic activity projection instead of leaking their payload. */
 export function chatToolReceipt(message: Pick<OperatorConversationMessage, "role" | "content">) {
