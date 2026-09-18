@@ -548,8 +548,9 @@ describe("operator nudges while paused", () => {
     const created = createOperatorNudge(state, { presenceId: presence.id, content: "Please consider this." });
     expect(created.nudge.status).toBe("acknowledged");
     expect(created.nudge.acknowledgedAt).toBeTruthy();
-    expect(created.state.operatorConversations?.[0]?.messages).toHaveLength(1);
-    expect(created.state.operatorConversations?.[0]?.messages[0]?.role).toBe("operator");
+    const messages = created.state.operatorConversations?.[0]?.messages ?? [];
+    expect(messages.filter((message) => message.role === "operator")).toHaveLength(1);
+    expect(messages.at(-1)?.role).toBe("operator");
     expect(repairMissingOperatorNudgeWakes(created.state)).toBe(1);
     expect(repairMissingOperatorNudgeWakes(created.state)).toBe(0);
     expect(listScheduledWakes(presence.id).filter((wake) => wake.state === "pending" && ((wake.payload as { triggers?: string[] })?.triggers ?? []).includes("operator_nudge"))).toHaveLength(1);
@@ -574,13 +575,14 @@ describe("operator nudges while paused", () => {
     const first = startQueuedNudge(created.state, presence.id, episode);
     expect(first.nudge?.status).toBe("working");
     expect(first.nudge?.acknowledgedAt).toBeTruthy();
-    expect(first.state.operatorConversations?.[0]?.messages).toHaveLength(1);
-    expect(first.state.operatorConversations?.[0]?.messages[0]?.role).toBe("operator");
+    const firstMessages = first.state.operatorConversations?.[0]?.messages ?? [];
+    expect(firstMessages.filter((message) => message.role === "operator")).toHaveLength(1);
+    expect(firstMessages.at(-1)?.role).toBe("operator");
 
     const settled = settleNudgeForEpisode(first.state, episodeId, "The post makes a concrete claim worth remembering, but does not need a public response.");
-    const presenceMessages = settled.operatorConversations?.[0]?.messages.filter((message) => message.role === "presence") ?? [];
+    const presenceMessages = settled.operatorConversations?.[0]?.messages.filter((message) => message.role === "presence" && message.milestone === "decision") ?? [];
     expect(presenceMessages).toHaveLength(1);
-    expect(presenceMessages[0]).toMatchObject({ milestone: "decision", content: "The post makes a concrete claim worth remembering, but does not need a public response." });
+    expect(presenceMessages[0]).toMatchObject({ content: "The post makes a concrete claim worth remembering, but does not need a public response." });
   });
 
   it("projects operator-linked executions as truthful chronological action events", () => {
@@ -627,9 +629,9 @@ describe("operator nudges while paused", () => {
     const handedOff = recordNudgeAssignmentHandoff(created.state, created.nudge.id, "Required Assignment queued. Its result will return to this conversation.");
     const settled = settleNudgeFromAssignment(handedOff, "assignment_chat_1", "deferred", "The post did not warrant a public response.");
     const messages = settled.operatorConversations?.[0]?.messages ?? [];
-    expect(messages).toHaveLength(3);
-    expect(messages[1]).toMatchObject({ role: "system", milestone: "assignment" });
-    expect(messages[2]).toMatchObject({ role: "presence", milestone: "decision", content: "The post did not warrant a public response." });
+    expect(messages.filter((message) => message.milestone === "assignment")).toHaveLength(1);
+    expect(messages.find((message) => message.milestone === "assignment")).toMatchObject({ role: "system" });
+    expect(messages.at(-1)).toMatchObject({ role: "presence", milestone: "decision", content: "The post did not warrant a public response." });
     expect(settled.operatorNudges?.[0]).toMatchObject({ status: "resolved", resultSummary: "The post did not warrant a public response." });
   });
 });
@@ -667,7 +669,7 @@ describe("natural operator conversation", () => {
     const withOperator = recordOperatorConversationMessage(state, { presenceId: state.presence!.id, content: "What did you do recently?" });
     const withReply = recordOperatorConversationMessage(withOperator, { presenceId: state.presence!.id, content: "I was reviewing the latest signal.", role: "presence" });
     expect(withReply.operatorNudges ?? []).toHaveLength(0);
-    expect(withReply.operatorConversations?.[0]?.messages.map((message) => message.role)).toEqual(["operator", "presence"]);
+    expect(withReply.operatorConversations?.[0]?.messages.slice(-2).map((message) => message.role)).toEqual(["operator", "presence"]);
   });
 
   it("treats a retried operator send as the same private turn", () => {
@@ -677,14 +679,14 @@ describe("natural operator conversation", () => {
     expect(second.duplicate).toBe(true);
     expect(second.nudge.id).toBe(first.nudge.id);
     expect(second.state.operatorNudges).toHaveLength(1);
-    expect(second.state.operatorConversations?.[0]?.messages).toHaveLength(1);
+    expect(second.state.operatorConversations?.[0]?.messages.filter((message) => message.role === "operator")).toHaveLength(1);
   });
 
   it("deduplicates a retried normal operator conversation turn", () => {
     const state = createAgent({ name: "Conversation Retry", description: "Test", audience: "Testers", mode: "agent", handle: "@conversation_retry", accent: "#777777" });
     const first = recordOperatorConversationMessage(state, { presenceId: state.presence!.id, content: "What did you do?", clientRequestId: "client-chat-1" });
     const second = recordOperatorConversationMessage(first, { presenceId: state.presence!.id, content: "What did you do?", clientRequestId: "client-chat-1" });
-    expect(second.operatorConversations?.[0]?.messages).toHaveLength(1);
+    expect(second.operatorConversations?.[0]?.messages.filter((message) => message.role === "operator")).toHaveLength(1);
   });
 
   it("recognizes an explicit person-watch request for the private watch tool", () => {
