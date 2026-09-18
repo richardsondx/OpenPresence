@@ -9,7 +9,7 @@ export type AutonomousGrowthReviewNeed = {
 };
 
 /** Keep Agenda eligibility and headless execution on the same decision. */
-export function autonomousGrowthReviewNeed(source: OpenPresenceState, presenceId: string, now = new Date()): AutonomousGrowthReviewNeed | undefined {
+export function autonomousGrowthReviewNeed(source: OpenPresenceState, presenceId: string, now = new Date(), options?: { sandboxSessionId?: string }): AutonomousGrowthReviewNeed | undefined {
   const presence = source.presences.find((item) => item.id === presenceId) ?? source.presence;
   const assignment = source.assignments.find((item) => item.presenceId === presenceId
     && item.successEvidence?.kind === "metric_threshold"
@@ -21,7 +21,7 @@ export function autonomousGrowthReviewNeed(source: OpenPresenceState, presenceId
   const nowMs = now.getTime();
   const strategicDue = Boolean(assignment.plan.nextStrategicReviewAt && Date.parse(assignment.plan.nextStrategicReviewAt) <= nowMs);
   const weeklyDue = Boolean(assignment.plan.nextWeeklyReviewAt && Date.parse(assignment.plan.nextWeeklyReviewAt) <= nowMs);
-  const snapshot = deriveGrowthEvidenceSnapshot(source, presenceId);
+  const snapshot = deriveGrowthEvidenceSnapshot(source, presenceId, options?.sandboxSessionId ? { sandboxSessionId: options.sandboxSessionId } : undefined);
   const lastReview = (source.growthReviews ?? [])
     .filter((review) => review.presenceId === presenceId && review.assignmentId === assignment.id)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
@@ -31,9 +31,13 @@ export function autonomousGrowthReviewNeed(source: OpenPresenceState, presenceId
   // that old watermark is numerically ahead of the current seven-day window.
   const assignmentCreatedAt = Date.parse(assignment.createdAt);
   const evidenceSinceAssignment = [
-    ...source.audienceSnapshots.filter((item) => item.presenceId === presenceId).map((item) => item.observedAt),
-    ...source.publicationMetricSnapshots.filter((item) => item.presenceId === presenceId).map((item) => item.observedAt),
-    ...source.mirrorObjects.filter((item) => item.presenceId === presenceId && item.environment !== "sandbox").map((item) => item.occurredAt ?? item.observedAt),
+    ...source.audienceSnapshots.filter((item) => item.presenceId === presenceId && (!options?.sandboxSessionId || (item.environment === "sandbox" && item.sessionId === options.sandboxSessionId))).map((item) => item.observedAt),
+    ...source.publicationMetricSnapshots.filter((item) => {
+      if (item.presenceId !== presenceId || !options?.sandboxSessionId) return item.presenceId === presenceId && !options?.sandboxSessionId;
+      const publication = source.mirrorObjects.find((mirror) => mirror.id === item.mirrorObjectId);
+      return publication?.environment === "sandbox" && publication.sessionId === options.sandboxSessionId;
+    }).map((item) => item.observedAt),
+    ...source.mirrorObjects.filter((item) => item.presenceId === presenceId && (options?.sandboxSessionId ? item.environment === "sandbox" && item.sessionId === options.sandboxSessionId : item.environment !== "sandbox")).map((item) => item.occurredAt ?? item.observedAt),
   ].some((observedAt) => Number.isFinite(assignmentCreatedAt) && Date.parse(observedAt) >= assignmentCreatedAt);
   const hasNewEvidence = snapshot.watermark > (presence.lastTriagedEvidenceWatermark ?? 0)
     || (!lastReview && evidenceSinceAssignment);

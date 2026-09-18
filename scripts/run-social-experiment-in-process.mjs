@@ -279,7 +279,7 @@ async function runScenario(scenarioPath, presenceId) {
       if (!sessionId) throw new Error(`Scenario step ${index + 1} records audience data before a session starts.`);
       const current = await getState();
       const session = sessionFor(current, sessionId);
-      const updated = await postOperation({ type: "recordAudienceSnapshot", presenceId: session.presenceId, followers: Number(options.followers), following: options.following === undefined ? undefined : Number(options.following), source: "sandbox", observationStatus: "observed", observedAt: session.virtualNow });
+      const updated = await postOperation({ type: "recordAudienceSnapshot", presenceId: session.presenceId, followers: Number(options.followers), following: options.following === undefined ? undefined : Number(options.following), source: "sandbox", observationStatus: "observed", observedAt: session.virtualNow, sessionId });
       result = projectedState(updated, sessionId, "audience");
     } else if (step.command === "review") {
       if (!sessionId) throw new Error(`Scenario step ${index + 1} reviews before a session starts.`);

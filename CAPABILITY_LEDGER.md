@@ -790,3 +790,31 @@ remain PARTIAL. No capability is promoted. The next single highest-impact gate
 is still a truthful positive disposition followed by an independently
 reconstructed later decision that differs when the learned artifact is
 removed.
+
+## 2026-09-18 autonomous review wiring delta
+
+The session-scoped evidence repair is now threaded through the actual
+autonomous Sandbox review path, not only the explicit public review operation.
+`advanceSandboxTime` passes the session ID into review eligibility and the
+model-backed Growth Review worker; the worker derives the same session-scoped
+snapshot, limits hypotheses to that Sandbox session, and persists the session
+scope on the review operation. The public harness also attaches the session ID
+to audience observations.
+
+Validation:
+
+- Focused suite: 112/112 passed.
+- `pnpm build`: passed; only pre-existing lint warnings.
+- A follow-up real-model invocation was attempted against the preserved
+  configured canary database, but the scenario stopped before measurement with
+  `OpenPresence rejected invalid state mutation mirrorObjectId: Required`.
+  The cause is the scenario's first own-post resolver: this historically active
+  account correctly chose no original during its initial pulse, leaving no own
+  post to measure. The failed invocation is preserved in the terminal output;
+  it is not certification evidence and no claim is made from it.
+
+The prior completed real-model artifact remains the authoritative canary
+evidence for this checkpoint. It proves source-backed selection, durable
+lineage, distinct generated variation, and the two-turn response chain, but not
+positive supported learning or retained-vs-removed transfer. All affected
+capabilities remain PARTIAL.

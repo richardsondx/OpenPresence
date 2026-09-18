@@ -6938,9 +6938,9 @@ export async function POST(request: Request) {
         // checkpoint against the session clock so a compressed week can
         // produce the review, plan cadence, and operator update it would have
         // produced in live time.
-        const sandboxGrowthReview = autonomousGrowthReviewNeed(next, updatedSession.presenceId, new Date(updatedSession.virtualNow));
+        const sandboxGrowthReview = autonomousGrowthReviewNeed(next, updatedSession.presenceId, new Date(updatedSession.virtualNow), { sandboxSessionId: parsed.sessionId });
         if (sandboxGrowthReview) {
-          next = await runModelGrowthReview(next, sandboxGrowthReview.assignment, sandboxGrowthReview.kind, { reviewAt: new Date(updatedSession.virtualNow) });
+          next = await runModelGrowthReview(next, sandboxGrowthReview.assignment, sandboxGrowthReview.kind, { reviewAt: new Date(updatedSession.virtualNow), sandboxSessionId: parsed.sessionId });
         }
         const publishingHistoryBefore = next.publishingPlans
           .filter((plan) => plan.presenceId === updatedSession.presenceId)

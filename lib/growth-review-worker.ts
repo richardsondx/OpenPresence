@@ -10,22 +10,22 @@ import { ensureGrowthEvidenceRecords } from "./social-strategy";
 import type { Assignment, GrowthReviewKind, OpenPresenceState } from "./types";
 
 /** Run the model-backed Growth role from a headless worker or an API action. */
-export async function runModelGrowthReview(source: OpenPresenceState, assignment: Assignment, kind: GrowthReviewKind, options?: { reviewAt?: Date }) {
+export async function runModelGrowthReview(source: OpenPresenceState, assignment: Assignment, kind: GrowthReviewKind, options?: { reviewAt?: Date; sandboxSessionId?: string }) {
   const presence = source.presences.find((item) => item.id === assignment.presenceId) ?? source.presence;
   if (!presence) return source;
 
   ensureGrowthEvidenceRecords(source, presence.id);
-  const snapshot = deriveGrowthEvidenceSnapshot(source, presence.id);
+  const snapshot = deriveGrowthEvidenceSnapshot(source, presence.id, options?.sandboxSessionId ? { sandboxSessionId: options.sandboxSessionId } : undefined);
   const evidence = {
     strategyEvidence: source.growthEvidenceRecords?.filter((item) => item.presenceId === presence.id).slice(0, 80),
-    hypotheses: source.growthHypotheses?.filter((item) => item.originatingPresenceId === presence.id),
+    hypotheses: source.growthHypotheses?.filter((item) => item.originatingPresenceId === presence.id && (!options?.sandboxSessionId || item.sandboxSessionId === options.sandboxSessionId)),
     evidenceSnapshot: snapshot,
     capabilities: derivePresenceCapabilityManifest(source, presence.id).items,
   };
 
   try {
     const decision = await generateGrowthReview(source, assignment, kind, evidence);
-    return applyOperation(source, { type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind, modelDecision: decision, ...(options?.reviewAt ? { reviewAt: options.reviewAt.toISOString() } : {}) });
+    return applyOperation(source, { type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind, modelDecision: decision, ...(options?.reviewAt ? { reviewAt: options.reviewAt.toISOString() } : {}), ...(options?.sandboxSessionId ? { sandboxSessionId: options.sandboxSessionId } : {}) });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "The selected model could not complete the Growth Review.";
     openAgentRequest(source, {
