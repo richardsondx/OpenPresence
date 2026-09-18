@@ -275,6 +275,17 @@ async function runScenario(scenarioPath, presenceId) {
       const mirrorId = resolveValue(options.object, previous);
       const updated = await postOperation({ type: "recordPublicationMetricSnapshot", presenceId: sessionFor(state, sessionId).presenceId, mirrorObjectId: mirrorId, publicationAgeSeconds: Number(options.publicationAgeSeconds ?? 3600), metrics: options.metrics ?? { impressions: 100, likes: 10, replies: 4, reposts: 2, quotes: 1 }, source: "sandbox", observationStatus: "observed" });
       result = projectedState(updated, sessionId, "metric");
+    } else if (step.command === "assert-own-posts") {
+      if (!sessionId) throw new Error(`Scenario step ${index + 1} checks own publications before a session starts.`);
+      const state = await getState();
+      const projected = projectedState(state, sessionId, "assert-own-posts");
+      const minimum = Number(options.minimum ?? 1);
+      const ownPosts = projected.world.filter((item) => item.objectType === "post" && item.actorPresenceId);
+      if (ownPosts.length < minimum) {
+        const evidencePath = outputPath ?? "stdout-only run";
+        throw new Error(`Public canary precondition failed: expected at least ${minimum} measurable own post${minimum === 1 ? "" : "s"} from the autonomous path, found ${ownPosts.length}. Failed-run output: ${evidencePath}`);
+      }
+      result = projected;
     } else if (step.command === "audience") {
       if (!sessionId) throw new Error(`Scenario step ${index + 1} records audience data before a session starts.`);
       const current = await getState();
