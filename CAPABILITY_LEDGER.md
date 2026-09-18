@@ -722,3 +722,25 @@ Projected counterfactuals were present but unchanged (`decisionsDiffer=false`,
 negative evidence; LEARN-002/003/004 and dependent capabilities remain
 PARTIAL pending a supported artifact and independent retained-vs-removed
 transfer.
+
+## 2026-09-18 autonomous learning canary delta — qualified-response attempt
+
+The public canary added a realistic external reply to the generated original
+and allowed the Agent to judge it through the normal autonomous path; metric
+recording explicitly targeted the latest own post. The real-model run
+completed with a durable `weakened` disposition for the session template, but
+did not reach `supported`, and all projected present-vs-removed
+counterfactuals remained unchanged.
+
+Evidence:
+
+- JSON: `/tmp/openpresence-learning-canary-real-1789690340-qualified-reply.json`
+- DB: `/tmp/openpresence-learning-canary-real-1789690340-qualified-reply.db`
+- Model: OpenAI `gpt-5.6-luna`, low reasoning; Sandbox-only execution.
+
+This is protected negative evidence. The runtime proves measured lineage and
+disposition for testing artifacts, including weakening; it does not prove
+that a supported learned artifact changes a later autonomous decision.
+LEARN-002/003/004 and dependent rows remain PARTIAL. The next gate is still a
+positive supported-artifact run followed by an independently reconstructed
+retained-vs-removed counterfactual.

@@ -219,6 +219,8 @@ function resolveValue(value, previous) {
   if (value === "$session") return previous?.session?.id;
   if (value === "$latest-object-id") return previous?.world?.[0]?.id;
   if (value === "$latest-object") return previous?.world?.[0]?.externalRef;
+  if (value === "$latest-own-post-id") return previous?.world?.find((item) => item.objectType === "post" && item.actorPresenceId)?.id;
+  if (value === "$latest-own-post") return previous?.world?.find((item) => item.objectType === "post" && item.actorPresenceId)?.externalRef;
   if (value === "$latest-inbound") return previous?.world?.find((item) => !item.actorPresenceId)?.externalRef ?? previous?.world?.[0]?.externalRef;
   return value;
 }
