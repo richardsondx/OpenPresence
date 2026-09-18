@@ -818,3 +818,27 @@ evidence for this checkpoint. It proves source-backed selection, durable
 lineage, distinct generated variation, and the two-turn response chain, but not
 positive supported learning or retained-vs-removed transfer. All affected
 capabilities remain PARTIAL.
+
+## 2026-09-18 autonomous learning canary fixture guard (candidate c3df669)
+
+The public real-model fixture now measures the first own publication immediately
+after the real autonomous Sandbox pulse, then requires a second and third own
+publication before measuring the learned and follow-up variations. A missing
+publication is now an explicit failed-run precondition rather than an ambiguous
+`mirrorObjectId: Required` mutation or accidental remeasurement of an older
+post. The guard is implemented in
+`scripts/run-social-experiment-in-process.mjs` and exercised by
+`scenarios/learning-canary-public-real-model.json`.
+
+Evidence preserved in `qa-learnings/autonomous-learning-canary-fixture-2026-09-17.md`:
+
+- the earlier fixture failures that exposed the ambiguous resolver;
+- a clean fresh-Presence attempt through the real autonomous path;
+- the resulting OpenAI model-quota block (`Openai has no model API quota available`).
+
+No learning criteria were weakened, no `supported` disposition was obtained,
+and no capability was promoted. LEARN-002/003/004, AUT-001, EVAL-004,
+EVAL-005, and UX-004 remain PARTIAL. The next gate is an actual real-model run
+passing all own-publication guards, producing a genuine `supported`
+disposition, and demonstrating a later decision difference when the learned
+artifact is removed, followed by independent verification.
