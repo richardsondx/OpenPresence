@@ -7326,7 +7326,11 @@ export async function POST(request: Request) {
     }
     if (parsed.type === "reviewGrowth") {
       const presence = current.presences.find((item) => item.id === (parsed.presenceId ?? current.activePresenceId)) ?? current.presence;
-      const assignment = presence ? current.assignments.find((item) => item.id === parsed.assignmentId && item.presenceId === presence.id) ?? current.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && item.status === "active") : undefined;
+      const assignment = presence
+        ? current.assignments.find((item) => item.id === parsed.assignmentId && item.presenceId === presence.id)
+          ?? current.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && item.status === "active")
+          ?? current.assignments.find((item) => item.id === presence.publishingInitiative.assignmentId && item.origin === "publishing_initiative" && item.status === "active")
+        : undefined;
       if (!presence || !assignment) throw new Error("No active growth responsibility is available for this Presence.");
       const next = await runModelGrowthReview(current, assignment, parsed.kind ?? "weekly");
       const persisted = recordCapabilityFeedback(current, next, presence.id);
