@@ -883,3 +883,7 @@ build passed. A fresh real-model rerun reached the provider boundary but Ollama
 reported temporary capacity exhaustion (`/tmp/openpresence-learning-canary-ollama10.stderr`),
 so the repaired canary has not yet established supported transfer. No status
 changed and no capability is promoted.
+
+The next retry reproduced the same pre-cognition capacity failure
+(`/tmp/openpresence-learning-canary-ollama11.stderr`). It is preserved as
+infrastructure evidence and does not alter the capability verdict.
