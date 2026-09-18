@@ -744,3 +744,49 @@ that a supported learned artifact changes a later autonomous decision.
 LEARN-002/003/004 and dependent rows remain PARTIAL. The next gate is still a
 positive supported-artifact run followed by an independently reconstructed
 retained-vs-removed counterfactual.
+
+## 2026-09-18 autonomous learning canary delta — session-scoped Sandbox review
+
+The public canary exposed one additional runtime boundary. The real Agent
+created a substantive reply to an external question, and the scenario then
+provided a second external response to that Agent reply. The causal mirror
+chain was present, but `deriveGrowthEvidenceSnapshot` excluded Sandbox mirror
+objects from Growth Review, so the review could not observe the qualified
+conversation it had just produced.
+
+The smallest repair adds an optional session-scoped Sandbox evidence path to
+the existing Growth snapshot/review primitives. Sandbox audience snapshots
+now retain their session ID; the public `reviewGrowth` operation can request
+that session's mirrors, executions, publication metrics, and audience evidence.
+The live path remains fail-closed against Sandbox data, and the existing live
+snapshot behavior remains unchanged.
+
+Evidence:
+
+- The initial post-repair invocation against an empty database failed before
+  scenario start with `No active Presence is available for the experiment`;
+  it was preserved as a failed invocation and not treated as canary evidence.
+- Focused runtime proof after the regression fix: 112/112 tests passed across
+  `growth-runtime`, `social-strategy`, `learning-counterfactual`, and
+  `sandbox` suites.
+- `pnpm build` passed with only the existing lint warnings.
+- Real public OpenAI run, GPT-5.6 Luna Low, all executable affordances auto,
+  Sandbox-only: `/tmp/openpresence-learning-canary-real-1789691200-qualified-chain-repaired.json`
+  using `/tmp/openpresence-learning-canary-real-1789690617-question-reply.db`.
+
+The run preserved source-backed hypothesis lineage on the generated original,
+generated a distinct denominator variation, produced an Agent reply and a
+second external response to that reply, and recorded two publication metrics.
+The exact session artifact remained `testing`; the model review did not produce
+a positive supported disposition, and all projected retained-vs-removed
+comparisons remained `decisionsDiffer=false`, `scoresDiffer=false`, with
+`not_demonstrated` claims. Existing older-session review records in the reused
+database remain historical evidence and were not used to promote the current
+session.
+
+This closes the Sandbox review-observability boundary but does not close the
+learning canary. LEARN-002/003/004, AUT-001, EVAL-004, EVAL-005, and UX-004
+remain PARTIAL. No capability is promoted. The next single highest-impact gate
+is still a truthful positive disposition followed by an independently
+reconstructed later decision that differs when the learned artifact is
+removed.

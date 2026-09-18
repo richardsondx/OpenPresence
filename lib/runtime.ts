@@ -2185,24 +2185,33 @@ function growthAssignmentFor(source: OpenPresenceState, presenceId: string, assi
   return assignmentId ? assignments.find((assignment) => assignment.id === assignmentId) : assignments.find((assignment) => ["active", "working", "accepted", "planning"].includes(assignment.status)) ?? assignments[0];
 }
 
-export function deriveGrowthEvidenceSnapshot(source: OpenPresenceState, presenceId: string): import("./types").GrowthEvidenceSnapshot {
+export function deriveGrowthEvidenceSnapshot(source: OpenPresenceState, presenceId: string, options?: { sandboxSessionId?: string }): import("./types").GrowthEvidenceSnapshot {
   const state = normalizeState(source);
   const presence = state.presences.find((p) => p.id === presenceId) ?? state.presence;
+  const sandboxSessionId = options?.sandboxSessionId;
   const growthAssignment = growthAssignmentFor(state, presenceId);
   const nowDate = new Date();
   const periodDays = 7;
   const windowEnd = nowDate.toISOString();
   const windowStart = growthWindowStartAt(state, presenceId, periodDays, nowDate.getTime());
-  const audienceSnapshots = collapseAudienceSnapshots(state.audienceSnapshots.filter((s) => s.presenceId === presenceId && growthEvidenceIsInPresenceScope(state, presenceId, s.observedAt)));
-  const publicationSnapshots = state.publicationMetricSnapshots.filter((s) => s.presenceId === presenceId && growthPublicationIsInPresenceScope(state, presenceId, s) && new Date(s.observedAt).getTime() >= new Date(windowStart).getTime());
-  const scopedMirror = state.mirrorObjects.filter((m) => m.presenceId === presenceId && m.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presenceId, m.occurredAt ?? m.observedAt) && new Date(m.occurredAt ?? m.observedAt).getTime() >= new Date(windowStart).getTime());
+  const inGrowthScope = (item: { environment?: string; sessionId?: string; observedAt?: string; occurredAt?: string }) => sandboxSessionId
+    ? item.environment === "sandbox" && item.sessionId === sandboxSessionId
+    : item.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presenceId, item.occurredAt ?? item.observedAt);
+  const audienceSnapshots = collapseAudienceSnapshots(state.audienceSnapshots.filter((s) => s.presenceId === presenceId && (sandboxSessionId ? inGrowthScope(s) : growthEvidenceIsInPresenceScope(state, presenceId, s.observedAt))));
+  const publicationSnapshots = state.publicationMetricSnapshots.filter((s) => {
+    if (s.presenceId !== presenceId || new Date(s.observedAt).getTime() < new Date(windowStart).getTime()) return false;
+    const publication = state.mirrorObjects.find((item) => item.id === s.mirrorObjectId);
+    return publication && inGrowthScope(publication) && (sandboxSessionId ? s.source === "sandbox" : growthPublicationIsInPresenceScope(state, presenceId, s));
+  });
+  const scopedMirror = state.mirrorObjects.filter((m) => m.presenceId === presenceId && inGrowthScope(m) && new Date(m.occurredAt ?? m.observedAt).getTime() >= new Date(windowStart).getTime());
 
   const posts = scopedMirror.filter((m) => m.actorPresenceId === presenceId && m.objectType === "post").length;
   const replies = scopedMirror.filter((m) => m.actorPresenceId === presenceId && m.objectType === "reply").length;
   const quotes = scopedMirror.filter((m) => m.actorPresenceId === presenceId && m.objectType === "quote").length;
   const verifiedExecutions = state.executions.filter((execution) => {
     if (execution.presenceId !== presenceId || execution.status !== "succeeded") return false;
-    return growthEvidenceIsInPresenceScope(state, presenceId, execution.createdAt) && new Date(execution.createdAt).getTime() >= new Date(windowStart).getTime();
+    if (sandboxSessionId) return execution.environment === "sandbox" && execution.sessionId === sandboxSessionId;
+    return execution.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presenceId, execution.createdAt) && new Date(execution.createdAt).getTime() >= new Date(windowStart).getTime();
   });
   const likes = verifiedExecutions.filter((execution) => state.socialIntents.find((intent) => intent.id === execution.socialIntentId)?.affordance === "like").length;
   const follows = verifiedExecutions.filter((execution) => state.socialIntents.find((intent) => intent.id === execution.socialIntentId)?.affordance === "follow").length;
@@ -2213,7 +2222,7 @@ export function deriveGrowthEvidenceSnapshot(source: OpenPresenceState, presence
   const impressionsList = publicationSnapshots.map((s) => s.impressions).filter((v): v is number => typeof v === "number");
   const medianPostReach = median(impressionsList);
   const repliesWithResponses = scopedMirror.filter((m) => m.actorPresenceId === presenceId && m.objectType === "reply" && scopedMirror.some((child) => child.parentExternalRef?.id === m.externalRef.id)).length;
-  const scopedPersonIds = new Set(state.personIdentities.filter((identity) => identity.sourcePresenceId === presenceId && growthEvidenceIsInPresenceScope(state, presenceId, identity.createdAt)).map((identity) => identity.personId));
+  const scopedPersonIds = new Set(state.personIdentities.filter((identity) => identity.sourcePresenceId === presenceId && !sandboxSessionId && growthEvidenceIsInPresenceScope(state, presenceId, identity.createdAt)).map((identity) => identity.personId));
   const activeRelationships = state.relationships.filter((relationship) => relationship.state === "active" && scopedPersonIds.has(relationship.personId)).length
     || state.people.filter((person) => person.memoryState === "active" && scopedPersonIds.has(person.id)).length;
 
@@ -8139,7 +8148,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
   if (operation.type === "recordAudienceSnapshot") {
     const presence = state.presences.find((item) => item.id === (operation.presenceId ?? state.activePresenceId)) ?? state.presence;
     if (!presence || !Number.isInteger(operation.followers) || operation.followers < 0) return state;
-    const snapshot: PresenceAudienceSnapshot = { id: id("audience-snapshot"), presenceId: presence.id, channel: presence.channel, followers: operation.followers, following: operation.following, source: operation.source ?? (presence.environment === "sandbox" ? "sandbox" : "manual"), observationStatus: operation.observationStatus ?? "observed", observedAt: operation.observedAt ?? now(), environment: presence.environment };
+    const snapshot: PresenceAudienceSnapshot = { id: id("audience-snapshot"), presenceId: presence.id, channel: presence.channel, followers: operation.followers, following: operation.following, source: operation.source ?? (presence.environment === "sandbox" ? "sandbox" : "manual"), observationStatus: operation.observationStatus ?? "observed", observedAt: operation.observedAt ?? now(), environment: presence.environment, sessionId: operation.sessionId };
     // Keep raw polling deduplication independent from the Growth boundary.
     // Historical records remain available as provenance, while all Growth
     // reads below still fail closed on pre-Presence observations.
@@ -8195,7 +8204,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     const presence = state.presences.find((item) => item.id === (operation.presenceId ?? state.activePresenceId)) ?? state.presence;
     const assignment = presence ? growthAssignmentFor(state, presence.id, operation.assignmentId) : undefined;
     if (!assignment) return state;
-    const reviewed = createGrowthReview(state, assignment, operation.kind ?? "weekly", operation.modelDecision, undefined, operation.reviewAt ? new Date(operation.reviewAt) : undefined);
+    const reviewed = createGrowthReview(state, assignment, operation.kind ?? "weekly", operation.modelDecision, operation.sandboxSessionId ? deriveGrowthEvidenceSnapshot(state, assignment.presenceId, { sandboxSessionId: operation.sandboxSessionId }) : undefined, operation.reviewAt ? new Date(operation.reviewAt) : undefined);
     reviewed.events.unshift(event("learning", "Growth review completed", reviewed.growthReviews[0]?.summary ?? "Genny reviewed the available Growth evidence.", "positive", { presenceId: assignment.presenceId }));
     return reviewed;
   }

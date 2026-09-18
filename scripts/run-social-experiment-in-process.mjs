@@ -221,6 +221,8 @@ function resolveValue(value, previous) {
   if (value === "$latest-object") return previous?.world?.[0]?.externalRef;
   if (value === "$latest-own-post-id") return previous?.world?.find((item) => item.objectType === "post" && item.actorPresenceId)?.id;
   if (value === "$latest-own-post") return previous?.world?.find((item) => item.objectType === "post" && item.actorPresenceId)?.externalRef;
+  if (value === "$latest-own-reply-id") return previous?.world?.find((item) => item.objectType === "reply" && item.actorPresenceId)?.id;
+  if (value === "$latest-own-reply") return previous?.world?.find((item) => item.objectType === "reply" && item.actorPresenceId)?.externalRef;
   if (value === "$latest-inbound") return previous?.world?.find((item) => !item.actorPresenceId)?.externalRef ?? previous?.world?.[0]?.externalRef;
   return value;
 }
@@ -283,7 +285,7 @@ async function runScenario(scenarioPath, presenceId) {
       if (!sessionId) throw new Error(`Scenario step ${index + 1} reviews before a session starts.`);
       const current = await getState();
       const session = sessionFor(current, sessionId);
-      const state = await postOperation({ type: "reviewGrowth", presenceId: session.presenceId, kind: options.kind ?? "weekly" });
+      const state = await postOperation({ type: "reviewGrowth", presenceId: session.presenceId, kind: options.kind ?? "weekly", sandboxSessionId: sessionId });
       result = projectedState(state, sessionId, "review");
     } else if (step.command === "timeline") {
       const state = await getState();

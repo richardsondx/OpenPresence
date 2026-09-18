@@ -776,6 +776,7 @@ export interface PresenceAudienceSnapshot {
   observationStatus: "observed" | "partial" | "unavailable";
   observedAt: string;
   environment?: PresenceEnvironment;
+  sessionId?: string;
 }
 export interface PublicationMetricSnapshot {
   id: string;
@@ -3109,7 +3110,7 @@ export type PublishingPlanOperation =
   | { type: "pausePublishingPlan"; id: string }
   | { type: "archivePublishingPlan"; id: string };
 export type GrowthOperation =
-  | { type: "reviewGrowth"; assignmentId?: string; presenceId?: string; kind?: GrowthReviewKind; modelDecision?: GrowthReviewDecision; reviewAt?: string };
+  | { type: "reviewGrowth"; assignmentId?: string; presenceId?: string; kind?: GrowthReviewKind; modelDecision?: GrowthReviewDecision; reviewAt?: string; sandboxSessionId?: string };
 export type AgentRequestOperation =
   | { type: "updateAgentRequest"; id: string; status: AgentRequestStatus }
   | { type: "recordCapabilityChange"; presenceId: string; changes: Array<Pick<CapabilityChangeEvent, "capability" | "previousAvailability" | "nextAvailability" | "provider" | "detail">> };
@@ -3127,7 +3128,7 @@ export type ExplorationOperation =
   | { type: "runAttentionWorker"; presenceId?: string; scheduled?: boolean };
 export type BrowserOperation = { type: "setPresenceBrowserAccess"; presenceId?: string; enabled: boolean };
 export type ObservabilityOperation =
-  | { type: "recordAudienceSnapshot"; presenceId?: string; followers: number; following?: number; source?: MetricObservationSource; observationStatus?: "observed" | "partial" | "unavailable"; observedAt?: string }
+  | { type: "recordAudienceSnapshot"; presenceId?: string; followers: number; following?: number; source?: MetricObservationSource; observationStatus?: "observed" | "partial" | "unavailable"; observedAt?: string; sessionId?: string }
   | { type: "recordPublicationMetricSnapshot"; presenceId?: string; mirrorObjectId: string; publicationAgeSeconds?: number; metrics: Partial<Record<"impressions" | "likes" | "replies" | "reposts" | "quotes", number>>; source?: MetricObservationSource; observationStatus?: "observed" | "partial" | "unavailable" };
 export type LegacyLanguageOperation =
   | { type: "setAgentLanguagePolicy"; policy: Partial<LanguagePolicy> }
