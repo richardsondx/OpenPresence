@@ -22,6 +22,9 @@ const dbPath = option("db", process.env.OPENPRESENCE_DB_PATH);
 const secretKeyFile = option("secret-key-file");
 const routeArtifact = option("route", ".next/server/app/api/state/route.js");
 const outputPath = option("output");
+const requestedProvider = option("provider", "openai");
+const requestedModel = option("model", "gpt-5.6-luna");
+const requestedQuality = option("quality", "low");
 const requiredProvider = option("require-provider");
 const requiredModel = option("require-model");
 const requiredReasoning = option("require-reasoning");
@@ -318,15 +321,30 @@ async function runScenario(scenarioPath, presenceId) {
 const initial = await getState();
 const presence = initial.presence ?? initial.presences?.[0];
 if (!presence?.id) throw new Error("No active Presence is available for the experiment.");
-const openAiConnection = initial.providerConnections?.find((item) => item.provider === "openai" && item.status === "available" && item.secretConfigured !== false);
-if (!openAiConnection) throw new Error("The selected QA database has no available configured OpenAI provider.");
+const providerConnection = initial.providerConnections?.find((item) => item.provider === requestedProvider && (item.status === "available" || item.status === "local") && (requestedProvider === "ollama" || item.secretConfigured !== false));
+if (!providerConnection) throw new Error(`The selected QA database has no available configured ${requestedProvider} provider.`);
 const affordances = ["post", "reply", "repost", "quote", "like", "message"];
 const autoExecution = Object.fromEntries(affordances.map((affordance) => [affordance, "auto"]));
-const configured = await postOperation({ type: "setModel", model: "gpt-5.6-luna", provider: "openai", quality: "low", vision: true });
-const sandboxState = await postOperation({ type: "setPresence", patch: { connectionMode: "sandbox", execution: autoExecution } });
+const configured = await postOperation({ type: "setModel", model: requestedModel, provider: requestedProvider, quality: requestedQuality, vision: true });
+const sandboxState = await postOperation({
+  type: "setPresence",
+  patch: {
+    connectionMode: "sandbox",
+    execution: autoExecution,
+    // Bootstrap the Presence-owned publishing responsibility through the
+    // public runtime path. This is not a user-created Assignment; it is the
+    // standing Agent-owned responsibility required by the canary's Growth
+    // review and autonomous publication loop.
+    publishingInitiative: {
+      ...(presence.publishingInitiative ?? { mode: "adaptive", timezone: "America/Toronto", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }),
+      mode: presence.publishingInitiative?.mode === "off" ? "adaptive" : (presence.publishingInitiative?.mode ?? "adaptive"),
+      updatedAt: new Date().toISOString(),
+    },
+  },
+});
 const configuredPresence = sandboxState.presences?.find((item) => item.id === presence.id) ?? sandboxState.presence;
 const model = configured.modelProfiles?.find((item) => item.agentId === configured.agent?.id) ?? configured.modelProfiles?.[0];
-if (!model || model.provider !== "openai" || model.model !== "gpt-5.6-luna" || model.quality !== "low") throw new Error("The requested GPT 5.6 Luna Low configuration was not applied.");
+if (!model || model.provider !== requestedProvider || model.model !== requestedModel || model.quality !== requestedQuality) throw new Error(`The requested ${requestedProvider}/${requestedModel}/${requestedQuality} configuration was not applied.`);
 if (/qwen/i.test(model.model)) throw new Error("Qwen is prohibited for message experiments.");
 if (requiredProvider && model.provider !== requiredProvider) throw new Error(`Expected provider ${requiredProvider}, received ${model.provider}.`);
 if (requiredModel && model.model !== requiredModel) throw new Error(`Expected model ${requiredModel}, received ${model.model}.`);
