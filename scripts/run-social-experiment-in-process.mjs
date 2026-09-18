@@ -237,7 +237,8 @@ async function runScenario(scenarioPath, presenceId) {
   if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) throw new Error("Scenario must contain a non-empty steps array.");
   const steps = [];
   let sessionId;
-  for (const [index, step] of scenario.steps.entries()) {
+  try {
+    for (const [index, step] of scenario.steps.entries()) {
     const previous = steps.at(-1)?.result;
     const options = Object.fromEntries(Object.entries(step.options ?? {}).map(([key, value]) => [key, resolveValue(value, previous)]));
     let result;
@@ -312,7 +313,20 @@ async function runScenario(scenarioPath, presenceId) {
     } else {
       throw new Error(`Unsupported in-process scenario command: ${step.command}`);
     }
-    steps.push({ index: index + 1, command: step.command, ...(options.observeOnly === true ? { observeOnly: true } : {}), result });
+      steps.push({ index: index + 1, command: step.command, ...(options.observeOnly === true ? { observeOnly: true } : {}), result });
+    }
+  } catch (error) {
+    if (outputPath) {
+      const failure = {
+        ok: false,
+        scenario: scenarioPath,
+        error: { name: error?.name ?? "Error", message: error?.message ?? String(error), stack: error?.stack },
+        steps,
+        result: steps.at(-1)?.result,
+      };
+      await writeFile(path.resolve(outputPath), `${JSON.stringify(failure, null, 2)}\n`);
+    }
+    throw error;
   }
   const unavailable = steps.flatMap((step) => step.result?.recentEvents ?? [])
     .filter((event) => event.title === "Sandbox evaluation unavailable");
