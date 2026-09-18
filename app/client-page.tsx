@@ -2294,39 +2294,6 @@ function AnalyticsView({ state, mutate, setView, onOpenAttention }: { state: Ope
   </div>;
 }
 
-function OperatorThreadSidebar({ state, setView }: { state: OpenPresenceState; setView: (view: View) => void }) {
-  const threads = (state.operatorThreads ?? []).filter((thread) => thread.agentId === state.agent?.id && thread.status !== "archived");
-  const assignments = state.assignments.filter((assignment) => assignment.agentId === state.agent?.id);
-  const activeAssignmentIds = new Set(assignments.filter((assignment) => assignmentIsOpen(assignment)).map((assignment) => assignment.id));
-  const main = threads.find((thread) => thread.title === "Main") ?? threads[threads.length - 1];
-  const active = threads.filter((thread) => thread.id !== main?.id && thread.assignmentIds.some((id) => activeAssignmentIds.has(id))).slice(0, 4);
-  const recent = threads.filter((thread) => thread.id !== main?.id && !active.some((item) => item.id === thread.id)).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 5);
-  const openThread = (threadId: string) => {
-    const url = new URL(window.location.href);
-    url.pathname = viewPaths.chat;
-    url.searchParams.set("threadId", threadId);
-    window.history.pushState({ ...(window.history.state ?? {}), openPresenceView: "chat" }, "", url.pathname + url.search + url.hash);
-    setView("chat");
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  };
-  const group = (label: string, items: typeof threads) => items.length ? <div className="operator-thread-group">
-    <span className="sidebar-label">{label}</span>
-    {items.map((thread) => {
-      const isWorking = thread.assignmentIds.some((id) => activeAssignmentIds.has(id));
-      return <button type="button" key={thread.id} className="operator-thread-sidebar-row" onClick={() => openThread(thread.id)}>
-        <span className={`thread-status-dot${isWorking ? " is-active" : ""}`} aria-hidden="true" />
-        <span className="operator-thread-sidebar-title">{thread.title}</span>
-        {isWorking && <span className="thread-active-label">Working</span>}
-      </button>;
-    })}
-  </div> : null;
-  return <div className="operator-thread-sidebar" aria-label="Agent conversations">
-    {main && group("Main", [main])}
-    {group("Active work", active)}
-    {group("Recent", recent)}
-  </div>;
-}
-
 function AgentWorkspaceShell({
   state,
   view,
@@ -2441,9 +2408,6 @@ function AgentWorkspaceShell({
         <details className="agent-switcher-menu"><summary aria-label="Choose agent"><PresenceGlyph accent={agent.accent} name={agent.name} avatarVariant={agent.avatarVariant} /><span>{agent.name}</span><ChevronDown size={16} /></summary>
         <AgentPortfolio state={state} mutate={mutate} onSelectAgent={onSelectAgent} switchingAgentId={switchingAgentId} onCreateAgent={() => setShowCreateAgent(true)} collapsed={false} />
         </details>
-        <div className="sidebar-agent-workspace">
-          <OperatorThreadSidebar state={state} setView={setView} />
-        </div>
         </div>
         {navigation("desktop-navigation")}
         <div className={`sidebar-resource-menu${resourceMenuOpen ? " is-open" : ""}`}>
