@@ -959,6 +959,14 @@ learning verifier has not returned a verdict for this exact candidate, so
 LEARN-002/003/004, AUT-001, EVAL-004, EVAL-005, and UX-004 remain PARTIAL.
 No capability is promoted from the artifact or release health alone.
 
+The bounded independent public learning verifier is recorded in
+`qa-learnings/independent-public-learning-verifier-2026-09-18.md`. It binds
+the sealed artifact by SHA-256 and verifies that the autonomous runtime and
+fixture files did not change between the canary-producing commit and the
+release-health candidate. It returns PASS for the canary claim, but the
+broader capability contracts still require their remaining adversarial and
+composed gates; no row is promoted.
+
 The exact candidate also passed the existing independent public safety checks:
 `tests/native-inflight-external-oracle.test.ts` (2/2, including cancellation
 during retry backoff with zero external requests) and
