@@ -7563,11 +7563,64 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .inspector-identity .presence-glyph { width: 40px; height: 40px; }
 .agent-activity-inspector .inspector-heading h2 { font-size: 22px; }
 .agent-activity-inspector .inspector-view-nav { grid-template-columns: 1fr 1fr; padding: 5px; border: 0; border-radius: 24px; background: var(--surface-subtle); gap: 4px; }
+.agent-activity-inspector .inspector-view-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .agent-activity-inspector .inspector-view-nav button { flex-direction: row; justify-content: center; gap: 8px; min-height: 44px; border: 0; border-radius: 22px; color: var(--muted); }
 .agent-activity-inspector .inspector-view-nav button[aria-pressed="true"] { background: var(--surface); color: var(--ink); }
 .agent-activity-inspector h3 { font-size: 15px; margin: 0 0 12px; }
 .agent-activity-inspector .inspector-list-row { gap: 10px; min-height: 68px; padding: 10px 0; }
 .agent-activity-inspector .inspector-list-row strong { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 14px; }
+.agent-activity-inspector .inspector-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.agent-activity-inspector .inspector-section-heading p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.inspector-count { display: grid; min-width: 24px; height: 24px; place-items: center; border-radius: 999px; color: var(--muted); background: var(--surface-subtle); font: 10px "DM Mono", monospace; }
+.inspector-today-list { display: grid; gap: 2px; margin-top: 13px; }
+.inspector-today-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 9px; width: 100%; padding: 10px 0; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.inspector-today-row:hover, .inspector-today-row:focus-visible { color: #6742d5; }
+.inspector-today-row > span:nth-child(2) { display: grid; gap: 3px; min-width: 0; }
+.inspector-today-row strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.inspector-today-row small { overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.inspector-today-row time, .agent-activity-detail-row time { color: var(--faint); font: 9px "DM Mono", monospace; }
+.inspector-event-icon { display: grid; width: 30px; height: 30px; place-items: center; flex: 0 0 auto; border-radius: 9px; color: #6742d5; background: #f2edff; }
+.inspector-event-icon-execution { color: #397953; background: #edf8f0; }
+.inspector-event-icon-decision { color: #9b632e; background: #fff5e6; }
+.inspector-event-icon-learning { color: #a14e74; background: #fff0f6; }
+.inspector-event-icon-memory { color: #477398; background: #edf6fc; }
+.agent-activity-detail-backdrop { z-index: 100; }
+.agent-activity-detail-dialog { display: grid; gap: 18px; width: min(680px, calc(100vw - 32px)); max-height: min(720px, calc(100vh - 48px)); overflow-y: auto; padding: 24px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface, #fff); color: var(--ink); box-shadow: 0 24px 80px rgba(32,35,49,.22); }
+.agent-activity-detail-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.agent-activity-detail-dialog h2 { margin: 5px 0 4px; font-size: 20px; letter-spacing: -.04em; }
+.agent-activity-detail-dialog header p { margin: 0; color: var(--muted); font-size: 11px; }
+.inspector-detail-status { color: #4f805e; font: 9px "DM Mono", monospace; letter-spacing: .06em; text-transform: uppercase; }
+.agent-activity-detail-summary { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 11px; padding: 13px; border-radius: 10px; background: var(--surface-subtle); }
+.agent-activity-detail-summary strong, .agent-activity-detail-timeline > strong { font-size: 12px; }
+.agent-activity-detail-summary p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.agent-activity-detail-timeline { display: grid; gap: 0; }
+.agent-activity-detail-hint { margin: 4px 0 16px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.agent-activity-detail-step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 11px; min-width: 0; }
+.agent-activity-detail-rail { position: relative; display: flex; justify-content: center; }
+.agent-activity-detail-marker { z-index: 1; display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid #ddd4ff; border-radius: 50%; color: #6742d5; background: #f2edff; }
+.agent-activity-detail-line { position: absolute; top: 28px; bottom: -1px; width: 1px; background: var(--line); }
+.agent-activity-detail-step.is-started .agent-activity-detail-marker { color: #397953; border-color: #cbe9d3; background: #edf8f0; }
+.agent-activity-detail-step.is-completed .agent-activity-detail-marker { color: #397953; border-color: #b8ddc3; background: #e6f6ea; }
+.agent-activity-detail-step.is-tool .agent-activity-detail-marker { color: #477398; border-color: #cfe5f4; background: #edf6fc; }
+.agent-activity-detail-step-content { min-width: 0; padding-bottom: 13px; }
+.agent-activity-detail-step-button { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; width: 100%; padding: 1px 0 10px; border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.agent-activity-detail-step-button:hover, .agent-activity-detail-step-button:focus-visible { color: #6742d5; }
+.agent-activity-detail-step-button > span { display: grid; gap: 3px; min-width: 0; }
+.agent-activity-detail-step-button small { color: var(--muted); font: 9px "DM Mono", monospace; letter-spacing: .06em; text-transform: uppercase; }
+.agent-activity-detail-step-button strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.agent-activity-detail-step-button time { color: var(--faint); font: 9px "DM Mono", monospace; }
+.agent-activity-detail-step-button > svg { flex: 0 0 auto; margin-top: 7px; color: var(--muted); transition: transform .15s ease; }
+.agent-activity-detail-step.is-expanded .agent-activity-detail-step-button > svg { transform: rotate(180deg); }
+.agent-activity-detail-step-output { display: grid; gap: 10px; margin: 0 0 13px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-subtle); }
+.agent-activity-detail-step-output strong { font-size: 11px; }
+.agent-activity-detail-step-output p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.agent-activity-detail-step-output details { border-top: 1px solid var(--line); padding-top: 8px; }
+.agent-activity-detail-step-output summary { color: var(--muted); font-size: 10px; cursor: pointer; }
+.agent-activity-detail-step-output dl { display: grid; gap: 6px; margin: 9px 0 0; }
+.agent-activity-detail-step-output dl > div { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; }
+.agent-activity-detail-step-output dt { color: var(--muted); font-size: 10px; }
+.agent-activity-detail-step-output dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--ink); font: 9px "DM Mono", monospace; }
+.theme-dark .agent-activity-detail-dialog { background: #20232d; }
 .inspector-shortcuts { display: grid; gap: 3px; margin-top: 18px; }
 .inspector-shortcuts button { display: flex; align-items: center; gap: 10px; padding: 14px 0; min-height: 48px; border: 0; background: transparent; color: var(--ink); text-align: left; }
 .inspector-shortcuts button > svg:last-child { margin-left: auto; }
