@@ -122,7 +122,12 @@ export function captureLearningCheckpoint(state: OpenPresenceState, presence: Pr
 }
 
 function situationForStrategyRun(run: SocialStrategyRetrievalRun, presence: Presence, situationId: string, availableActions: string[] = ["original_post"]): LearningDecisionSituation {
-  const actions = [...new Set(availableActions.filter(Boolean))];
+  // The runtime planner calls an original publication "post" while the
+  // strategy playbook and counterfactual contract use "original_post". Keep
+  // one canonical action in the fork oracle; otherwise real autonomous post
+  // decisions disappear from the candidate set and learning can never affect
+  // their retained-vs-removed comparison.
+  const actions = [...new Set(availableActions.filter(Boolean).map((action) => action === "post" ? "original_post" : action))];
   const candidates = run.consideredPatterns.length
     ? run.consideredPatterns.flatMap((pattern) => actions
       .filter((action) => action === "original_post" || pattern.supportedActs.includes(action))

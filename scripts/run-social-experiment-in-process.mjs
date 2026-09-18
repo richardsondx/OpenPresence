@@ -22,6 +22,7 @@ const dbPath = option("db", process.env.OPENPRESENCE_DB_PATH);
 const secretKeyFile = option("secret-key-file");
 const routeArtifact = option("route", ".next/server/app/api/state/route.js");
 const outputPath = option("output");
+const freshPresence = booleanOption("fresh-presence");
 const requestedProvider = option("provider", "openai");
 const requestedModel = option("model", "gpt-5.6-luna");
 const requestedQuality = option("quality", "low");
@@ -304,6 +305,12 @@ async function runScenario(scenarioPath, presenceId) {
       const session = sessionFor(current, sessionId);
       const state = await postOperation({ type: "reviewGrowth", presenceId: session.presenceId, kind: options.kind ?? "weekly", sandboxSessionId: sessionId });
       result = projectedState(state, sessionId, "review");
+    } else if (step.command === "replan") {
+      if (!sessionId) throw new Error(`Scenario step ${index + 1} replans before a session starts.`);
+      const current = await getState();
+      const session = sessionFor(current, sessionId);
+      const state = await postOperation({ type: "replanPublishing", presenceId: session.presenceId });
+      result = projectedState(state, sessionId, "replan");
     } else if (step.command === "timeline") {
       const state = await getState();
       result = projectedState(state, sessionId, "timeline");
@@ -334,8 +341,23 @@ async function runScenario(scenarioPath, presenceId) {
   return { ok: true, command: "run", scenario: scenarioPath, steps, result: steps.at(-1)?.result };
 }
 
-const initial = await getState();
-const presence = initial.presence ?? initial.presences?.[0];
+let initial = await getState();
+let presence = initial.presence ?? initial.presences?.[0];
+if (freshPresence) {
+  const suffix = Math.random().toString(36).slice(2, 10);
+  initial = await postOperation({
+    type: "createPresence",
+    input: {
+      channel: "x",
+      name: `Learning Canary ${suffix}`,
+      handle: `@learningcanary${suffix}`,
+      mode: "agent",
+      accent: "#d88b57",
+      connectionMode: "sandbox",
+    },
+  });
+  presence = initial.presences?.find((item) => item.id === initial.activePresenceId) ?? initial.presence;
+}
 if (!presence?.id) throw new Error("No active Presence is available for the experiment.");
 const providerConnection = initial.providerConnections?.find((item) => item.provider === requestedProvider && (item.status === "available" || item.status === "local") && (requestedProvider === "ollama" || item.secretConfigured !== false));
 if (!providerConnection) throw new Error(`The selected QA database has no available configured ${requestedProvider} provider.`);

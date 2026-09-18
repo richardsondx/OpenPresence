@@ -4166,7 +4166,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
   // source into a private, session-scoped reusable hypothesis before the
   // decision is compiled. This is the missing consideration -> strategy
   // transition: retrieval alone must not imply that the Agent learned.
-  if (!inbound && !isAssignment && !isPublishingWindow && !isOriginalRehearsal && !isAiMockEnabled()) {
+  if (!inbound && !isAssignment && !isOriginalRehearsal && !isAiMockEnabled()) {
     const metrics = new Map(actionSource.publicationMetricSnapshots.filter((item) => item.presenceId === presence.id).map((item) => [item.mirrorObjectId, item]));
     const sources = mirror
       .filter((item) => item.actorPresenceId !== presence.id && item.objectType === "post" && item.environment === "sandbox")
@@ -4199,7 +4199,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
   const requestedSourceBackedTemplate = isOriginalRehearsal && /(?:use|based on|from).*(?:observed|source).*(?:pattern|structure)|(?:pattern|structure).*(?:observed|source)/i.test(rehearsal?.inspiration ?? "")
     ? (source.growthHypotheses ?? []).find((hypothesis) => hypothesis.sandboxSessionId === sessionId && hypothesis.template?.source === "observed_post" && !["retired", "disfavored"].includes(hypothesis.status))
     : undefined;
-  const autonomousSourceBackedTemplate = !inbound && !isAssignment && !isPublishingWindow && !isOriginalRehearsal && !isAiMockEnabled()
+  const autonomousSourceBackedTemplate = !inbound && !isAssignment && !isOriginalRehearsal && !isAiMockEnabled()
     ? (cognitionSource.growthHypotheses ?? []).find((hypothesis) => hypothesis.sandboxSessionId === sessionId && hypothesis.template?.source === "observed_post" && !["retired", "disfavored"].includes(hypothesis.status))
     : undefined;
   const selectedSourceBackedTemplate = requestedSourceBackedTemplate ?? autonomousSourceBackedTemplate;
@@ -4280,9 +4280,12 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
   // The first planner pass can choose no_op before expression normalization.
   // Exact-quantity assignments must get the same bounded recovery pass here;
   // otherwise the early no-op branch bypasses assignment delivery entirely.
-  if (isAssignment && decision.action === "no_op" && availableActions.includes("post")) {
+  if ((isAssignment || isPublishingWindow) && decision.action === "no_op" && availableActions.includes("post")) {
     try {
-      const recovered = await generateAgentSocialDecision(cognitionSource, `${prompt}${judgmentContext}\n\nThis is an explicit exact-quantity posting Assignment. A no_op does not satisfy this Assignment. Produce the next original post now, grounded in the supplied Presence context. Return action=post with the complete publication text; do not return no_op merely because the world is quiet or because the operator asked for a batch.`, availableActions, { assignmentMode: true, presence, requireStrategySelection: true });
+      const recoveryInstruction = isPublishingWindow
+        ? "This is an eligible Agent-owned publishing window. A no_op leaves the standing responsibility unfinished. Produce one distinct, evidence-backed original post now when no hard safety or channel constraint prevents it. Preserve the selected reusable strategy when one is applicable; return action=post with the complete publication text."
+        : "This is an explicit exact-quantity posting Assignment. A no_op does not satisfy this Assignment. Produce the next original post now, grounded in the supplied Presence context. Return action=post with the complete publication text; do not return no_op merely because the world is quiet or because the operator asked for a batch.";
+      const recovered = await generateAgentSocialDecision(cognitionSource, `${prompt}${judgmentContext}\n\n${recoveryInstruction}`, availableActions, { assignmentMode: true, presence, strategyContext: originalStrategyContext, requireStrategySelection: true, requireTemplateSelection: Boolean(originalStrategyContext?.retrievalRun.selectedTemplateId) });
       if (recovered.action === "post" && cleanSandboxDraft(recovered.text)) decision = recovered;
     } catch {
       // The normal no-op/rejection path below records the failed candidate.

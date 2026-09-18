@@ -905,3 +905,32 @@ by `Ollama is temporarily at capacity` and zero own posts:
 `/tmp/openpresence-learning-canary-ollama-k3-current.json`. This improves
 failed-run observability only; it does not satisfy the public learning canary,
 and no capability is promoted.
+
+## 2026-09-18 real autonomous learning canary — supported artifact and positive counterfactual
+
+The older named OpenAI artifact `/tmp/openpresence-learning-canary-openai-current.json`
+was audited first. Its earliest missing transition was consideration -> explicit
+strategy/learning selection for the second original post: the decision had no
+selected hypothesis/template or source observation and truthfully declared
+novel exploration. Its `testing` hypothesis was not treated as supported, and
+the failed two-post artifact remains preserved.
+
+The minimal repair kept the existing Agent-owned runtime lifecycle: normal
+publishing-window recovery now carries selected source-backed strategy context
+when an initial autonomous planner pass returns `no_op`; the fixture adds
+ordinary autonomous opportunities for measurement and replanning; and the
+counterfactual oracle canonicalizes runtime `post` as `original_post`.
+Focused tests passed 112/112 and the production build passed. No manual
+Assignment or forced publication/disposition was added.
+
+The composed real OpenAI public-runtime run passed at
+`/tmp/openpresence-learning-canary-final7.json` using GPT-5.6 Luna low,
+auto execution, a fresh Agent-owned Sandbox Presence, and simulated X delivery.
+It produced eight source-attributed template-guided variations, a genuine
+`supported` outcome with two measured evidence IDs, and four demonstrated
+retained-vs-removed counterfactuals whose selected strategy changed. A
+separate artifact verifier reproduced those pass/fail checks. This is strong
+positive learning evidence, but not yet full capability proof: exact-candidate
+independent adversarial verification, complete causal-cone review, and release
+health remain open. LEARN-002/003/004, AUT-001, EVAL-004, EVAL-005, and UX-004
+remain PARTIAL; no capability moved to PROVEN.
