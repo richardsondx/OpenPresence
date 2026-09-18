@@ -4199,13 +4199,17 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
   const requestedSourceBackedTemplate = isOriginalRehearsal && /(?:use|based on|from).*(?:observed|source).*(?:pattern|structure)|(?:pattern|structure).*(?:observed|source)/i.test(rehearsal?.inspiration ?? "")
     ? (source.growthHypotheses ?? []).find((hypothesis) => hypothesis.sandboxSessionId === sessionId && hypothesis.template?.source === "observed_post" && !["retired", "disfavored"].includes(hypothesis.status))
     : undefined;
-  const originalStrategyContext = requestedSourceBackedTemplate
-    ? compileSocialStrategyContext(source, presence, {
+  const autonomousSourceBackedTemplate = !inbound && !isAssignment && !isPublishingWindow && !isOriginalRehearsal && !isAiMockEnabled()
+    ? (cognitionSource.growthHypotheses ?? []).find((hypothesis) => hypothesis.sandboxSessionId === sessionId && hypothesis.template?.source === "observed_post" && !["retired", "disfavored"].includes(hypothesis.status))
+    : undefined;
+  const selectedSourceBackedTemplate = requestedSourceBackedTemplate ?? autonomousSourceBackedTemplate;
+  const originalStrategyContext = selectedSourceBackedTemplate
+    ? compileSocialStrategyContext(cognitionSource, presence, {
       invocation: "original_publication",
-      objective: rehearsal?.inspiration ?? "source-backed original publication",
+      objective: rehearsal?.inspiration ?? "source-backed autonomous original publication",
       availableActions,
       sandboxSessionId: sessionId,
-      strategyTemplateId: requestedSourceBackedTemplate.id,
+      strategyTemplateId: selectedSourceBackedTemplate.id,
     })
     : undefined;
   if (publishingContext) {
