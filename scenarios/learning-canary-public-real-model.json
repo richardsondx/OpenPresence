@@ -10,7 +10,7 @@
       { "command": "inject", "options": { "actor": "Rafi Cole", "handle": "@raficole", "action": "post", "content": "Our polished launch thread got attention but no qualified conversations. The format looked right; the evidence was thin." } },
       { "command": "metric", "options": { "object": "$latest-inbound-id", "metrics": { "impressions": 9200, "likes": 320, "replies": 61, "reposts": 48, "quotes": 16 }, "publicationAgeSeconds": 7200 } },
       { "command": "consider" },
-      { "command": "advance", "options": { "minutes": 1440 } },
+      { "command": "advance", "options": { "minutes": 2880 } },
       { "command": "consider" },
       { "command": "assert-own-posts", "options": { "minimum": 2 } },
       { "command": "metric", "options": { "object": "$latest-own-post-id", "metrics": { "impressions": 4100, "likes": 140, "replies": 34, "reposts": 24, "quotes": 9 }, "publicationAgeSeconds": 3600 } },
