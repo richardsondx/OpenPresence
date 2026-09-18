@@ -887,3 +887,13 @@ changed and no capability is promoted.
 The next retry reproduced the same pre-cognition capacity failure
 (`/tmp/openpresence-learning-canary-ollama11.stderr`). It is preserved as
 infrastructure evidence and does not alter the capability verdict.
+
+## 2026-09-18 alternate non-mock model canary failure
+
+The remaining configured non-mock Ollama cloud model, `kimi-k2.6:cloud`, was
+run through the same public autonomous canary. The strict first-own-post
+precondition failed with zero measurable own posts
+(`/tmp/openpresence-learning-canary-ollama-k26b.stderr`). No source metric,
+`supported` disposition, retained-vs-removed counterfactual, or independent
+verification was claimed. The learning criteria remain unchanged and
+LEARN-002/003/004, AUT-001, EVAL-004, EVAL-005, and UX-004 remain PARTIAL.
