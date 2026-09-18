@@ -934,3 +934,27 @@ positive learning evidence, but not yet full capability proof: exact-candidate
 independent adversarial verification, complete causal-cone review, and release
 health remain open. LEARN-002/003/004, AUT-001, EVAL-004, EVAL-005, and UX-004
 remain PARTIAL; no capability moved to PROVEN.
+
+## 2026-09-18 candidate `4183c69` release-health checkpoint
+
+The release-health correction was limited to the intentionally skipped legacy
+X-connection E2E test: its `test.skip` call now uses the typed overload and its
+obsolete `navigation` reference now uses the existing `page` fixture. Related
+Activity assertions were updated only to ignore the seeded initial Presence
+message while preserving operator, assignment, and decision-message
+invariants.
+
+Exact-candidate health evidence on `4183c692fa670d1daec3e3180a14f83efdfbf58e`:
+
+- `pnpm typecheck` passed.
+- `pnpm lint` passed with 0 errors and 161 pre-existing warnings.
+- `pnpm build` passed.
+- `pnpm test -- --reporter=dot --no-file-parallelism --maxWorkers=1 --minWorkers=1` passed: 132 files / 1,247 tests.
+- `tests/activity-now.test.ts` passed independently: 40/40.
+
+The sealed learning artifact still has builder-independent structural checks
+for eight learned variations, two measured support records, and four positive
+retained-vs-removed counterfactuals. A full independent public/adversarial
+learning verifier has not returned a verdict for this exact candidate, so
+LEARN-002/003/004, AUT-001, EVAL-004, EVAL-005, and UX-004 remain PARTIAL.
+No capability is promoted from the artifact or release health alone.
