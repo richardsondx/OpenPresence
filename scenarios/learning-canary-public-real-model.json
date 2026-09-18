@@ -8,6 +8,7 @@
       { "command": "metric", "options": { "object": "$latest-own-post-id", "metrics": { "impressions": 180, "likes": 1, "replies": 0, "reposts": 0, "quotes": 0 }, "publicationAgeSeconds": 3600 } },
       { "command": "inject", "options": { "actor": "Maya Chen", "handle": "@mayachen", "action": "post", "content": "We doubled activation after removing invited users from the denominator. The mechanism mattered more than the headline." } },
       { "command": "inject", "options": { "actor": "Rafi Cole", "handle": "@raficole", "action": "post", "content": "Our polished launch thread got attention but no qualified conversations. The format looked right; the evidence was thin." } },
+      { "command": "metric", "options": { "object": "$latest-object-id", "metrics": { "impressions": 9200, "likes": 320, "replies": 61, "reposts": 48, "quotes": 16 }, "publicationAgeSeconds": 7200 } },
       { "command": "consider" },
       { "command": "advance", "options": { "minutes": 1440 } },
       { "command": "consider" },
