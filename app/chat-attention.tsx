@@ -4,6 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { ArrowUpRight, CircleAlert, X } from "lucide-react";
 import type { OpenPresenceState, OperationalHealthSnapshot } from "@/lib/types";
 import { isXCreditsError, X_API_CONSOLE_URL } from "@/lib/x-credits";
+import { bridgeExecutionStatus } from "@/lib/bridge-contract";
 
 const reminderFallback = new Map<string, string | null>();
 const reminderEvent = "openpresence:chat-attention-changed";
@@ -38,11 +39,15 @@ export function ChatAttention({ state, health, busy, onCheck, onReview }: {
   const xBillingIncident = (incident: NonNullable<OperationalHealthSnapshot["incidents"]>[number]) => incident.rootCauseKey === "native_x.credits_exhausted" || incident.rootCauseKey === "runtime.credits_exhausted" && /\bX\b/.test(incident.safeSummary);
   const billingTasks = tasks.filter((task) => isXCreditsError(task.lastOutcome?.message) || isXCreditsError(task.work?.blockedReason));
   const billing = billingTasks.length > 0 && (incidents.some((incident) => xBillingIncident(incident) || isXCreditsError(incident.safeSummary)) || isXCreditsError(health?.summary) || tasks.length === billingTasks.length);
+  const browserRouteAvailable = Boolean(presence?.channel === "x" && state.bridges.some((bridge) => bridge.presenceId === presence.id && bridge.name.startsWith("OpenPresence Chrome") && bridgeExecutionStatus(bridge) === "connected"));
+  const billingContinuingInBrowser = billing && browserRouteAvailable;
   const duplicate = incidents.some((incident) => incident.rootCauseKey === "runtime.duplicate_public_outcome");
-  const relevantTasks = billing ? billingTasks : tasks;
-  const summary = billing ? "X previously reported a billing or spending-limit block. Check again to see whether access has recovered." : incidents[0]?.safeSummary ?? tasks[0]?.lastOutcome?.message ?? health?.summary;
+  const relevantTasks = billingContinuingInBrowser ? [] : billing ? billingTasks : tasks;
+  const summary = billingContinuingInBrowser
+    ? "Public work is continuing through the authorized browser."
+    : billing ? "X previously reported a billing or spending-limit block. Check again to see whether access has recovered." : incidents[0]?.safeSummary ?? tasks[0]?.lastOutcome?.message ?? health?.summary;
   const onlyBilling = isXCreditsError(health?.summary) || (incidents.length > 0 && incidents.every((incident) => xBillingIncident(incident) || isXCreditsError(incident.safeSummary)));
-  const visible = tasks.length > 0 || health?.status === "needs_you" && !onlyBilling;
+  const visible = billingContinuingInBrowser ? false : tasks.length > 0 || health?.status === "needs_you" && !onlyBilling;
   // Dismissal follows the paused responsibility, not the latest diagnostic
   // text or retry count. Those fields can change while a reply is in flight,
   // which used to make a dismissed card reappear immediately.

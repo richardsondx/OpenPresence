@@ -19,7 +19,8 @@ describe("human-readable chat evidence", () => {
     expect(toolActivitySummary({ tool: "retry_assignment", result: { status: "queued" } }).status).toBe("Retry queued");
     expect(toolActivitySummary({ tool: "retry_assignment", result: { status: "failed", error: "Credits still exhausted" } })).toMatchObject({ status: "Still blocked", failed: true });
     expect(toolActivitySummary({ tool: "check_connection", result: { status: "failed", error: "X monthly spending limit reached" } })).toMatchObject({ status: "Failed", summary: "X monthly spending limit reached", failed: true });
-    expect(toolActivitySummary({ tool: "social_action", result: [{ action: "reply", status: "verification-pending", verified: false }] }).status).toBe("Awaiting verification");
+    expect(toolActivitySummary({ tool: "social_action", result: [{ action: "reply", status: "verification-pending", verified: false, connector: "native" }] }).status).toBe("Awaiting verification");
+    expect(toolActivitySummary({ tool: "social_action", result: [{ action: "reply", status: "queued", verified: false, connector: "bridge" }] }).summary).toContain("reply · Authorized browser: queued");
     expect(toolActivitySummary({ tool: "social_action", result: [{ action: "reply", status: "succeeded", verified: true }] }).status).toBe("Verified");
   });
   it("turns template tool receipts into a compact saved-artifact activity", () => {

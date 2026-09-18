@@ -23,7 +23,7 @@ import {
 } from "./runtime";
 import { deleteXPost, followXUser, likeXPost, publishSealedXPost, readNativeXCredentials, repostXPost } from "./x";
 import { isTestRuntime } from "./test-runtime";
-import { xCreditsExhausted } from "./x-credits";
+import { xNativeWriteUnavailable } from "./x-credits";
 import { PublicationSecurityError, sealExecutionForDelivery } from "./publication-security";
 import { detectDuplicateVerifiedExecutionOutcomes } from "./public-action-safety";
 import { hasObservedOwnReplyForTarget } from "./duplicate-public-outcome";
@@ -61,7 +61,7 @@ function nativeConnectionCanWrite(connection: OpenPresenceState["nativeConnectio
   if (!canAct) return false;
   // Keep reads available while routing writes away from an API app with no
   // credits. A connected-but-creditless API must not strand browser work.
-  return !xCreditsExhausted(connection);
+  return !xNativeWriteUnavailable(connection);
 }
 
 function nativeAuthorityChanged(source: OpenPresenceState, execution: OpenPresenceState["executions"][number]) {
@@ -149,9 +149,9 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
     }
     const expectedHandle = next.presences.find((item) => item.id === execution.presenceId)?.handle ?? next.presence?.handle;
     const connection = next.nativeConnections.find((item) => item.presenceId === execution.presenceId && item.access === "read-write" && nativeConnectionCanWrite(item, expectedHandle));
-    const creditlessConnection = next.nativeConnections.find((item) => item.presenceId === execution.presenceId && item.channelId === "x" && xCreditsExhausted(item));
-    if (!connection && creditlessConnection && browserBridgeFor(next, execution.presenceId, execution.affordance)) {
-      next = rerouteExecutionToBrowser(next, execution.id, "X API credits are exhausted; the authorized Chrome Bridge is the continuity route for this public action.");
+    const unavailableNativeConnection = next.nativeConnections.find((item) => item.presenceId === execution.presenceId && item.channelId === "x" && xNativeWriteUnavailable(item));
+    if (!connection && unavailableNativeConnection && browserBridgeFor(next, execution.presenceId, execution.affordance)) {
+      next = rerouteExecutionToBrowser(next, execution.id, "The X API write route is unavailable; the authorized Chrome Bridge is the continuity route for this public action.");
       continue;
     }
     // Test and mock runtimes never retrieve live write credentials. The sealed

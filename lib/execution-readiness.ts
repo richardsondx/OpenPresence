@@ -1,6 +1,6 @@
 import type { ChannelAffordance, ChannelId, ExecutionMode, OpenPresenceState, Presence } from "./types";
 import { bridgeExecutionStatus } from "./bridge-contract";
-import { xCreditsExhausted } from "./x-credits";
+import { xCreditsExhausted, xNativeWriteUnavailable } from "./x-credits";
 
 export type ExecutionAuthorityMode = ExecutionMode; // "auto" | "review" | "manual" | "off"
 
@@ -35,7 +35,7 @@ export function nativeConnectionCanAct(connection: OpenPresenceState["nativeConn
 
 export function nativeConnectionCanWrite(connection: OpenPresenceState["nativeConnections"][number], expectedHandle?: string): boolean {
   if (!nativeConnectionCanAct(connection, expectedHandle)) return false;
-  return !xCreditsExhausted(connection);
+  return !xNativeWriteUnavailable(connection);
 }
 
 /**

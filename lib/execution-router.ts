@@ -1,4 +1,4 @@
-import { isXCreditsError } from "./x-credits";
+import { isXCreditsError, xNativeWriteUnavailable } from "./x-credits";
 import { getDependencyHealth, readStateForContext } from "./db";
 import { derivePresenceCapabilityManifest } from "./runtime";
 import { bridgeExecutionStatus } from "./bridge-contract";
@@ -51,15 +51,18 @@ export function routeExecutionIntent(input: {
   const normalizedAffordance = affordance.replace(/^(x|linkedin|substack)\./, "");
   const capability = manifest.items.find((item) => item.capability === affordance || item.capability === normalizedAffordance);
 
+  const nativeWriteUnavailable = state.nativeConnections.some((connection) => connection.presenceId === presenceId && connection.channelId === "x" && xNativeWriteUnavailable(connection));
   const browserLearned = (presence.browserAccess?.learnedFallbacks ?? []).some((item) => !isXCreditsError(item.reason) && (item.action === affordance || item.action === normalizedAffordance));
   const browserBridge = state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.name.startsWith("OpenPresence Chrome · ") && bridgeExecutionStatus(bridge) === "connected");
 
   const bridgeHealth = getDependencyHealth("user_attached_bridge", presenceId);
   const bridgeHealthy = !bridgeHealth || bridgeHealth.state === "healthy";
-  if (browserLearned && browserBridge && bridgeHealthy) {
+  if ((nativeWriteUnavailable || browserLearned) && browserBridge && bridgeHealthy) {
     return {
       route: "user_attached_bridge",
-      reason: `The native connector previously rejected ${affordance}; using the learned browser capability for this action.`,
+      reason: nativeWriteUnavailable
+        ? `The X API write route is unavailable; using the authorized browser capability for ${affordance}.`
+        : `The native connector previously rejected ${affordance}; using the learned browser capability for this action.`,
       requiresBrowser: true,
     };
   }

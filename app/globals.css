@@ -7680,7 +7680,7 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .app-shell .operator-chat-outbox-state.is-sending { color: #48728c; }
 .app-shell .operator-chat-outbox-state.is-unconfirmed { color: #a15e38; }
 .app-shell .operator-chat-outbox-list { display: grid; gap: 6px; margin: 9px 0 0; padding: 0; list-style: none; }
-.app-shell .operator-chat-outbox-item { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 9px; align-items: start; min-width: 0; padding: 9px 10px; border: 1px solid #e6e0f1; border-radius: 11px; background: #f5f1ff; }
+.app-shell .operator-chat-outbox-item { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto auto; gap: 9px; align-items: start; min-width: 0; padding: 9px 10px; border: 1px solid #e6e0f1; border-radius: 11px; background: #f5f1ff; }
 .app-shell .operator-chat-outbox-item.is-first { border-color: #cfc1ee; background: #eee8ff; }
 .app-shell .operator-chat-outbox-item.is-sending { border-color: #c7dce8; background: #edf7fb; }
 .app-shell .operator-chat-outbox-item.is-unconfirmed { border-color: #ebcdbb; background: #fff5ed; }
@@ -7695,6 +7695,9 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .app-shell .operator-chat-outbox-copy small { display: block; margin-top: 4px; color: #897e9a; font-size: 10px; }
 .app-shell .operator-chat-outbox-retry { align-self: center; padding: 5px 9px; border: 1px solid #c98d67; border-radius: 999px; color: #92532f; background: transparent; font: 600 10px/1.2 var(--font-mono, monospace); cursor: pointer; }
 .app-shell .operator-chat-outbox-retry:hover { background: #fff0e4; }
+.app-shell .operator-chat-outbox-remove { display: grid; place-items: center; align-self: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; color: #897e9a; background: transparent; cursor: pointer; }
+.app-shell .operator-chat-outbox-remove:hover { color: #a15e38; background: #fff0e4; }
+.app-shell .operator-chat-outbox-remove:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 .app-shell .operator-chat-outbox-help { margin: 8px 2px 0; }
 .app-shell.theme-dark .operator-chat-outbox { border-color: #4c4169; background: #252136; color: #eee9ff; }
 .app-shell.theme-dark .operator-chat-outbox-title small, .app-shell.theme-dark .operator-chat-outbox-help, .app-shell.theme-dark .operator-chat-outbox-state { color: #b9aecf; }
@@ -7705,7 +7708,8 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .app-shell.theme-dark .operator-chat-outbox-copy p { color: #f4f0ff; }
 .app-shell.theme-dark .operator-chat-outbox-copy small { color: #b9aecf; }
 @media (max-width: 600px) {
-  .app-shell .operator-chat-outbox-item { grid-template-columns: 24px minmax(0, 1fr); }
+  .app-shell .operator-chat-outbox-item { grid-template-columns: 24px minmax(0, 1fr) auto; }
   .app-shell .operator-chat-outbox-retry { grid-column: 2; justify-self: start; }
+  .app-shell .operator-chat-outbox-remove { grid-column: 3; grid-row: 1; }
   .app-shell .operator-chat-outbox-title small { flex-basis: 100%; margin-left: 15px; }
 }

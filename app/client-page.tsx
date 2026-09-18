@@ -7376,7 +7376,7 @@ function OperatorChatBrowserActivity({ state, run }: { state: OpenPresenceState;
   return <details className="operator-chat-browser-activity" data-testid="operator-chat-browser-activity">
     <summary>
       <span className="operator-chat-browser-icon" aria-hidden="true"><Globe2 size={15} /></span>
-      <span className="operator-chat-browser-title">Using Chrome and the browser</span>
+      <span className="operator-chat-browser-title">Tool call · Authorized browser</span>
       <span className="operator-chat-browser-status">{status}</span>
       <ChevronDown size={13} className="operator-chat-tool-chevron" aria-hidden="true" />
     </summary>
@@ -7385,6 +7385,42 @@ function OperatorChatBrowserActivity({ state, run }: { state: OpenPresenceState;
       <ul>
         <li>Authorized browser capability</li>
         <li>{execution.status === "verification-pending" ? "Checking the public outcome before reporting success" : "The action is being handled by the signed-in account"}</li>
+      </ul>
+    </div>
+  </details>;
+}
+
+function activeNativeExecutionsForChat(state: OpenPresenceState, run: NonNullable<OpenPresenceState["operationalRuns"]>[number]) {
+  return state.executions.filter((execution) => execution.presenceId === run.presenceId
+    && execution.runId === run.id
+    && execution.connector === "native"
+    && activeBrowserExecutionStatuses.has(execution.status));
+}
+
+function operatorChatNativeActivityLabel(stage: string | undefined, execution: OpenPresenceState["executions"][number]) {
+  if (stage === "operator_chat.inspect_execution") return "Verifying the result through Native X";
+  if (stage === "operator_chat.delivery") return `Sending ${execution.affordance.replace(/^x\./, "")} through Native X`;
+  return "Using Native X";
+}
+
+function OperatorChatNativeActivity({ state, run }: { state: OpenPresenceState; run?: NonNullable<OpenPresenceState["operationalRuns"]>[number] }) {
+  if (!run || !["queued", "running", "waiting", "recovering", "reconciling"].includes(run.state)) return null;
+  const executions = activeNativeExecutionsForChat(state, run);
+  if (!executions.length) return null;
+  const execution = executions[0];
+  const status = execution.status === "verification-pending" ? "Verifying" : "In progress";
+  return <details className="operator-chat-browser-activity" data-testid="operator-chat-native-activity">
+    <summary>
+      <span className="operator-chat-browser-icon" aria-hidden="true"><Radio size={15} /></span>
+      <span className="operator-chat-browser-title">Tool call · Native X</span>
+      <span className="operator-chat-browser-status">{status}</span>
+      <ChevronDown size={13} className="operator-chat-tool-chevron" aria-hidden="true" />
+    </summary>
+    <div className="operator-chat-browser-result">
+      <p>{operatorChatNativeActivityLabel(run.stage, execution)}</p>
+      <ul>
+        <li>Official X API capability</li>
+        <li>{execution.status === "verification-pending" ? "Checking the public outcome before reporting success" : "The action is being handled by the connected X account"}</li>
       </ul>
     </div>
   </details>;
@@ -7757,6 +7793,7 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
           {anchoredAssignment && <OperatorSessionBlocks state={state} presence={presence} assignments={[anchoredAssignment]} runs={anchoredRuns} actions={anchoredActions} onOpenReview={() => setView("review")} />}</Fragment>;
         })}
         {activeOperatorRun && (activeOperatorRun.state === "waiting" || !["operator_chat.queued", "operator_chat.generating"].includes(activeOperatorRun.stage ?? "")) && <OperatorChatWorkStatus run={activeOperatorRun} presence={presence} />}
+        <OperatorChatNativeActivity state={state} run={activeOperatorRun} />
         <OperatorChatBrowserActivity state={state} run={activeOperatorRun} />
         {activeOperatorRun && activeOperatorRun.state !== "waiting" && ["operator_chat.queued", "operator_chat.generating"].includes(activeOperatorRun.stage ?? "") && <div className="operator-chat-thinking" role="status" aria-live="polite" data-testid="operator-chat-thinking">
           <PresenceGlyph accent={presence.accent} name={presence.name} avatarVariant={state.agent?.avatarVariant} look={presenceAvatarLook(presence)} />
@@ -7784,6 +7821,15 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
                 <span className="operator-chat-outbox-number" aria-hidden="true">{index + 1}</span>
                 <div className="operator-chat-outbox-copy"><strong>{deliveryLabel}</strong><p>{turn.content}</p>{turn.inputAttachments.length > 0 && <small>{turn.inputAttachments.length} attachment{turn.inputAttachments.length === 1 ? "" : "s"} included</small>}</div>
                 {isFirst && turn.delivery === "unconfirmed" && <button type="button" className="operator-chat-outbox-retry" onClick={outbox.retry}>Retry send</button>}
+                {turn.delivery !== "sending" && <button
+                  type="button"
+                  className="operator-chat-outbox-remove"
+                  aria-label="Remove queued message"
+                  title="Remove this message from the queue"
+                  onClick={() => {
+                    if (window.confirm("Remove this message from the queue? It will not be sent.")) outbox.remove(turn.id);
+                  }}
+                ><Trash2 size={15} aria-hidden="true" /></button>}
               </li>;
             })}
           </ol>

@@ -4,6 +4,11 @@ export const X_CREDITS_PATTERN = /no api credits|api credits(?: are)? exhausted|
 
 export const X_API_CONSOLE_URL = "https://console.x.com/";
 
+// These failures describe the X API credential/app boundary, not the signed-in
+// browser session. When a verified browser body exists, it is a valid
+// continuity route for public work while the operator repairs the API.
+export const X_NATIVE_CREDENTIAL_PATTERN = /rejected (?:these )?credentials|api key|api secret|access token|token values|invalid credentials|credential(?:s)? .*expired|token .*expired|authentication failed/i;
+
 export function isXCreditsError(error?: string | Error | null) {
   if (!error) return false;
   const msg = typeof error === "string" ? error : error.message || "";
@@ -13,6 +18,12 @@ export function isXCreditsError(error?: string | Error | null) {
 export function xCreditsExhausted(connection?: Pick<NativeChannelConnection, "healthMessage" | "deliveryError"> & { observation?: { error?: string } } | null) {
   if (!connection) return false;
   return X_CREDITS_PATTERN.test(`${connection.healthMessage ?? ""} ${connection.deliveryError ?? ""} ${connection.observation?.error ?? ""}`);
+}
+
+export function xNativeWriteUnavailable(connection?: Pick<NativeChannelConnection, "healthMessage" | "deliveryError"> & { observation?: { error?: string } } | null) {
+  if (!connection) return false;
+  const message = `${connection.healthMessage ?? ""} ${connection.deliveryError ?? ""} ${connection.observation?.error ?? ""}`;
+  return X_CREDITS_PATTERN.test(message) || X_NATIVE_CREDENTIAL_PATTERN.test(message);
 }
 
 export function xCreditsBillingUrl(accountId?: string) {

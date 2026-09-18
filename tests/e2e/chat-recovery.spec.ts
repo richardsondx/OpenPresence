@@ -118,6 +118,31 @@ test("an unconfirmed first turn prevents later turns overtaking it", async ({ pa
   expect(sends).toEqual(["First private turn", "First private turn", "Second private turn"]);
 });
 
+test("removing a queued turn deletes its browser recovery copy", async ({ page }) => {
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/state", async (route) => {
+    if (route.request().method() !== "POST" || route.request().postDataJSON().type !== "sendPresenceNudge") return route.continue();
+    await hold;
+    return route.abort("failed");
+  });
+  const composer = page.getByLabel("Message Recovery Agent");
+  await composer.fill("First private turn");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Sending message", exact: true })).toBeVisible();
+  await composer.fill("Remove this queued turn");
+  await composer.press("Enter");
+  await expect(page.getByTestId("operator-chat-queued-message-2")).toContainText("Remove this queued turn");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Remove queued message" }).click();
+  await expect(page.getByText("Remove this queued turn", { exact: true })).toHaveCount(0);
+  release();
+  await expect(page.getByRole("button", { name: "Retry send" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("Remove this queued turn", { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId("operator-chat-queued-message-2")).toHaveCount(0);
+});
+
 test("selecting the current Agent from Schedule changes the URL and refreshes Chat", async ({ page }) => {
   await page.goto("/schedule");
   await page.getByRole("button", { name: /Recovery Agent avatar X channel Recovery Agent/ }).click();

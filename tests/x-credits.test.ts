@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isXCreditsError, xCreditsAlertAppliesToView, xCreditsBillingUrl, xCreditsExhausted } from "@/lib/x-credits";
+import { isXCreditsError, xCreditsAlertAppliesToView, xCreditsBillingUrl, xCreditsExhausted, xNativeWriteUnavailable } from "@/lib/x-credits";
 import { nativeConnectionCanWrite } from "@/lib/execution-readiness";
 
 describe("X credit alert helpers", () => {
@@ -20,6 +20,11 @@ describe("X credit alert helpers", () => {
     expect(xCreditsExhausted({ healthMessage: "credits depleted" })).toBe(true);
     expect(xCreditsExhausted({ observation: { error: "X API credits depleted" } })).toBe(true);
     expect(xCreditsExhausted({ healthMessage: "X temporarily rate-limited this app." })).toBe(false);
+  });
+
+  it("treats expired native credentials as browser-fallback state", () => {
+    expect(xNativeWriteUnavailable({ deliveryError: "X rejected these credentials. Check the API key and token values; the token may be expired." })).toBe(true);
+    expect(xNativeWriteUnavailable({ deliveryError: "X temporarily rate-limited this app." })).toBe(false);
   });
 
   it("deep-links to account billing when an account id is known", () => {

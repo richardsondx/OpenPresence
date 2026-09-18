@@ -240,6 +240,34 @@ describe("continuous growth responsibility", () => {
     }
   });
 
+  it("projects the connected Browser Bridge when the Native API credentials are expired", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, connectionMode: "native" as const };
+    const now = new Date().toISOString();
+    const next = {
+      ...state,
+      presence,
+      presences: [presence],
+      nativeConnections: [{ id: "native-x", presenceId: presence.id, channelId: "x" as const, kind: "x" as const, status: "needs-attention" as const, access: "read-write" as const, deliveryError: "X rejected these credentials. The access token has expired.", account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: now, updatedAt: now }],
+      bridges: [{ id: "bridge-x", presenceId: presence.id, channelId: "x" as const, name: "OpenPresence Chrome", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: now, accountIdentity: { username: "genny", status: "verified" as const, observedAt: now }, capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply", "like", "repost", "quote", "follow"], formats: ["x.post", "x.reply", "x.like", "x.repost", "x.quote", "x.follow"], metrics: ["followers", "public_metrics"] }, createdAt: now, updatedAt: now }],
+    };
+    expect(derivePresenceCapabilityManifest(next, presence.id).items.find((item) => item.capability === "post")).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true, requiresBrowser: true });
+  });
+
+  it("forms new X actions on the browser body while the native credentials are expired", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, connectionMode: "native" as const, execution: { ...state.presence!.execution, like: "auto" as const } };
+    const now = new Date().toISOString();
+    const next = formXActionIntent({
+      ...state,
+      presence,
+      presences: [presence],
+      nativeConnections: [{ id: "native-x", presenceId: presence.id, channelId: "x" as const, kind: "x" as const, status: "needs-attention" as const, access: "read-write" as const, deliveryError: "X rejected these credentials. The access token has expired.", account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: now, updatedAt: now }],
+      bridges: [{ id: "bridge-x", presenceId: presence.id, channelId: "x" as const, name: "OpenPresence Chrome", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: now, accountIdentity: { username: "genny", status: "verified" as const, observedAt: now }, capabilities: { inbound: true, reconcile: true, affordances: ["like"], formats: ["x.like"], metrics: [] }, createdAt: now, updatedAt: now }],
+    }, { affordance: "x.like", target: { type: "x.post", id: "post-1" } });
+    expect(next.executions[0]).toMatchObject({ connector: "bridge", bridgeId: "bridge-x", status: "queued" });
+  });
+
   it("projects a learned quote fallback through the actual verified browser route", () => {
     const state = fixture();
     const now = new Date().toISOString();

@@ -17,7 +17,7 @@ import type { RelationshipVisibility } from "./types";
 import { addKnowledgeItem, archiveKnowledgeCollection, archiveKnowledgeDocument, archiveKnowledgeItem, createKnowledgeCollection, createKnowledgeDocument, migrateKnowledgeState, saveKnowledgeDocument, setKnowledgeAccess, setMindFileKnowledgeBinding, setKnowledgeBinding, updateKnowledgeCollection, uploadKnowledgeVersion } from "./knowledge";
 import { applyAssetLibraryOperation, authorizeAssetSelection, liveAssetReuseReason, normalizeAssetLibraryState, normalizeAssetReuseCooldownMonths } from "./asset-library";
 import { evaluateExecutionReadiness } from "./execution-readiness";
-import { isXCreditsError, xCreditsExhausted } from "./x-credits";
+import { isXCreditsError, xCreditsExhausted, xNativeWriteUnavailable } from "./x-credits";
 import { getDefaultCurationSources, normalizeCurationSources, seedDefaultEditorialReferences } from "./editorial-curation";
 import { assignmentRunIsActive, isTerminalDuplicateExecution, reconcileLiveAssignmentRuns, settleTerminalDuplicateAssignment } from "./live-assignment-run";
 export { assignmentRunIsActive } from "./live-assignment-run";
@@ -335,7 +335,7 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
   // Action-specific rejections (like "not permitted to perform this action"
   // for a specific reply) do NOT block all native write actions — they might
   // succeed for a different target post.
-  const nativeGlobalDeliveryBlocked = xCreditsExhausted(native) || Boolean(native?.deliveryError && /check your app permissions|fetch failed/i.test(native.deliveryError));
+  const nativeGlobalDeliveryBlocked = xNativeWriteUnavailable(native) || Boolean(native?.deliveryError && /check your app permissions|fetch failed/i.test(native.deliveryError));
   const targetObject = context?.target?.type === "x.post"
     ? state.mirrorObjects.find((object) => object.presenceId === presence.id && object.externalRef.type === "x.post" && object.externalRef.id === context.target?.id)
     : undefined;
@@ -7367,7 +7367,7 @@ function addSocialEvaluation(state: OpenPresenceState, standing: StandingIntent,
   const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance, publicationId: publication.id, priority: 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, standingIntentId: standing.id, origin, environment: presence.environment ?? "live" };
   state.socialIntents.unshift(socialIntent);
   if (mode !== "off") {
-    const nativeX = presence.channel === "x" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.status === "connected" && connection.access === "read-write") : undefined;
+    const nativeX = presence.channel === "x" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.status === "connected" && connection.access === "read-write" && !xNativeWriteUnavailable(connection)) : undefined;
     const bridge = nativeX ? undefined : bridgeFor(state, presence.id, "post");
     const simulated = !bridge && !nativeX && presence.channel === "x" && isTestRuntime();
     const connector = nativeX ? "native" as const : bridge ? bridge.kind : simulated ? "simulated" as const : undefined;
@@ -7440,7 +7440,7 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
   // may still be present for reads (or may be out of credits), but it must not
   // silently override an operator-selected Bridge for public writes.
   const useNativeRoute = presence.connectionMode !== "bridge";
-  const nativeX = useNativeRoute ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? "")))) : undefined;
+  const nativeX = useNativeRoute ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && !xNativeWriteUnavailable(connection) && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? "")))) : undefined;
   const bridge = !nativeX ? bridgeFor(state, presence.id, "post") : undefined;
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : undefined;
   const leakageReason = identityLeakageReason(state, presence, text);
@@ -7481,7 +7481,7 @@ export function formStandingPostIntent(source: OpenPresenceState, text: string, 
     state.events.unshift(event("decision", "Calendar intention held", "Jenny formed a social intention, but Posts are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id }));
     return state;
   }
-  const nativeX = presence.channel === "x" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? "")))) : undefined;
+  const nativeX = presence.channel === "x" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && !xNativeWriteUnavailable(connection) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? "")))) : undefined;
   const bridge = nativeX ? undefined : bridgeFor(state, presence.id, "post");
   const simulated = !bridge && !nativeX && presence.channel === "x" && isTestRuntime();
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : simulated ? "simulated" as const : undefined;
@@ -7617,7 +7617,7 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
     state.events.unshift(event("decision", "Reply intention held", "Jenny formed a social intention, but Replies are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id, decisionId: socialDecision?.id, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId }));
     return state;
   }
-  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.status === "connected" && connection.access === "read-write" && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle));
+  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.status === "connected" && connection.access === "read-write" && !xNativeWriteUnavailable(connection) && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle));
   const learnedBrowserFallback = browserFallbackWasLearned(presence, "x.reply");
   const observedNonMentionReply = Boolean(parentObject && !mirrorObjectIsOwnOrMentionsPresence(parentObject, presence.handle, nativeX?.account?.id));
   const browserFallbackRequired = observedNonMentionReply || learnedBrowserFallback;
@@ -7681,7 +7681,7 @@ export function formXDeleteIntent(source: OpenPresenceState, input: { target: En
     state.events.unshift(event("decision", "Deletion intention held", "The Presence identified its own X content, but deletion is Off in the execution envelope.", "quiet", { presenceId: presence.id, intentId: socialIntent.id, decisionId: socialDecision?.id, runId, invocationId }));
     return state;
   }
-  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""))));
+  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && !xNativeWriteUnavailable(connection) && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""))));
   const bridge = !nativeX ? browserBridgeFor(state, presence.id, "delete") : undefined;
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : undefined;
   const status = mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
@@ -7757,7 +7757,7 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
     state.events.unshift(event("decision", `X ${capability} intention held`, `The Presence selected ${capability}, but that affordance is off in the execution envelope.`, "quiet", { presenceId: presence.id, intentId: socialIntent.id, decisionId: socialDecision?.id, runId, invocationId }));
     return state;
   }
-  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""))));
+  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && !xNativeWriteUnavailable(connection) && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""))));
   // The Native API gets the first attempt. A browser route is selected only
   // after this exact affordance has learned that native delivery fails.
   const browserFallbackRequired = (!nativeTargetAllowed && requiresExpression) || browserFallbackWasLearned(presence, input.affordance);

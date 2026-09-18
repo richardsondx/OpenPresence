@@ -100,7 +100,8 @@ export function toolActivitySummary(receipt: Record<string, unknown>) {
     : result?.status === "not-dispatched" ? "Not sent" : result?.status === "verification-pending" ? "Awaiting verification" : result?.status === "awaiting-review" ? "Needs review" : "Finished";
   const searchKey: Record<string, string> = { search_web: "sources", search_posts: "posts", search_people: "people", discover_assets: "candidates" };
   const matches = searchKey[tool] && Array.isArray(result?.[searchKey[tool]]) ? result[searchKey[tool]] as unknown[] : tool === "search_assets" && Array.isArray(receipt.result) ? receipt.result : undefined;
-  const summary = error ?? (matches ? `Found ${matches.length} ${searchKey[tool] ?? "media items"}.` : deliveryResults.length ? deliveryResults.map((item) => `${text(item.action) ?? "Action"}: ${item.verified === true ? "verified" : text(item.status)?.replaceAll("_", " ").replaceAll("-", " ") ?? "unconfirmed"}`).join(" · ") : text(result?.note) ?? text(receipt.query) ?? text(receipt.instruction) ?? text(recordValue(receipt.post)?.text) ?? "Result available below.");
+  const routeLabel = (item: Record<string, unknown>) => text(item.connector) === "native" ? "Native X" : text(item.connector) === "bridge" ? "Authorized browser" : undefined;
+  const summary = error ?? (matches ? `Found ${matches.length} ${searchKey[tool] ?? "media items"}.` : deliveryResults.length ? deliveryResults.map((item) => `${text(item.action) ?? "Action"}${routeLabel(item) ? ` · ${routeLabel(item)}` : ""}: ${item.verified === true ? "verified" : text(item.status)?.replaceAll("_", " ").replaceAll("-", " ") ?? "unconfirmed"}`).join(" · ") : text(result?.note) ?? text(receipt.query) ?? text(receipt.instruction) ?? text(recordValue(receipt.post)?.text) ?? "Result available below.");
   return { title, status, failed: failed || deliveryFailed, summary, limit: receipt.delivered === false ? "No public action was delivered." : undefined };
 }
 
