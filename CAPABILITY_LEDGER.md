@@ -842,3 +842,29 @@ EVAL-005, and UX-004 remain PARTIAL. The next gate is an actual real-model run
 passing all own-publication guards, producing a genuine `supported`
 disposition, and demonstrating a later decision difference when the learned
 artifact is removed, followed by independent verification.
+
+## 2026-09-18 autonomous learning canary — measured source extraction, no transfer
+
+The public canary is now provider-selectable while retaining OpenAI/GPT-5.6
+Luna as its default. A configured non-mock Ollama cloud model was used only to
+exercise the same public Sandbox/runtime path; deterministic and AI-mock modes
+remain prohibited. The fixture activates the Presence-owned publishing
+responsibility, records a measurable own first post, records measured evidence
+on the actual external source post, and runs later decisions through autonomous
+pulses after a quiet period.
+
+The real run produced a session-scoped observed-post hypothesis with a concrete
+template and source mirror ID. The Agent then chose silence for the later
+original because the current world and recent publications did not justify
+another post. The first failing transition is later autonomous original
+selection: no measured variation was formed, so no `supported` disposition or
+retained-vs-removed counterfactual exists.
+
+Evidence: `/tmp/openpresence-learning-canary-ollama8.stderr` and the preserved
+earlier Ollama artifacts referenced in
+`qa-learnings/autonomous-learning-canary-fixture-2026-09-17.md`.
+
+No capability is promoted. LEARN-002/003/004, AUT-001, EVAL-004, EVAL-005,
+and UX-004 remain PARTIAL. Independent verification remains deferred until the
+strict composed canary obtains a genuine supported disposition and a later
+decision difference when the learned artifact is removed.
