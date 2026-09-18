@@ -116,7 +116,7 @@ test("operator connects an X Presence through the official API", async ({ page }
 });
 
 test("native X connection delivers an approved Presence action", async ({ page }) => {
-  test.skip("Legacy user-created Assignment flow is intentionally removed; native delivery remains covered by the runtime verifier.");
+  test.skip(true, "Legacy user-created Assignment flow is intentionally removed; native delivery remains covered by the runtime verifier.");
   await createAgent(page);
   await openAgentSettings(page);
   await page.getByRole("group", { name: "Destination route" }).getByRole("button", { name: /^X Live/ }).click();
@@ -127,7 +127,7 @@ test("native X connection delivers an approved Presence action", async ({ page }
   await page.getByRole("button", { name: "Save connection" }).click();
   await expect(page.getByRole("heading", { name: "Connected to @jenny_ai" })).toBeVisible();
 
-  await navigation.getByRole("button", { name: "Schedule", exact: true }).click();
+  await page.getByRole("button", { name: "Schedule", exact: true }).click();
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
   await page.getByLabel("What should Jenny accomplish?").fill("Share one useful idea about persistent agents.");
   await page.getByLabel("Assignment date").fill(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto" }).format(new Date()));
