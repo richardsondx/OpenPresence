@@ -958,3 +958,10 @@ retained-vs-removed counterfactuals. A full independent public/adversarial
 learning verifier has not returned a verdict for this exact candidate, so
 LEARN-002/003/004, AUT-001, EVAL-004, EVAL-005, and UX-004 remain PARTIAL.
 No capability is promoted from the artifact or release health alone.
+
+The exact candidate also passed the existing independent public safety checks:
+`tests/native-inflight-external-oracle.test.ts` (2/2, including cancellation
+during retry backoff with zero external requests) and
+`tests/e2e/independent-causal-trace.spec.ts` (1/1, typed-parent reconstruction).
+These strengthen SBX-004/SBX-008 evidence but do not substitute for the
+remaining full composed learning verifier or promote the learning rows.
