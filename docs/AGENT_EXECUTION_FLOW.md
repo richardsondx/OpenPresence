@@ -239,6 +239,61 @@ changed files, capability-ledger diff, commands, scenario IDs/seeds, virtual
 duration, trajectories, screenshots/runtime evidence, failures fixed, and
 known gaps.
 
+For a goal that has a composed acceptance journey, freeze an executable closure
+contract before broad implementation. Use the existing `verify-app` surface:
+
+```bash
+node .agents/skills/verify-app/scripts/verify-app.mjs proof-pack \
+  --contract verification/<goal>-contract.json \
+  --evidence verification/<goal>-evidence.json \
+  --out verification/<goal>-proof.json
+```
+
+Declare generated evidence paths in the contract `artifacts` array before the run; their bytes are bound separately and cannot overlap the causal cone. This prevents the test output itself from invalidating its source binding.
+
+The packet hashes the exact checkout, including non-ignored untracked files,
+and records each required gate as `PASS`, `FAIL`, or `BLOCKED`. `PASS` is a
+contract attestation only; it does not promote a capability ledger row. A gate whose
+evidence belongs to another candidate is blocked. Passing evidence may be
+reused with `--reuse-from` only when the contract's declared causal cone is
+unchanged; the packet records the prior candidate and changed paths. This
+allows cheap reruns after unrelated edits while preventing stale evidence from
+promoting a changed behavior. `FAIL` is a product assertion that ran and did
+not hold. `BLOCKED` is an honest inability to exercise the assertion. Both are
+non-zero command outcomes and must remain distinct in the ledger.
+
+The candidate manifest records `next-env.d.ts` as generated metadata while
+excluding it from the hash. Concurrent isolated Next runs may rewrite that
+file; do not restore it during an active writer and do not treat it as product
+evidence.
+
+Declare `oracle: "independent"` on gates whose result could be manufactured by
+the scenario or its counters. Their evidence must carry the same oracle marker
+and inspect semantic state plus causal transitions. A fixture may arrange an
+opportunity or inject a failure; it must not directly write the expected
+strategy change, delivery, learning, or recovery result. Counts and self
+reported labels can support an oracle, but cannot be its only assertion.
+
+Every gate in a composed contract must reference the same run or checkpoint
+identity and linked causal trace. A focused unit test and an unrelated
+multi-day browser run are adjacent evidence, not one composed pass. The oracle
+must inspect semantic transitions and persisted outcomes; event counts and
+self-reported strategy labels are supporting signals only.
+
+Use a compact entry protocol: read only affected ledger rows and linked
+evidence; freeze contract and causal cone; reproduce once; repair the first
+failing edge; rerun the same composed run; challenge that exact candidate
+independently; then close only rows whose own gates pass. Choose checks by
+expected information per cost, keep retries bounded with a stable run identity,
+and stop when the same external blocker repeats. Record the blocker, attempts,
+and recovery condition as `BLOCKED` rather than spending another broad pass.
+
+Use the packet as the single closure spine: implement only toward a failing
+gate, rerun that gate after the smallest repair, then run the composed journey,
+independent challenge, and adjacent regressions. Do not begin a second
+benchmark or goal in the same closure packet. If the acceptance contract
+changes, create a new contract and packet rather than editing history.
+
 The gate is:
 
 1. targeted tests and type/build/lint checks;
@@ -249,6 +304,14 @@ The gate is:
 6. Product Review when the experience changed;
 7. simplification/ablation review;
 8. capability-ledger review.
+
+Apply this full gate to an autonomy milestone. For a bounded feature change,
+select the affected gates and record why others are not applicable; do not
+recertify an unchanged Sandbox or rerun broad release health after each small
+repair. Run release health once after behavioral closure, repeating only checks
+invalidated by later changes. A Native executor proof and a Sandbox proof must
+respect their environment isolation; require a shared causal run only where
+the product actually composes those transitions.
 
 Do not call the goal complete while a critical capability is `UNPROVEN`,
 `PARTIAL`, `REGRESSED`, or `BLOCKED`, or while an important assumption has no

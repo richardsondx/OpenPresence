@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 
@@ -20,7 +21,7 @@ function booleanOption(name) {
 const runCount = Number(option("runs", "1"));
 const dbPath = option("db", process.env.OPENPRESENCE_DB_PATH);
 const secretKeyFile = option("secret-key-file");
-const routeArtifact = option("route", ".next/server/app/api/state/route.js");
+const routeArtifact = option("route");
 const outputPath = option("output");
 const freshPresence = booleanOption("fresh-presence");
 const requestedProvider = option("provider", "openai");
@@ -30,6 +31,7 @@ const requiredProvider = option("require-provider");
 const requiredModel = option("require-model");
 const requiredReasoning = option("require-reasoning");
 if (!Number.isInteger(runCount) || runCount < 1) throw new Error("--runs must be a positive integer.");
+if (!routeArtifact) throw new Error("--route is required so the experiment cannot silently import a stale build artifact.");
 if (process.env.OPENPRESENCE_AI_MOCK === "1") throw new Error("Social capability experiments cannot run with OPENPRESENCE_AI_MOCK=1.");
 if (dbPath) process.env.OPENPRESENCE_DB_PATH = path.resolve(dbPath);
 if (secretKeyFile) process.env.OPENPRESENCE_SECRET_KEY = (await readFile(path.resolve(secretKeyFile))).toString("base64");
@@ -37,6 +39,45 @@ if (secretKeyFile) process.env.OPENPRESENCE_SECRET_KEY = (await readFile(path.re
 const imported = await import(path.resolve(routeArtifact));
 const routeRuntime = await imported.default;
 const methods = routeRuntime.routeModule.methods;
+const resolvedRouteArtifact = path.resolve(routeArtifact);
+const serverMarker = `${path.sep}server${path.sep}`;
+const buildRoot = resolvedRouteArtifact.includes(serverMarker) ? resolvedRouteArtifact.slice(0, resolvedRouteArtifact.indexOf(serverMarker)) : path.dirname(resolvedRouteArtifact);
+async function buildFiles(root, relative = "") {
+  const current = path.join(root, relative);
+  const entries = await readdir(current, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const child = path.join(relative, entry.name);
+    if (entry.isDirectory()) files.push(...await buildFiles(root, child));
+    else files.push(child);
+  }
+  return files;
+}
+const provenanceRelativeFiles = [
+  "BUILD_ID",
+  "build-manifest.json",
+  "routes-manifest.json",
+  "server-reference-manifest.json",
+  "middleware-manifest.json",
+  ...(await buildFiles(buildRoot, "server")),
+].filter((relative, index, all) => all.indexOf(relative) === index);
+const provenanceFiles = [];
+for (const relative of provenanceRelativeFiles.sort()) {
+  try {
+    const bytes = await readFile(path.join(buildRoot, relative));
+    provenanceFiles.push({ path: relative, bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") });
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
+const runtimeProvenance = {
+  routeArtifact: resolvedRouteArtifact,
+  routeSha256: createHash("sha256").update(await readFile(resolvedRouteArtifact)).digest("hex"),
+  buildRoot,
+  buildId: (await readFile(path.join(buildRoot, "BUILD_ID"), "utf8")).trim(),
+  aggregateSha256: createHash("sha256").update(JSON.stringify(provenanceFiles)).digest("hex"),
+  aggregateFileCount: provenanceFiles.length,
+};
 
 async function getState() {
   const response = await methods.GET(new Request("http://openpresence.local/api/state"));
@@ -238,8 +279,32 @@ async function runScenario(scenarioPath, presenceId) {
   if (!Array.isArray(scenario.steps) || scenario.steps.length === 0) throw new Error("Scenario must contain a non-empty steps array.");
   const steps = [];
   let sessionId;
+  const progressPath = outputPath ? `${path.resolve(outputPath)}.progress.json` : undefined;
+  const writeProgress = async (status, extra = {}) => {
+    if (!outputPath) return;
+    const artifactPath = path.resolve(outputPath);
+    const tempPath = `${artifactPath}.tmp-${process.pid}`;
+    const updatedAt = new Date().toISOString();
+    const progress = { ok: false, status, updatedAt, runtimeProvenance, scenario: scenarioPath, steps, result: steps.at(-1)?.result, ...extra };
+    // Before a new call only the compact cursor changes; the last complete
+    // raw prefix is already durable. Avoid rewriting it twice per step.
+    if (!extra.currentStep) {
+      await writeFile(tempPath, `${JSON.stringify(progress, null, 2)}\n`);
+      await rename(tempPath, artifactPath);
+    }
+    if (progressPath) {
+      const compactPath = `${progressPath}.tmp-${process.pid}`;
+      await writeFile(compactPath, `${JSON.stringify({ ok: false, status, updatedAt, runtimeProvenance, scenario: scenarioPath, currentStep: extra.currentStep, error: extra.error, completedStepCount: steps.length, lastResultSummary: steps.at(-1) ? { index: steps.at(-1).index, command: steps.at(-1).command } : undefined }, null, 2)}\n`);
+      await rename(compactPath, progressPath);
+    }
+  };
+  // Persist a started marker before the first model call. If the provider or
+  // process hangs, the artifact still identifies the scenario and completed
+  // prefix instead of disappearing until the final report is assembled.
+  await writeProgress("running");
   try {
     for (const [index, step] of scenario.steps.entries()) {
+    await writeProgress("running", { currentStep: { index: index + 1, command: step.command } });
     const previous = steps.at(-1)?.result;
     const options = Object.fromEntries(Object.entries(step.options ?? {}).map(([key, value]) => [key, resolveValue(value, previous)]));
     let result;
@@ -321,23 +386,34 @@ async function runScenario(scenarioPath, presenceId) {
       throw new Error(`Unsupported in-process scenario command: ${step.command}`);
     }
       steps.push({ index: index + 1, command: step.command, ...(options.observeOnly === true ? { observeOnly: true } : {}), result });
+      await writeProgress("running");
     }
   } catch (error) {
     if (outputPath) {
       const failure = {
         ok: false,
         scenario: scenarioPath,
+        runtimeProvenance,
         error: { name: error?.name ?? "Error", message: error?.message ?? String(error), stack: error?.stack },
         steps,
         result: steps.at(-1)?.result,
       };
-      await writeFile(path.resolve(outputPath), `${JSON.stringify(failure, null, 2)}\n`);
+      await writeProgress("failed", { error: failure.error });
     }
     throw error;
   }
   const unavailable = steps.flatMap((step) => step.result?.recentEvents ?? [])
     .filter((event) => event.title === "Sandbox evaluation unavailable");
-  if (unavailable.length) throw new Error(`The model runtime was unavailable during the Playground run: ${unavailable[0]?.detail ?? "provider request failed"}`);
+  if (unavailable.length) {
+    const message = `The model runtime was unavailable during the Playground run: ${unavailable[0]?.detail ?? "provider request failed"}`;
+    await writeProgress("failed", { error: { name: "ModelUnavailable", message } });
+    throw new Error(message);
+  }
+  if (progressPath) {
+    const compactPath = `${progressPath}.tmp-${process.pid}`;
+    await writeFile(compactPath, `${JSON.stringify({ ok: true, status: "completed", updatedAt: new Date().toISOString(), runtimeProvenance, scenario: scenarioPath, completedStepCount: steps.length, lastResultSummary: steps.at(-1) ? { index: steps.at(-1).index, command: steps.at(-1).command } : undefined }, null, 2)}\n`);
+    await rename(compactPath, progressPath);
+  }
   return { ok: true, command: "run", scenario: scenarioPath, steps, result: steps.at(-1)?.result };
 }
 
@@ -413,6 +489,7 @@ for (let index = 0; index < runCount; index += 1) {
 }
 
 const report = {
+  runtimeProvenance,
   scenario,
   requestedRuns: runCount,
   autoConfiguration: autoExecution,

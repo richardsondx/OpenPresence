@@ -44,6 +44,21 @@ describe("private operator Chat harness", () => {
     expect(() => parseOperatorChatStep(JSON.stringify({ kind: "answer", text: "Done.", reaction: "🚀" }))).toThrow();
   });
 
+  it("accepts the general artifact presentation capability", () => {
+    expect(parseOperatorChatStep(JSON.stringify({ kind: "present_asset", assetId: "asset-existing" }))).toEqual({ kind: "present_asset", assetId: "asset-existing" });
+  });
+
+  it("ignores shared strategy metadata without weakening strict Chat tool validation", () => {
+    expect(parseOperatorChatStep(JSON.stringify({
+      kind: "social_action",
+      action: "post",
+      text: "A bounded canary post.",
+      strategyId: "social.x.v1.selective-amplification",
+      mechanismId: "selective amplification",
+    }))).toEqual({ kind: "social_action", action: "post", text: "A bounded canary post." });
+    expect(() => parseOperatorChatStep(JSON.stringify({ kind: "answer", text: "Done.", unsupportedField: true }))).toThrow();
+  });
+
   it("persists a reaction separately from the Agent's prose", () => {
     const original = fixture("Make this easier to read.");
     const next = recordOperatorConversationMessage(original.state, { presenceId: original.presenceId, role: "presence", content: "I’ll simplify it now.", reaction: "👍", replyToMessageId: original.message.id });
@@ -64,14 +79,14 @@ describe("private operator Chat harness", () => {
   it("keeps validation details out of operator-facing failure copy", () => {
     const failure = new Error(JSON.stringify([{ code: "invalid_enum_value", path: ["reasons", 0], received: "privacy" }]));
     const message = operatorChatFailureMessage(failure);
-    expect(message).toBe("I hit a temporary problem while processing that. Your message is saved, so nothing was lost. Please retry the response.");
+    expect(message).toBe("I couldn’t complete that turn because my response format was invalid. Your message is saved, and no new public action was confirmed. Retry response to try again.");
     expect(message).not.toContain("invalid_enum_value");
     expect(message).not.toContain("privacy");
   });
 
   it("renders an existing persisted validation leak as safe copy", () => {
     const legacy = `I’m not able to answer yet. ${JSON.stringify([{ code: "invalid_enum_value", received: "privacy" }])}`;
-    expect(legacyOperatorChatFailureMessage(legacy)).toBe("I hit a temporary problem while processing that. Your message is saved, so nothing was lost. Please retry the response.");
+    expect(legacyOperatorChatFailureMessage(legacy)).toBe("I couldn’t complete that turn because my response format was invalid. Your message is saved, and no new public action was confirmed. Retry response to try again.");
   });
 
   it("persists readable copy when a structured model step is still invalid", async () => {
@@ -87,7 +102,7 @@ describe("private operator Chat harness", () => {
     await executeAutonomyRun(run.id);
     const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
     const reply = saved.operatorConversations!.flatMap((item) => item.messages).find((item) => item.replyToMessageId === original.message.id && item.role === "system");
-    expect(reply?.content).toBe("I hit a temporary problem while processing that. Your message is saved, so nothing was lost. Please retry the response.");
+    expect(reply?.content).toBe("I couldn’t complete that turn because my response format was invalid. Your message is saved, and no new public action was confirmed. Retry response to try again.");
     expect(reply?.content).not.toContain("unsupportedField");
     expect(getOperationalRun(run.id)?.state).toBe("failed");
   });
@@ -192,6 +207,40 @@ describe("private operator Chat harness", () => {
     expect(saved.executions).toHaveLength(1);
     expect(saved.outcomes.filter((item) => item.status === "succeeded")).toHaveLength(1);
     expect(saved.operatorConversations!.flatMap((item) => item.messages)).toContainEqual(expect.objectContaining({ content: "The Sandbox post is verified.", replyToMessageId: original.message.id }));
+  });
+
+  it("threads a presented existing artifact into the user-visible Chat reply", async () => {
+    const original = fixture("I can't see the image you made. Please show the existing artifact.");
+    const timestamp = new Date().toISOString();
+    original.state.assets.push({
+      id: "chat-present-artifact",
+      agentId: original.state.agent!.id,
+      presenceId: original.presenceId,
+      accessScope: { mode: "selected_presences", presenceIds: [original.presenceId] },
+      type: "image",
+      dataUrl: "data:image/png;base64,AAAA",
+      mimeType: "image/png",
+      status: "ready",
+      perception: { observation: "A generated test image.", uncertainty: ["low"] },
+      rights: { status: "unknown" },
+      retention: "preserved",
+      reusePermission: "ready_to_use",
+      provenance: { origin: "operator_upload", importedAt: timestamp },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    } as never);
+    writeState(original.state);
+    const steps = [
+      { kind: "present_asset", assetId: "chat-present-artifact" },
+      { kind: "answer", text: "Here is the existing image attached to this reply." },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => modelResponse(steps.shift() ?? { kind: "answer", text: "The artifact is attached." })));
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+    const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
+    const reply = saved.operatorConversations!.flatMap((item) => item.messages).find(item => item.role === "presence" && item.replyToMessageId === original.message.id);
+    expect(reply).toMatchObject({ content: expect.any(String), attachments: [{ existingAssetId: "chat-present-artifact", kind: "image" }] });
+    expect(saved.executions).toHaveLength(0);
   });
 
   it("turns natural supervisory guidance into an Agent-owned plan mutation", async () => {

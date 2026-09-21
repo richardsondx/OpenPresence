@@ -55,6 +55,24 @@ Record accepted design decisions here so repeated reviews do not reopen settled 
 
 Do not reopen a decision because a new component, trend, or visual style is available. Reopen only for changed goals, changed user evidence, changed surrounding architecture, or demonstrated friction against the decision.
 
+## 2026-09-18 — Growth leads with a consumer scan
+
+- **Decision:** Growth opens with one plain-language goal/status card, three primary visual measures, and one audience trend. Audience context, strategy, autonomy proof, review rhythm, and raw evidence stay available behind explicit disclosures.
+- **Context/problem:** The previous default exposed too many paragraphs, metrics, strategy concepts, operational states, and evidence records at once for a general consumer.
+- **Alternatives rejected:** Removing Growth evidence; flattening all sections into a shorter dashboard; replacing truthful status with decorative charts.
+- **Reasoning:** The common job is to understand whether the Agent is making progress and what needs attention. Visual hierarchy and progressive disclosure reduce reading load while preserving the underlying evidence, operator action, and truthful scope.
+- **Evidence:** Live Growth route review on the requested Presence showed the simplified default with compact scope, goal progress, three primary measures, a trend chart, and collapsed deeper sections; the learning disclosure still opened successfully.
+- **Reopen when:** Users cannot find the next action, or evidence shows the default scan hides a decision that must be acted on immediately.
+
+## 2026-09-18 — Growth recovery stays inline with the goal status
+
+- **Decision:** Keep an attention decision in the goal card's status row with one compact `Review` action; do not add a second full-width alert panel that repeats the status and action.
+- **Context/problem:** The recovery banner consumed substantial vertical space while repeating `Needs attention`, `A decision is needed`, and `Review details` already present in the goal card.
+- **Alternatives rejected:** Keep the full-width banner; remove the recovery action entirely; move the decision only to Activity.
+- **Reasoning:** The status row remains truthful and actionable while preserving the focused Review destination. The goal card returns to a glance surface instead of becoming a second operator queue.
+- **Evidence:** User screenshot and direct feedback that the panel “doesn't need to take all that space.”
+- **Reopen when:** The compact action hides an urgent decision, or operators cannot find the Review destination in live journey testing.
+
 ## 2026-09-13 — Five daily destinations, responsive conversation
 
 - **Decision:** Chat, Tasks, People, Growth, Media; the same labeled icons on a mobile dock and desktop navigation. Tasks absorbs Work/Schedule. Knowledge, Teach, Test agent, Watchlist, and settings stay in the Agent menu.
@@ -68,6 +86,15 @@ Do not reopen a decision because a new component, trend, or visual style is avai
 
 People uses compact rows with one useful context line. Watching keeps watch plans and exploration details closed until selected. Growth leads with the goal and three audience measures; operational evidence is disclosed. Media opens the gallery without a selected inspector, and folder creation is secondary. Activity / About replaces four duplicate context tabs. Mobile sheets keep focus and offer a visible close control; desktop preserves room for the same content. These changes retain the underlying assignments, scope, review, and verified-outcome rules.
 
+## 2026-09-17 — Shared workspace header is action-only
+
+- **Decision:** Keep Agent identity in the sidebar when it is needed for portfolio switching, but hide the single-Agent avatar/name row on desktop where it is redundant. Mobile keeps the compact row because it is the mobile workspace switcher. The shared workspace header retains only workspace actions, including the context inspector control.
+- **Context/problem:** The top bar repeated the same Agent identity already visible in the sidebar and mixed durable identity with live environment state. The requested screen evidence showed the resulting redundancy directly.
+- **Alternatives rejected:** Keep the repeated identity and reduce its size; keep a second `Live · disconnected` indicator in the header; move Activity truth into a generic global status chip.
+- **Reasoning:** One visible identity source is enough. Environment truth remains available on Activity and connection-specific surfaces, where it has the needed context and recovery action.
+- **Capability ablation:** Multi-Agent switching remains in the desktop sidebar portfolio; a single Agent needs no switcher. Mobile retains its compact switcher. Agent/Presence scope, inspector access, and environment truth remain available through the sidebar, context control, Activity, and settings.
+- **Reopen when:** The sidebar no longer establishes the active Agent/Presence scope, or a cross-surface action needs a persistent status with an actionable recovery affordance.
+
 ## 2026-09-16 — Artifacts separates reusable materials from Growth analytics
 
 - **DESIGN CHANGE:** Daily navigation replaces Media with Artifacts, containing Templates and Media tabs. Existing `/assets` links still open Media.
@@ -76,3 +103,48 @@ People uses compact rows with one useful context line. Watching keeps watch plan
 - **Rejected:** A second competing library in Growth; a sixth daily navigation destination; treating saved templates or scheduled tasks as verified posts.
 - **Chat:** Anchor meaningful approach/work records to their originating receipt, hide empty approach cards, preserve run data across projections, and fit cards within the conversation width.
 - **Reopen:** Evidence that Templates and Media cannot be found or that learned hypotheses and reusable formats need distinct artifact filters.
+
+## 2026-09-18 — Schedule opens on today’s responsibilities
+
+- **Decision:** The plain Tasks/Schedule route defaults to the current local day and does not auto-open a blocked Assignment inspector. Users can still select any visible item, use the existing day/type filters to widen the scan, switch to Calendar, or open a deep-linked Assignment directly.
+- **Context/problem:** The previous default showed the full responsibility inventory and automatically expanded the first blocked item, forcing a general consumer to parse scheduling, recovery, readiness, and intervention concepts before understanding what mattered now.
+- **Alternatives rejected:** Removing the week view; deleting blocked/recovery detail; hiding future work permanently; replacing the Agent-owned projection with a user-managed task list.
+- **Reasoning:** Today is the safest attention default for the common journey. Progressive disclosure preserves truthful status, operator intervention, future timing, and the Agent-owned projection without making the first scan a dashboard.
+- **Evidence:** Live Chromium route verification on the requested Presence showed the default scan reduced from 12 open items plus an auto-open inspector to 2 current responsibilities with no inspector; the direct `assignmentId` route still opened the full detail and recovery path. TypeScript passed.
+- **Reopen when:** Users need a different default horizon, or runtime evidence shows current-day filtering hides urgent unscheduled or recovery work.
+
+## 2026-09-18 — Tasks shows responsibilities, not goals
+
+- **Decision:** Keep Tasks focused on what the Agent is handling today and what comes next. Growth remains the canonical home for goals, progress, and evidence; the duplicate Goals section is removed from Tasks.
+- **Context/problem:** The schedule page combined responsibilities, publishing opportunities, and strategic goals into one dashboard, asking a general consumer to understand several planning systems at once.
+- **Alternatives rejected:** Keep goals in both Tasks and Growth; add another Tasks filter; move Growth into the schedule page.
+- **Reasoning:** One surface should answer one everyday question. Removing the duplicate projection reduces scan cost without deleting goals, Assignments, or their runtime state.
+- **Evidence:** Live Chromium route verification shows Today’s work first, two current responsibilities, and the lighter Open opportunities projection below; Growth remains in the daily navigation for goal-level context.
+- **Reopen when:** Goal evidence becomes necessary to choose the next responsibility, or users cannot find strategic progress from Growth.
+
+## 2026-09-18 — Readiness contracts are progressive disclosure
+
+- **Decision:** Keep the persisted readiness contract and checks, but collapse the detailed contract by default in the Assignment inspector. The common ready state shows the result; blocked and failed states keep the actionable outcome visible, with deeper checks available on demand.
+- **Context/problem:** A ready Assignment opened with outcome, assumptions, agent decisions, timing, capability, and completion-contract cards all expanded. That made a consumer read the Agent's operating model before deciding whether to guide it.
+- **Alternatives rejected:** Delete the contract; show every check in the default inspector; move the contract into a separate settings surface.
+- **Reasoning:** Readiness protects truthful authority and verified completion, but the normal path needs one clear answer: can Genny proceed? Progressive disclosure preserves the contract without turning every task detail into an operations panel.
+- **Evidence:** The supplied live inspector screenshot showed the expanded contract occupying most of the detail surface; the revised ready state keeps the readiness result and guidance action visible while closing the detail disclosure.
+- **Reopen when:** Users make a meaningful decision that requires the contract before proceeding, or blocked-state recovery lacks enough visible explanation.
+
+## 2026-09-18 — Growth learning is conclusions first
+
+- **Decision:** Keep Growth's learning and strategy projection concise and human-readable by default. Show three short findings with one evidence line each, three short strategy actions, and a compact next check-in; retain raw review wording and evidence records behind the existing history disclosures.
+- **Context/problem:** The populated Growth panel exposed long model-generated strategy prose and raw `growth-evidence:` identifiers in the main scan, making a weak-performance finding look buggy and forcing the operator to parse implementation detail before deciding whether to intervene.
+- **Alternatives rejected:** Keep full review strings in cards; remove learning evidence entirely; add another explanatory panel or dashboard.
+- **Reasoning:** Reframing the projection preserves the Growth learning loop and truthful evidence while reducing concepts, words, and visual weight in the critical “understand → decide” journey. The Agent still owns the strategy and the underlying review remains inspectable.
+- **Evidence:** User screenshot and explicit feedback; live Chrome on the populated Genny Growth route showed concise findings, readable Publish/Discover/Build relationships actions, and no internal evidence IDs in the expanded primary projection.
+- **Reopen when:** Operators need the detailed wording to make a routine decision, or the concise projection loses a material limitation or recovery action.
+
+## 2026-09-18 — Artifact template rows own their disclosure typography
+
+- **Decision:** Explicitly style the template disclosure marker, title, and status badge at the component boundary. Keep the title readable and wrapping, while the status remains compact and single-line.
+- **Context/problem:** Artifact template summaries were inheriting browser/default typography, making titles render oversized and visually concatenate with statuses in the list view.
+- **Alternatives rejected:** Rely on global summary styles; reduce the entire Artifacts page scale; remove status labels from the scan.
+- **Reasoning:** This is a local disclosure component with a distinct scan job. Owning its typography makes the hierarchy stable across routes and preserves the useful status without adding vertical bulk.
+- **Evidence:** User screenshot and live Chrome reproduction; before the fix, computed summary typography was 16px/normal with 16px/700 title text and no explicit marker treatment.
+- **Reopen when:** The compact row hides a meaningful distinction, or real template titles require a different responsive status treatment.

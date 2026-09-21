@@ -8,7 +8,7 @@ import { createAssetPerception } from "./perception";
 import { relationshipHistory, peopleForPresence } from "./network-memory";
 import { readNativeXCredentials, testXCredentials, upsertNativeXConnection, readRecentXPosts, searchRecentXPosts } from "./x";
 import { reconcileNativeX } from "./native-x";
-import { markNativeConnectionNeedsAttention, recordNativeObservation, recordResourceUsageEventInPlace, recordNativeMirrors, derivePresenceCapabilityManifest, applyOperation, formChatPostIntent, formXReplyIntent, formXActionIntent, formSandboxIntent, deliverSandboxExecution, recordOperatorPreference } from "./runtime";
+import { clearNativeBrowserContinuityHold, markNativeConnectionNeedsAttention, recordNativeObservation, recordResourceUsageEventInPlace, recordNativeMirrors, derivePresenceCapabilityManifest, applyOperation, formChatPostIntent, formXReplyIntent, formXActionIntent, formSandboxIntent, deliverSandboxExecution, recordOperatorPreference } from "./runtime";
 import { recordOperationalFailure } from "./incident-engine";
 import { queueOperatorAssignmentRetry } from "./assignment-recovery";
 import { isAgentToolEnabled, type OpenPresenceState, type PresenceChatAttachment } from "./types";
@@ -209,12 +209,12 @@ export async function executeChatRuntimeTool(state: OpenPresenceState, presenceI
       if (verified.account.username.replace(/^@/, "").toLowerCase() !== presence.handle.replace(/^@/, "").toLowerCase()) throw new Error("ACCOUNT_MISMATCH: The saved credentials belong to a different X account.");
       requests += 1;
       await readRecentXPosts(credentials, verified.account.id, 5);
-      next = upsertNativeXConnection(state, { presenceId, id: connection.id, ...verified });
-      // A read-only check must not erase the last delivery result. Reads prove
-      // account and observation access, not write access or billing recovery.
-      next.nativeConnections = next.nativeConnections.map((item) => item.id === connection.id ? { ...item, deliveryError: connection.deliveryError } : item);
+      // An explicit operator check is the recovery boundary for the browser
+      // continuity hold. It re-arms Native X for the next write; if that write
+      // still fails, the delivery boundary will put the hold back in place.
+      next = clearNativeBrowserContinuityHold(upsertNativeXConnection(state, { presenceId, id: connection.id, ...verified }), presenceId);
       next = recordNativeObservation(next, presenceId, { ...connection.observation, status: "stale", error: undefined, nextObservationAt: new Date(Date.now() + 60_000).toISOString() });
-      result = { checkedAt, status: "passed", account: verified.account.username, access: verified.access, checks: ["account authentication", "recent-post read"], publicationTested: false, note: "Fresh X reads succeeded. The last delivery result is unchanged. No publication was attempted; this does not verify write access, credit balance, or a public outcome." };
+      result = { checkedAt, status: "passed", account: verified.account.username, access: verified.access, checks: ["account authentication", "recent-post read"], publicationTested: false, note: "Fresh X reads succeeded. Native X is re-armed for the next requested write; that write will still be verified independently. No publication was attempted." };
     } catch (error) {
       const detail = error instanceof Error ? error.message : "X check failed";
       next = markNativeConnectionNeedsAttention(state, presenceId, detail);
@@ -261,6 +261,20 @@ export async function executeChatRuntimeTool(state: OpenPresenceState, presenceI
     if (!asset) throw new Error("That asset is not available in this Agent and Presence scope.");
     const inspection = await inspectDiscoveredAsset(state, asset, { evidenceNeed: step.question });
     result = { assetId: asset.id, inspection, existingEvidence: readEligibleAsset(state, asset.id, presenceId) };
+  } else if (step.kind === "present_asset") {
+    requireTool("asset.inspect");
+    const asset = state.assets.find((item) => item.id === step.assetId && item.agentId === state.agent?.id && assetIsEligibleForPresence(state, item, presenceId));
+    if (!asset || asset.archivedAt || asset.status === "failed") throw new Error("That asset is not available in this Agent and Presence scope.");
+    const kind = asset.type === "pdf" ? "document" : asset.type === "audio" ? "audio" : asset.type === "link" ? "link" : asset.type;
+    const attachment = {
+      id: `presented_asset_${asset.id}`,
+      existingAssetId: asset.id,
+      name: asset.description?.trim() || `${asset.type} artifact`,
+      kind,
+      mimeType: asset.storage?.mimeType ?? asset.mimeType,
+      perception: asset.perception ? { observation: asset.perception.observation, interpretation: asset.perception.likelyMeaning, uncertainty: (asset.perception.uncertainty?.[0] ?? "unknown") as never } : undefined,
+    };
+    result = { assetId: asset.id, status: "presented", attachment, note: "The existing authorized artifact is attached to the next private Chat reply. This did not publish or alter the artifact." };
   } else if (step.kind === "relationship_history") {
     requireTool("relationship.history");
     if (!peopleForPresence(state, presence).some((item) => item.id === step.personId)) throw new Error("That person is not available in this Presence.");

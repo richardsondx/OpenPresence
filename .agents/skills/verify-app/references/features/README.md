@@ -1,6 +1,6 @@
 # OpenPresence feature map
 
-> Reviewed 2026-09-02 against the current source and a fresh harness-owned runtime. This map records the current product surface and the Agent-first workspace direction.
+> Reviewed 2026-09-21 against the canonical philosophy and current source. This index records the current product surface, executable entry points, and the Agent-first workspace contract.
 
 This map records how a real operator reaches behavior in the local OpenPresence product and what counts as proof. It is intentionally behavior-level; source code and internal handlers are not substitutes for exercising the UI.
 
@@ -56,22 +56,29 @@ The current shell exposes the Agent portfolio and the active connected channel t
 | `/calendar` | Schedule alias | Selected Presence | Legacy route; resolves to the canonical Schedule view |
 | `/agent` | Agent settings | Selected Agent + connected Presence | One settings home with Identity & Brain and Presence & Autonomy sections |
 | `/knowledge` | Knowledge | Selected Agent | Documents, versions, retrieval/access audit |
-| `/assets` | Asset library | Selected Agent | Separate Recent discoveries (ephemeral X working memory) and Media library (user-added + intentionally saved visuals), with visual evidence, folders, perception, provenance, and reuse |
+| `/artifacts` | Artifacts | Selected Agent | Templates and Media tabs; reusable formats, learned approaches, and the Agent-owned visual library |
+| `/assets` | Media compatibility alias | Selected Agent | Legacy deep link resolving to Artifacts → Media; preserve for existing links |
 | Activity → Developer Diagnostics | Technical audit | Selected Presence | Advanced forensic ledger; not a primary route |
 
 ## Current navigation shell
 
-Reviewed 2026-09-17: one Agent switcher and six daily destinations — Chat, Delegate,
-Tasks, People, Growth, Media. Desktop uses a labeled vertical navigation; mobile uses the
-same labeled icons in a bottom dock. Mobile's header menu opens Agent selection and
-settings; the dock hides while the software keyboard is open so the composer retains
-space. Teach agent, Watchlist, Test agent, and Agent settings are in Agent menu.
-Knowledge remains an Agent-owned surface, but is intentionally not a daily Agent-menu
-destination. Test agent opens `/rehearsal` and retains the Sandbox boundary.
+Reviewed 2026-09-21: one Agent switcher and five canonical daily destinations — Chat,
+Tasks, People, Growth, and Artifacts. Desktop uses a labeled vertical navigation;
+mobile uses the same labeled icons in a bottom dock. Mobile's header menu opens Agent
+selection and settings; the dock hides while the software keyboard is open so the
+composer retains space. Teach agent, Watchlist, Test agent, and Agent settings are in
+the Agent menu. Knowledge remains an Agent-owned surface, but is intentionally not a
+daily destination. Test agent opens `/rehearsal` and retains the Sandbox boundary.
+
+Delegate is a contextual handoff into Chat, not a sixth product destination. The
+current `app/client-page.tsx` source still includes it in the rendered destination
+array; the responsive regression therefore exercises six buttons until that UI drift
+is repaired.
 
 Tasks uses `/schedule` and the existing assignment editor with List/Calendar modes.
 `/work` and `/calendar` resolve to this same surface. Task details open directly as a
-side inspector or mobile sheet. Media uses `/assets` and remains Agent-owned.
+side inspector or mobile sheet. Artifacts uses `/artifacts` and remains Agent-owned;
+`/assets` is retained as a legacy Media deep-link alias.
 
 Chat's compact Agent identity header replaces the oversized Chat heading. The plus
 button (`Attach media or files`) opens a native dialog offering upload or existing
@@ -85,8 +92,10 @@ prefills the real composer; no operator message, Assignment, or public action ex
 until the operator submits the draft.
 
 Regression proof: `tests/e2e/responsive-workspace.spec.ts` covers both viewport
-projects, five destinations, legacy Tasks links, composer placement, media dialog
-recovery, durable chat/reload, and setup access.
+projects, the rendered workspace destinations, legacy Tasks links, composer placement,
+media dialog recovery, durable chat/reload, and setup access. Until Delegate is removed
+from the daily source array, the rendered destination count remains six while the
+canonical contract remains five.
 
 ## Agent-first verification contract
 
@@ -107,7 +116,7 @@ recovery, durable chat/reload, and setup access.
 - [Channels and Manage Agent](channels-agent.md)
 - [Playground and Rehearsal](playground-rehearsal.md)
 - [Schedule and Assignments](schedule-assignments.md)
-- [Knowledge, Assets, Growth, and reporting](knowledge-assets-growth.md)
+- [Knowledge, Artifacts (Templates and Media), Growth, and reporting](knowledge-assets-growth.md)
 - [Cross-surface journeys](journeys.md)
 
 The route inventory above is authoritative for coverage. The feature files below contain the concrete entry points, selectors, proof requirements, and gotchas for each behavior family.
@@ -122,7 +131,7 @@ The route inventory above is authoritative for coverage. The feature files below
 6. Watching/People and attention entry points.
 7. Playground/Rehearsal sandbox isolation.
 8. Schedule/Assignments and responsibility state.
-9. Knowledge, Assets, Growth, Analytics, Usage, and Public History reporting surfaces.
+9. Knowledge, Artifacts (Templates and Media), Growth, Analytics, Usage, and Public History reporting surfaces.
 10. Direct-route-only surfaces: Teach, Rehearsal, People, Growth, Feed, Usage, Schedule, and the `/calendar` alias.
 11. Cross-surface journeys, portfolio switching, and responsive entry points.
 

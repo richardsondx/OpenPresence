@@ -496,18 +496,43 @@ export function publicationMetricBaseline(source: OpenPresenceState, snapshot: P
 type PublicationMetricSnapshotOperation = Extract<Operation, { type: "recordPublicationMetricSnapshot" }>;
 
 function recordPublicationMetricSnapshotInPlace(state: OpenPresenceState, operation: PublicationMetricSnapshotOperation) {
-  const presence = state.presences.find((item) => item.id === (operation.presenceId ?? state.activePresenceId)) ?? state.presence;
+  const presenceId = operation.presenceId ?? state.activePresenceId ?? state.presence?.id;
+  const presence = state.presences.find((item) => item.id === presenceId)
+    ?? (state.presence?.id === presenceId ? state.presence : undefined);
   const mirror = state.mirrorObjects.find((item) => item.id === operation.mirrorObjectId && item.presenceId === presence?.id);
   if (!presence || !mirror || !Number.isFinite(operation.publicationAgeSeconds ?? 0)) return;
   const snapshot: PublicationMetricSnapshot = { id: id("publication-metric"), presenceId: presence.id, mirrorObjectId: mirror.id, observedAt: now(), publicationAgeSeconds: Math.max(0, Math.round(operation.publicationAgeSeconds ?? Math.max(0, (Date.now() - new Date(mirror.occurredAt ?? mirror.observedAt).getTime()) / 1000))), ...operation.metrics, source: operation.source ?? (presence.environment === "sandbox" ? "sandbox" : "manual"), observationStatus: operation.observationStatus ?? "observed" };
   snapshot.baseline = publicationMetricBaseline(state, snapshot, { normalized: true });
   state.publicationMetricSnapshots.unshift(snapshot);
   if (mirror.environment === "sandbox" && mirror.sessionId) {
+    const before = new Map((state.growthHypotheses ?? [])
+      .filter((hypothesis) => hypothesis.sandboxSessionId === mirror.sessionId && hypothesis.originatingPresenceId === presence.id)
+      .map((hypothesis) => [hypothesis.id, JSON.stringify({ ...hypothesis, updatedAt: undefined })]));
+    recordSandboxTrajectoryInPlace(state, mirror.sessionId, "measurement", {
+      publicationMetricId: snapshot.id, mirrorObjectId: mirror.id,
+      observationStatus: snapshot.observationStatus, metrics: operation.metrics,
+      causal: { parentIds: [mirror.id] },
+    }, snapshot.observedAt);
     ensureGrowthEvidenceRecords(state, presence.id, snapshot.observedAt, [mirror.id]);
     materializeSandboxOutcomeLearning(state, presence.id, mirror.sessionId, snapshot.observedAt);
     reconcileSandboxPerformanceLearning(state, presence.id, mirror.sessionId, snapshot.observedAt);
+    for (const hypothesis of state.growthHypotheses ?? []) {
+      if (hypothesis.sandboxSessionId !== mirror.sessionId || hypothesis.originatingPresenceId !== presence.id
+        || before.get(hypothesis.id) === JSON.stringify({ ...hypothesis, updatedAt: undefined })) continue;
+      // Record the actual durable update, not a claim that delivery or metric
+      // collection alone establishes learning or improved performance.
+      recordSandboxTrajectoryInPlace(state, mirror.sessionId, "learning", {
+        learningUpdateId: hypothesis.id, publicationMetricId: snapshot.id,
+        status: hypothesis.status, confidence: hypothesis.confidence,
+        supportingEvidenceIds: hypothesis.supportingEvidenceIds,
+        contradictingEvidenceIds: hypothesis.contradictingEvidenceIds,
+        causal: { parentIds: [snapshot.id] },
+      }, snapshot.observedAt);
+    }
   }
-  state.events.unshift(event("learning", "Publication performance observed", `Performance evidence for a verified ${presence.channel === "x" ? "X" : presence.name} publication is available for Growth review.`, "positive", { presenceId: presence.id, sourceObjectId: mirror.id }));
+  state.events.unshift(snapshot.observationStatus === "unavailable"
+    ? event("learning", "Publication performance unavailable", "Performance could not be observed. This is a missing measurement, not evidence of zero response.", "quiet", { presenceId: presence.id, sourceObjectId: mirror.id })
+    : event("learning", "Publication performance observed", `Performance evidence for a verified ${presence.channel === "x" ? "X" : presence.name} publication is available for Growth review.`, "positive", { presenceId: presence.id, sourceObjectId: mirror.id }));
 }
 
 /** Record a publication-metric batch with one compatibility-state clone. */
@@ -822,7 +847,7 @@ function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInp
   // before restart (or in another branch) smuggle global learning into this
   // session. Live decisions retain the existing precomputed-run contract.
   const strategyRun = sandboxSessionId
-    ? compileSocialStrategyContext(state, presence, { invocation: input.origin?.kind ?? "social_decision", objective: input.summary ?? input.decision, availableActions: input.acts?.map((act) => act.decision) ?? [input.decision], strategyTemplateId: assignmentTemplateId, sandboxSessionId }).retrievalRun
+    ? compileSocialStrategyContext(state, presence, { invocation: input.origin?.kind ?? "social_decision", objective: input.socialStrategy?.retrievalRun.objective ?? input.summary ?? input.decision, availableActions: input.acts?.map((act) => act.decision) ?? [input.decision], strategyTemplateId: assignmentTemplateId, sandboxSessionId }).retrievalRun
     : input.socialStrategy?.retrievalRun ?? compileSocialStrategyContext(state, presence, { invocation: input.origin?.kind ?? "social_decision", objective: input.summary ?? input.decision, availableActions: input.acts?.map((act) => act.decision) ?? [input.decision], strategyTemplateId: assignmentTemplateId }).retrievalRun;
   const learningCounterfactual = recordLearningCounterfactualInPlace(state, presence, strategyRun, now(), undefined, sandboxSessionId, input.counterfactualActions ?? [input.decision, ...(input.acts?.map((act) => act.decision) ?? [])]);
   if (learningCounterfactual) strategyRun.learningCounterfactual = {
@@ -1935,6 +1960,22 @@ export function markNativeConnectionNeedsAttention(source: OpenPresenceState, pr
     creditsExhausted ? `X API billing is blocking the native connection. An authorized browser route can continue available work. ${message}` : message,
     "warning"
   );
+}
+
+/** An explicit operator check is the boundary that re-arms Native X. Until
+ * then, a previous billing/credential failure is a durable continuity hold:
+ * new writes should use the verified browser body without probing Native X. */
+export function clearNativeBrowserContinuityHold(source: OpenPresenceState, presenceId: string) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  state.nativeConnections = state.nativeConnections.map((connection) => connection.presenceId === presenceId && connection.kind === "x"
+    ? { ...connection, status: "connected" as const, healthMessage: undefined, deliveryError: undefined, updatedAt: now() }
+    : connection);
+  const clearPresence = (presence: Presence) => presence.id === presenceId
+    ? { ...presence, browserAccess: presence.browserAccess ? { ...presence.browserAccess, learnedFallbacks: (presence.browserAccess.learnedFallbacks ?? []).filter((item) => !isXCreditsError(item.reason)) } : presence.browserAccess }
+    : presence;
+  state.presences = state.presences.map(clearPresence);
+  if (state.presence) state.presence = clearPresence(state.presence);
+  return state;
 }
 
 /** Resume a Presence only after an explicit manual check proves its previous
@@ -3604,8 +3645,14 @@ export function recordSandboxTrajectoryInPlace(state: OpenPresenceState, session
     };
     const parentTypes: Record<string, TemporalCausalParentType> = {};
     for (const parentId of parentIds) {
+      const metric = state.publicationMetricSnapshots.find((item) => item.id === parentId && item.presenceId === session.presenceId);
+      const metricInSession = metric && state.mirrorObjects.some((item) => item.id === metric.mirrorObjectId && item.sessionId === sessionId);
       const type: TemporalCausalParentType = temporalEventIds.has(parentId)
         ? "temporal_event"
+        : metricInSession
+          ? "publication_metric"
+          : state.publishingPlans.some((item) => item.id === parentId && item.presenceId === session.presenceId && item.environment === "sandbox")
+            ? "publishing_plan"
         : sessionCollection("mirrorObjects").some((item) => item && typeof item === "object" && (item as { id?: string }).id === parentId && (item as { sessionId?: string }).sessionId === sessionId)
           ? "mirror_object"
           : sessionCollection("assignments").some((item) => item && typeof item === "object" && (item as { id?: string }).id === parentId && (item as { sessionId?: string }).sessionId === sessionId)
@@ -4217,7 +4264,6 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
       assignment.attemptHistory = [...(assignment.attemptHistory ?? []), { id: id("assignment-attempt"), attempt: assignment.work.attempts, phase: assignment.work.phase, outcome: assignment.lastOutcome.class, message: assignment.lastOutcome.message, at: assignment.lastOutcome.at }].slice(-24);
       state.events.unshift({ ...event("execution", satisfied && !awaitingMeasurement ? "Assignment complete" : "Assignment progress updated", `${assignment.progress.verified} / ${assignment.progress.required} verified publications.`, "positive", { presenceId: presence.id, executionId: execution.id }), sessionId: session.id });
       if (!satisfied) {
-        recordSandboxTrajectoryInPlace(state, session.id, "learning", { assignmentId: assignment.id, outcomeId: outcome.id, verified: assignment.progress.verified, required: assignment.progress.required, lesson: "Sandbox outcome verified in the simulated world.", causal: { parentIds: [outcome.id] } }, now());
         recordSandboxTrajectoryInPlace(state, session.id, "replan", { assignmentId: assignment.id, outcomeId: outcome.id, reason: "The verified outcome did not yet satisfy the Assignment; more work remains.", causal: { parentIds: [outcome.id] } }, now());
       } else if (awaitingMeasurement) {
         recordSandboxTrajectoryInPlace(state, session.id, "measurement_scheduled", { assignmentId: assignment.id, deliveryOutcomeId: outcome.id, measurementEventId: measuredOutcomeEventId, causal: { parentIds: [outcome.id] } }, now());
@@ -4225,34 +4271,9 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
 
     }
   }
-  // Repeated verified outcomes are the first point at which a Sandbox
-  // learning signal clears the operator-interruption threshold. This is
-  // session-scoped because an Agent-owned responsibility may span several
-  // execution records without every act carrying an Assignment attachment.
-  const verifiedSessionOutcomes = state.outcomes.filter((item) => item.sessionId === session.id && item.status === "succeeded");
-  const learningDedupeKey = `sandbox-learning:${session.id}`;
-  const learningUpdateAlreadySent = (state.operatorConversations ?? []).some((conversation) => conversation.messages.some((message) => message.agentInitiated?.dedupeKey === learningDedupeKey));
-  if (verifiedSessionOutcomes.length >= 2 && !learningUpdateAlreadySent) {
-    const assignment = execution.assignmentId ? state.assignments.find((item) => item.id === execution.assignmentId) : undefined;
-    const learningEvent = event("learning", "Strategy learning update", "Repeated verified outcomes gave the Agent a meaningful signal about what is converting better. It is carrying that lesson into the next experiments.", "positive", { presenceId: presence.id, executionId: execution.id, outcomeId: outcome.id, sourceObjectId: assignment?.id });
-    state.events.unshift({ ...learningEvent, sessionId: session.id });
-    const communication = recordAgentInitiatedUpdate(state, presence.id, {
-      id: learningEvent.id,
-      title: learningEvent.title,
-      detail: learningEvent.detail,
-      type: learningEvent.type,
-      tone: learningEvent.tone,
-      kind: "strategy_change",
-      dedupeKey: learningDedupeKey,
-    });
-    if (communication.recorded) state = communication.state;
-    recordSandboxTrajectoryInPlace(state, session.id, "learning", {
-      executionId: execution.id,
-      outcomeId: outcome.id,
-      lesson: "Repeated verified outcomes changed the Agent's next strategy allocation.",
-      causal: { parentIds: [outcome.id, execution.socialIntentId] },
-    }, outcome.observedAt);
-  }
+  // Delivery establishes that an act happened, not audience response or a
+  // changed strategy. Learning and supervisory updates require their own
+  // measured evidence; a delivery count must never fabricate either.
   if (repliedToId) {
     const repliedTo = state.mirrorObjects.find((item) => item.externalRef.id === repliedToId && item.actorPresenceId !== presence.id);
     if (repliedTo) state = curateRelationshipFromMirror(state, repliedTo, presence.id);
@@ -5022,7 +5043,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   // reaction verification could mark only the execution/outcome and leave
   // the parent Assignment in `awaiting_execution` after a restart.
   for (const execution of normalized.executions) {
-    if (execution.status !== "succeeded" || !execution.assignmentId) continue;
+    if (execution.environment === "sandbox" || execution.status !== "succeeded" || !execution.assignmentId) continue;
     const assignment = normalized.assignments.find((item) => item.id === execution.assignmentId);
     const verified = normalized.outcomes.some((outcome) => outcome.executionId === execution.id && outcome.status === "succeeded");
     if (!assignment || !verified || !growthEvidenceIsInPresenceScope(normalized, execution.presenceId, execution.createdAt) || assignment.progress.verified >= assignment.progress.required) continue;
@@ -7143,8 +7164,10 @@ export function browserBridgeFor(state: OpenPresenceState, presenceId: string, a
 
 function browserFallbackWasLearned(presence: Presence, affordance: string) {
   const normalized = affordance.replace(/^[^.]+\./, "");
-  // Billing is temporary provider state, not evidence that this action needs a browser forever.
-  return (presence.browserAccess?.learnedFallbacks ?? []).some((item) => !isXCreditsError(item.reason) && (item.action === affordance || item.action === normalized));
+  // A learned fallback is a continuity hold until the operator explicitly
+  // checks the connection again. This prevents every new action from probing
+  // a provider that already reported a durable write boundary failure.
+  return (presence.browserAccess?.learnedFallbacks ?? []).some((item) => item.action === affordance || item.action === normalized);
 }
 
 function rememberBrowserFallback(presence: Presence, affordance: string, reason: string) {
@@ -7404,7 +7427,8 @@ export function isExplicitXPostRequest(content: string) {
     // one-time action. The channel-specific path above remains useful for
     // explicit X wording, but “publish this now” and “post something right
     // now” must not fall through as ordinary conversation.
-    || /\b(?:publish|post|tweet|send|ship)\b[^.!?\n]{0,120}\b(?:now|right\s+now|immediately|right\s+away)\b/.test(normalized);
+    || /\b(?:publish|post|tweet|send|ship)\b[^.!?\n]{0,120}\b(?:now|right\s+now|immediately|right\s+away)\b/.test(normalized)
+    || /\b(?:can|could|would)\s+you\s+(?:please\s+)?(?:post|publish|tweet|send)\b/.test(normalized);
 }
 
 export function formChatPostIntent(source: OpenPresenceState, text: string, standingIntentId?: string, sourceKind: "agent" | "operator" = "agent", assetIds: string[] = [], decisionInput?: SocialDecisionInput, runId?: string, presenceOverride?: Presence, operatorAssetIds: string[] = [], sandboxSessionId?: string) {

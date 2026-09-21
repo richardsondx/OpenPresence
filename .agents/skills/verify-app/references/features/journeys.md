@@ -36,7 +36,7 @@ Follow [Channels and Manage Agent](channels-agent.md), change a Presence setting
 
 ## Portfolio Agent → connected channel context
 
-Create or use at least two Agents, each with its own connected channel context. Switch Agent from the portfolio rail, verify the Agent name and Agent-scoped Knowledge/Assets/meaning remain stable, then verify the active channel, Activity, Review, Chat, and unified settings all follow the selected Agent. Do not introduce a separate channel switcher into the primary workspace.
+Create or use at least two Agents, each with its own connected channel context. Switch Agent from the portfolio rail, verify the Agent name and Agent-scoped Knowledge/Artifacts/meaning remain stable, then verify the active channel, Activity, Review, Chat, and unified settings all follow the selected Agent. Do not introduce a separate channel switcher into the primary workspace.
 
 ## Responsive and partial-state resilience
 

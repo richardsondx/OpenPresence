@@ -259,10 +259,10 @@ function scorePattern(pattern: SocialStrategyPattern, situation: SocialStrategyS
   return (actionMatch ? 3 : 0) + (formatMatch ? 2 : 0) + tagMatches * 2 - Math.min(3, fatigue * 0.45) + learningAdjustment;
 }
 
-function recentStrategyShape(state: OpenPresenceState, presenceId: string, limit = 12) {
+function recentStrategyShape(state: OpenPresenceState, presenceId: string, limit = 12, sandboxSessionId?: string) {
   const shape: Record<string, number> = {};
   const decisions = state.socialDecisions
-    .filter((item) => item.presenceId === presenceId)
+    .filter((item) => item.presenceId === presenceId && (sandboxSessionId ? item.sessionId === sandboxSessionId : !item.sessionId))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, limit);
   for (const decision of decisions) {
@@ -747,7 +747,7 @@ function durablePreferenceContext(state: OpenPresenceState, presence: Presence) 
 
 export function compileSocialStrategyContext(state: OpenPresenceState, presence: Presence, situation: SocialStrategySituation): CompiledSocialStrategyContext {
   const selectedPlaybook = bundledSocialStrategyPlaybooks().find((candidate) => candidate.channelId === presence.channel);
-  const recent = recentStrategyShape(state, presence.id);
+  const recent = recentStrategyShape(state, presence.id, 12, situation.sandboxSessionId);
   const candidates = (selectedPlaybook?.patterns ?? [])
     .map((pattern) => ({ pattern, score: scorePattern(pattern, situation, recent, learningAdjustmentForPattern(state, presence, pattern.id, situation.sandboxSessionId)) }))
     .filter(({ score }) => score > 0)
@@ -834,10 +834,20 @@ export function materializeSandboxOutcomeLearning(source: OpenPresenceState, pre
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   if (!presence || !state.agent) return state;
   const sessionOutcomes = state.outcomes.filter((outcome) => outcome.sessionId === sessionId && outcome.presenceId === presenceId && outcome.status === "succeeded" && outcome.environment === "sandbox");
+  const succeededIntentIds = new Set(sessionOutcomes.map((outcome) => outcome.socialIntentId));
+  const measuredDecisionIds = new Set(state.socialDecisions
+    .filter((decision) => decision.presenceId === presenceId && decision.sessionId === sessionId && decision.socialIntentId && succeededIntentIds.has(decision.socialIntentId))
+    .map((decision) => decision.id));
+  const metricIds = new Set((state.publicationMetricSnapshots ?? [])
+    .filter((snapshot) => snapshot.presenceId === presenceId
+      && snapshot.observationStatus !== "unavailable"
+      && [snapshot.impressions, snapshot.likes, snapshot.replies, snapshot.reposts, snapshot.quotes].some((value) => typeof value === "number" && Number.isFinite(value) && value > 0))
+    .filter((snapshot) => state.mirrorObjects.some((mirror) => mirror.id === snapshot.mirrorObjectId && mirror.presenceId === presenceId && mirror.environment === "sandbox" && mirror.sessionId === sessionId))
+    .map((snapshot) => snapshot.id));
   const evidenceByDecision = new Map<string, GrowthEvidenceRecord[]>();
   for (const record of state.growthEvidenceRecords ?? []) {
-    if (record.sandboxSessionId !== sessionId || record.presenceId !== presenceId || record.kind !== "WORLD_OUTCOME" || !record.verified || !record.sourceRefs.some((source) => source.kind === "publication_metric")) continue;
-    for (const decisionId of record.causalDecisionIds ?? []) {
+    if (record.sandboxSessionId !== sessionId || record.presenceId !== presenceId || record.kind !== "WORLD_OUTCOME" || !record.verified || !record.sourceRefs.some((source) => source.kind === "publication_metric" && metricIds.has(source.id)) || !record.causalDecisionIds?.some((decisionId) => measuredDecisionIds.has(decisionId))) continue;
+    for (const decisionId of (record.causalDecisionIds ?? []).filter((id) => measuredDecisionIds.has(id))) {
       const records = evidenceByDecision.get(decisionId) ?? [];
       records.push(record);
       evidenceByDecision.set(decisionId, records);
@@ -861,7 +871,7 @@ export function materializeSandboxOutcomeLearning(source: OpenPresenceState, pre
   const decisionIdsByPattern = new Map<string, Set<string>>();
   const actionsByPattern = new Map<string, Set<string>>();
   for (const outcome of sessionOutcomes) {
-    const decision = state.socialDecisions.find((item) => item.socialIntentId === outcome.socialIntentId);
+    const decision = state.socialDecisions.find((item) => item.socialIntentId === outcome.socialIntentId && item.presenceId === presenceId && item.sessionId === sessionId);
     if (!decision) continue;
     for (const selected of decision.socialStrategy?.selectedByAct ?? []) {
       if (!selected.patternId || !knownPatternIds.has(selected.patternId)) continue;
@@ -874,10 +884,11 @@ export function materializeSandboxOutcomeLearning(source: OpenPresenceState, pre
     }
   }
   for (const [patternId, decisionIds] of decisionIdsByPattern) {
-    if (decisionIds.size < 2) continue;
+    const measuredDecisionIds = [...decisionIds].filter((decisionId) => evidenceByDecision.has(decisionId));
+    if (measuredDecisionIds.length < 2) continue;
     const pattern = patterns.find((item) => item.id === patternId);
     if (!pattern) continue;
-    const evidenceIds = [...decisionIds].flatMap((decisionId) => (evidenceByDecision.get(decisionId) ?? []).map((record) => record.id));
+    const evidenceIds = [...new Set(measuredDecisionIds.flatMap((decisionId) => (evidenceByDecision.get(decisionId) ?? []).map((record) => record.id)))];
     if (evidenceIds.length < 2) continue;
     const mediaProfiles = [...new Map(evidenceIds
       .map((evidenceId) => state.growthEvidenceRecords?.find((record) => record.id === evidenceId)?.mediaProfile)
@@ -926,35 +937,46 @@ export function materializeSandboxOutcomeLearning(source: OpenPresenceState, pre
  */
 export function reconcileSandboxPerformanceLearning(source: OpenPresenceState, presenceId: string, sessionId: string, observedAt = new Date().toISOString()) {
   const state = source;
-  const samplesByPattern = new Map<string, Array<{ decisionId: string; evidenceIds: string[]; signal: number }>>();
+  const samplesByPattern = new Map<string, Array<{ decisionId: string; evidenceIds: string[]; signal: number; publicationAgeSeconds: number }>>();
   const snapshots = new Map((state.publicationMetricSnapshots ?? []).map((snapshot) => [snapshot.id, snapshot]));
   for (const record of state.growthEvidenceRecords ?? []) {
     if (record.sandboxSessionId !== sessionId || record.presenceId !== presenceId || record.kind !== "WORLD_OUTCOME" || !record.verified) continue;
     const metricId = record.sourceRefs.find((source) => source.kind === "publication_metric")?.id;
     const snapshot = metricId ? snapshots.get(metricId) : undefined;
-    if (!snapshot || record.causalDecisionIds?.length !== 1) continue;
+    const mirror = snapshot ? state.mirrorObjects.find((item) => item.id === snapshot.mirrorObjectId && item.presenceId === presenceId && item.environment === "sandbox" && item.sessionId === sessionId) : undefined;
+    const measurable = snapshot && snapshot.presenceId === presenceId && Number.isFinite(snapshot.publicationAgeSeconds) && snapshot.publicationAgeSeconds >= 0 && snapshot.observationStatus !== "unavailable"
+      && [snapshot.impressions, snapshot.likes, snapshot.replies, snapshot.reposts, snapshot.quotes].some((value) => typeof value === "number" && Number.isFinite(value) && value >= 0);
+    if (!snapshot || !mirror || !measurable || record.causalDecisionIds?.length !== 1) continue;
     const decisionId = record.causalDecisionIds[0]!;
-    const decision = state.socialDecisions.find((item) => item.id === decisionId && item.sessionId === sessionId);
+    const decision = state.socialDecisions.find((item) => item.id === decisionId && item.presenceId === presenceId && item.sessionId === sessionId && state.outcomes.some((outcome) => outcome.presenceId === presenceId && outcome.sessionId === sessionId && outcome.status === "succeeded" && outcome.socialIntentId === item.socialIntentId));
     const signal = (snapshot.impressions ?? 0) + (snapshot.likes ?? 0) * 4 + (snapshot.replies ?? 0) * 6 + (snapshot.reposts ?? 0) * 8 + (snapshot.quotes ?? 0) * 8;
     for (const selected of decision?.socialStrategy?.selectedByAct ?? []) {
       if (!selected.patternId || !knownPatternIds.has(selected.patternId)) continue;
       const samples = samplesByPattern.get(selected.patternId) ?? [];
-      if (!samples.some((sample) => sample.decisionId === decisionId)) samples.push({ decisionId, evidenceIds: [record.id], signal });
+      if (!samples.some((sample) => sample.decisionId === decisionId && sample.publicationAgeSeconds === snapshot.publicationAgeSeconds)) samples.push({ decisionId, evidenceIds: [record.id], signal, publicationAgeSeconds: snapshot.publicationAgeSeconds });
       samplesByPattern.set(selected.patternId, samples);
     }
   }
-  const averages = new Map<string, number>();
+  const averagesByAge = new Map<number, Map<string, number>>();
   for (const [patternId, samples] of samplesByPattern) {
-    if (samples.length >= 2) averages.set(patternId, samples.reduce((sum, sample) => sum + sample.signal, 0) / samples.length);
+    for (const age of new Set(samples.map((sample) => sample.publicationAgeSeconds))) {
+      const ageSamples = samples.filter((sample) => sample.publicationAgeSeconds === age);
+      if (ageSamples.length < 2) continue;
+      const averages = averagesByAge.get(age) ?? new Map<string, number>();
+      averages.set(patternId, ageSamples.reduce((sum, sample) => sum + sample.signal, 0) / ageSamples.length);
+      averagesByAge.set(age, averages);
+    }
   }
   for (const hypothesis of state.growthHypotheses ?? []) {
     if (hypothesis.sandboxSessionId !== sessionId || hypothesis.originatingPresenceId !== presenceId || !["supported", "weakened", "disfavored"].includes(hypothesis.status)) continue;
     const patternId = hypothesis.decisionTargets?.find((target) => target.strategyId)?.strategyId ?? hypothesis.patternIds[0];
-    const ownAverage = patternId ? averages.get(patternId) : undefined;
-    if (ownAverage === undefined) continue;
-    const alternativeAverage = [...averages.entries()].filter(([candidate]) => candidate !== patternId).map(([, value]) => value).sort((left, right) => right - left)[0];
-    if (alternativeAverage === undefined || ownAverage > alternativeAverage * 0.75) continue;
-    const samples = samplesByPattern.get(patternId) ?? [];
+    const comparable = [...averagesByAge.entries()]
+      .map(([age, averages]) => ({ age, ownAverage: patternId ? averages.get(patternId) : undefined, alternativeAverage: [...averages.entries()].filter(([candidate]) => candidate !== patternId).map(([, value]) => value).sort((left, right) => right - left)[0] }))
+      .find((item) => item.ownAverage !== undefined && item.alternativeAverage !== undefined && item.alternativeAverage > 0 && item.ownAverage <= item.alternativeAverage * 0.75);
+    const ownAverage = comparable?.ownAverage;
+    const alternativeAverage = comparable?.alternativeAverage;
+    if (!comparable || ownAverage === undefined || alternativeAverage === undefined) continue;
+    const samples = (samplesByPattern.get(patternId) ?? []).filter((sample) => sample.publicationAgeSeconds === comparable.age);
     const newContradictions = samples.flatMap((sample) => sample.evidenceIds).filter((evidenceId) => !hypothesis.contradictingEvidenceIds.includes(evidenceId));
     if (!newContradictions.length) continue;
     hypothesis.contradictingEvidenceIds = [...new Set([...hypothesis.contradictingEvidenceIds, ...newContradictions])];

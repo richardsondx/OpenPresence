@@ -37,6 +37,26 @@ User
 
 The Agent owns **what is worth doing**. The operator owns **how a Presence may act**. The connector owns **how delivery is attempted**. The external world owns **what actually happened**.
 
+## Current navigation contract
+
+Reviewed 2026-09-21 against the canonical philosophy and current client shell.
+The Agent-first workspace has five daily destinations:
+
+```text
+Chat · Tasks · People · Growth · Artifacts
+```
+
+Tasks combines responsibility and Calendar views. Artifacts contains separate
+Templates and Media tabs; `/artifacts` is the canonical route and `/assets` is a
+legacy compatibility alias. Knowledge, Teach agent, Agent Lab, Watchlist, and
+Agent settings belong in the Agent menu. Delegate is a contextual handoff into
+Chat, not a competing product destination.
+
+The current source still renders Delegate in the daily `destinations` array in
+`app/client-page.tsx`. That is tracked navigation drift to resolve in the UI;
+this map records the intended product contract rather than silently treating
+the extra button as a sixth destination.
+
 ## Feature inventory
 
 | Feature | Scope | Primary UI | Main implementation | QA anchors |
@@ -48,14 +68,15 @@ The Agent owns **what is worth doing**. The operator owns **how a Presence may a
 | Presence identity, Ghost, brief, public self | Presence | Settings | `PresenceView`, `lib/runtime.ts`, `lib/types.ts` | `tests/presence-identity.test.ts`, `tests/identity-boundary.test.ts` |
 | Attention rhythm and publishing initiative | Presence | Settings / Schedule | `attention-governor`, publishing-plan runtime | `tests/attention-governor.test.ts`, `tests/publishing-plan.test.ts` |
 | Operator Chat, Teach, Rehearsal | Agent / Presence | Chat / Teach / Rehearsal | `OperatorChatView`, `TeachView`, `PresenceChatView`, `lib/operator-chat-harness.ts` | `tests/conversation-boundary.test.ts`, `tests/activity-chat-truth.spec.ts`, `tests/scenario-rehearsal.spec.ts`, `tests/e2e/natural-supervision.spec.ts`, `qa-learnings/conversation-prompt-evals/` |
-| Delegate | Agent / Presence | Delegate → Chat draft handoff | `DelegateView`, `OperatorChatView` in `app/client-page.tsx` | Select a suggestion, verify Chat opens with the editable draft, verify nothing is sent until submit |
+| Delegate handoff | Agent / Presence | Agent menu or contextual Delegate → Chat draft handoff | `DelegateView`, `OperatorChatView` in `app/client-page.tsx` | Select a suggestion, verify Chat opens with the editable draft, verify nothing is sent until submit |
 | Activity and autonomy | Presence / Runtime | Activity | `LiveView`, `autonomy-worker`, `activity-now` | `tests/e2e/activity-delivery-trace.spec.ts`, `tests/operational-autonomy.test.ts` |
 | Watching: Watchlist and Explorations | Presence | Watching | `WatchingView`, `lib/runtime.ts`, `autonomy-worker` | `tests/e2e/watching.spec.ts`, `tests/explorations.test.ts` |
 | People and relationships | Presence | People | `PeopleView`, `network-memory`, `conversation-episodes` | `tests/network.test.ts`, `tests/conversation-episodes.test.ts` |
 | Feed and Social Mirror | Presence / Channel | Feed | `PublicHistoryView`, `mirror-content`, `x.ts` | `tests/mirror-content.test.ts`, `tests/e2e/history-inspector-layout.spec.ts` |
 | Growth and evidence | Agent / Presence | Growth / Feed / Activity | growth projections, snapshots, reviews | `tests/growth-runtime.test.ts`, `tests/growth-history.test.ts` |
 | Schedule, Assignments, Standing Intents | Presence / Runtime | Schedule | `ScheduleView`, assignment runtime | `tests/agenda-and-assignment.test.ts`, `tests/e2e/schedule-state.spec.ts` |
-| Expression, Assets, Perception, editorial curation | Agent / Presence | Playground / Settings / Activity | `asset-*`, `perception*`, `editorial-curation` | `tests/asset-intelligence.test.ts`, `tests/editorial-production-parity.test.ts`, `tests/visual-fit.test.ts` |
+| Artifacts: Templates and Media | Agent / Presence | Artifacts (`/artifacts`) / Chat attachment / Activity | `ArtifactsView`, `social-playbook`, `asset-*`, `perception*`, `editorial-curation` | `tests/e2e/artifacts-playbook.spec.ts`, `tests/asset-intelligence.test.ts`, `tests/editorial-production-parity.test.ts`, `tests/visual-fit.test.ts` |
+| Expression, Assets, Perception, editorial curation | Agent / Presence | Artifacts / Playground / Settings / Activity | `asset-*`, `perception*`, `editorial-curation` | `tests/asset-intelligence.test.ts`, `tests/editorial-production-parity.test.ts`, `tests/visual-fit.test.ts` |
 | Execution Envelope and review | Presence | Settings / Activity | `execution-router`, `publication-security`, `native-execution-delivery` | `tests/publication-security.test.ts`, `tests/multi-act-execution.test.ts` |
 | Native X, Bridge, Manual Relay, browser hands | Presence / Channel | Settings | `lib/x.ts`, `lib/bridge.ts`, `extension/`, browser routes | `tests/x-connection.test.ts`, `tests/bridge-contract.test.ts`, `tests/extension-composer.test.ts` |
 | Playground Sandbox | Presence / Sandbox | Playground | `PlaygroundView`, Sandbox operations in `lib/runtime.ts` | `tests/sandbox.test.ts`, `tests/e2e/playground-rehearsal.spec.ts` |
@@ -391,14 +412,24 @@ Schedule is an Agent-owned projection: it shows what Genny decided to pursue and
 - Active and future Publishing Plan windows appear in Schedule as flexible Agent-plan opportunities and open the linked responsibility for guidance; they are not duplicated as executable Assignments.
 - Capability-level tests must prove legacy `planningOnly` records remain safe while new Agent-owned Assignments are executable without explicit user activation.
 
-### 14. Expression, Assets, Perception, and editorial curation
+### 14. Artifacts, Expression, Assets, Perception, and editorial curation
 
 **Business description**
 
-Text is not the product. The Agent should choose the medium that makes an idea clear: text, image, chart, screenshot, video, GIF, link, quote, thread, article, or slides. Assets are evidence and expression, not decoration.
+Artifacts is the Agent-owned library for reusable Templates, learned approaches,
+and Media. Text is not the product: the Agent should choose the medium that makes
+an idea clear—text, image, chart, screenshot, video, GIF, link, quote, thread,
+article, or slides. Assets are evidence and expression, not decoration.
 
 **Code POV**
 
+- `ArtifactsView` in [`app/client-page.tsx`](app/client-page.tsx) owns the
+  `/artifacts` surface and its Templates/Media tabs; `/assets` remains a legacy
+  Media deep-link alias.
+- Reusable templates and measured approaches are rendered by
+  [`app/social-playbook.tsx`](app/social-playbook.tsx); media-library upload,
+  provenance, folders, perception, and reuse remain in `app/client-page.tsx`
+  and the asset domain modules.
 - Asset discovery/materialization is in [`lib/asset-discovery.ts`](lib/asset-discovery.ts); storage and immutable bytes are in `lib/asset-store.ts`.
 - Perception levels, uncertainty, media review policy, and cognition-safe summaries are in [`lib/perception.ts`](lib/perception.ts) and `lib/perception-runtime.ts`.
 - Editorial source providers, visual fit, feedback layers, factual verification, publication packages, and Taste calibration are in [`lib/editorial-curation.ts`](lib/editorial-curation.ts) and `lib/visual-fit.ts`.
@@ -406,7 +437,13 @@ Text is not the product. The Agent should choose the medium that makes an idea c
 
 **User POV**
 
-Playground Curation Lab lets the operator search configured sources, review candidates, mark good/rejected/starred, inspect references, and calibrate Taste. Settings explains that perception explains media while Taste decides whether it is worth acting on.
+Artifacts gives the operator separate Templates and Media tabs. Templates show
+reusable formats and learned approaches with visible evidence and results; Media
+shows the Agent-owned visual library and recent discoveries. Chat can attach
+eligible Agent media without authorizing publication. Playground Curation Lab
+lets the operator search configured sources, review candidates, mark
+good/rejected/starred, inspect references, and calibrate Taste. Settings explains
+that perception explains media while Taste decides whether it is worth acting on.
 
 **QA expectations**
 
@@ -620,7 +657,7 @@ UI action
   → scoped state projection returned to UI
 ```
 
-Dedicated routes exist for X credentials, Bridge management/protocol, browser setup/launch/connect, Knowledge, Assets, Usage, runtime health/logging, link previews, and Ollama model discovery. Do not add a second mutation path for a domain object without checking whether `applyOperation` or an existing dedicated route is the authoritative boundary.
+Dedicated routes exist for X credentials, Bridge management/protocol, browser setup/launch/connect, Knowledge, Artifacts/media, Usage, runtime health/logging, link previews, and Ollama model discovery. Do not add a second mutation path for a domain object without checking whether `applyOperation` or an existing dedicated route is the authoritative boundary.
 
 ## Visual and UX references
 

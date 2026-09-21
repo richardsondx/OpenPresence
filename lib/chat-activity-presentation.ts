@@ -1,4 +1,5 @@
 import type { OperatorConversationMessage } from "./types";
+import { isXCreditsError } from "./x-credits";
 
 export const toolActivityLabels: Record<string, string> = {
   inspect_post: "Read post", watch: "Saved watch", assignment: "Created responsibility",
@@ -6,7 +7,7 @@ export const toolActivityLabels: Record<string, string> = {
   search_people: "Searched people", runtime_status: "Reviewed saved account state",
   check_connection: "Checked X connection", refresh_channel: "Refreshed channel",
   search_posts: "Searched posts", search_knowledge: "Searched knowledge", search_assets: "Found media",
-  inspect_asset: "Inspected media", relationship_history: "Reviewed relationship history",
+  inspect_asset: "Inspected media", present_asset: "Presented artifact", relationship_history: "Reviewed relationship history",
   social_action: "Social action", inspect_execution: "Checked delivery", retry_action: "Retried action",
   retry_assignment: "Checked paused work", learn_social_pattern: "Saved strategy lesson",
   save_social_template: "Saved strategy template", list_social_playbook: "Read strategy playbook",
@@ -30,8 +31,11 @@ export function operatorChatFailureMessage(error: unknown): string {
   const technical = /(?:zod|invalid_enum_value|unrecognized_keys|invalid_type|unexpected token|json|parse|stack|\bfetch\b|econn|\bhttp\b|timeout|timed out)/i.test(detail)
     || /[\[{][\s\S]*[\]}]/.test(detail);
   if (/work limit/i.test(detail) && !technical) return detail;
+  if (/invalid_enum_value|unrecognized_keys|invalid_type|zod/i.test(detail)) {
+    return "I couldn’t complete that turn because my response format was invalid. Your message is saved, and no new public action was confirmed. Retry response to try again.";
+  }
   if (!technical && detail.length > 0 && detail.length <= 240) return detail;
-  return "I hit a temporary problem while processing that. Your message is saved, so nothing was lost. Please retry the response.";
+  return "I couldn’t complete that turn. Your message is saved, and any work already recorded remains visible. Retry response to continue.";
 }
 
 /** Turn already-persisted validation leaks into the same safe copy. */
@@ -95,14 +99,23 @@ export function toolActivitySummary(receipt: Record<string, unknown>) {
   const results = Array.isArray(receipt.result) ? records(receipt.result) : [];
   const deliveryResults = ["social_action", "inspect_execution", "retry_action"].includes(tool) ? (results.length ? results : result ? [result] : []) : [];
   const deliveryFailed = deliveryResults.some((item) => ["failed", "blocked", "verification-closed"].includes(String(item.status)));
+  const billingBlocked = isXCreditsError(error) || deliveryResults.some((item) => isXCreditsError(text(item.failure) ?? text(item.message)));
+  const browserRouted = deliveryResults.some((item) => text(item.connector) === "bridge");
   const status = failed || deliveryFailed ? "Failed"
     : deliveryResults.length ? deliveryResults.every((item) => item.verified === true) ? "Verified" : deliveryResults.some((item) => item.status === "awaiting-review") ? "Needs review" : "Awaiting verification"
     : result?.status === "not-dispatched" ? "Not sent" : result?.status === "verification-pending" ? "Awaiting verification" : result?.status === "awaiting-review" ? "Needs review" : "Finished";
   const searchKey: Record<string, string> = { search_web: "sources", search_posts: "posts", search_people: "people", discover_assets: "candidates" };
   const matches = searchKey[tool] && Array.isArray(result?.[searchKey[tool]]) ? result[searchKey[tool]] as unknown[] : tool === "search_assets" && Array.isArray(receipt.result) ? receipt.result : undefined;
   const routeLabel = (item: Record<string, unknown>) => text(item.connector) === "native" ? "Native X" : text(item.connector) === "bridge" ? "Authorized browser" : undefined;
-  const summary = error ?? (matches ? `Found ${matches.length} ${searchKey[tool] ?? "media items"}.` : deliveryResults.length ? deliveryResults.map((item) => `${text(item.action) ?? "Action"}${routeLabel(item) ? ` · ${routeLabel(item)}` : ""}: ${item.verified === true ? "verified" : text(item.status)?.replaceAll("_", " ").replaceAll("-", " ") ?? "unconfirmed"}`).join(" · ") : text(result?.note) ?? text(receipt.query) ?? text(receipt.instruction) ?? text(recordValue(receipt.post)?.text) ?? "Result available below.");
-  return { title, status, failed: failed || deliveryFailed, summary, limit: receipt.delivered === false ? "No public action was delivered." : undefined };
+  const summary = billingBlocked
+    ? browserRouted
+      ? "Native X billing is unavailable; this eligible action is continuing through the authorized browser."
+      : "Native X billing blocked this action before a public outcome could be verified."
+    : error ?? (matches ? `Found ${matches.length} ${searchKey[tool] ?? "media items"}.` : deliveryResults.length ? deliveryResults.map((item) => `${text(item.action) ?? "Action"}${routeLabel(item) ? ` · ${routeLabel(item)}` : ""}: ${item.verified === true ? "verified" : text(item.status)?.replaceAll("_", " ").replaceAll("-", " ") ?? "unconfirmed"}`).join(" · ") : text(result?.note) ?? text(receipt.query) ?? text(receipt.instruction) ?? text(recordValue(receipt.post)?.text) ?? "Result available below.");
+  const limit = billingBlocked
+    ? browserRouted ? "The browser route still requires its own verified public outcome." : "An authorized browser route can continue eligible public work while Native X billing is repaired."
+    : receipt.delivered === false ? "No public action was delivered." : undefined;
+  return { title, status, failed: failed || deliveryFailed, summary, limit };
 }
 
 /** Read historical reports without rewriting their original evidence. */

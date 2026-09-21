@@ -106,6 +106,8 @@ export interface TemporalTrajectoryRecord {
 export type TemporalCausalParentType =
   | "temporal_event"
   | "mirror_object"
+  | "publication_metric"
+  | "publishing_plan"
   | "assignment"
   | "social_intent"
   | "execution"

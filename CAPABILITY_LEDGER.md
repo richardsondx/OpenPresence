@@ -11,6 +11,70 @@ baseline and must be re-verified against the current checkout before release.
 mechanical proof gates, dependencies, and exact closure gaps for the current
 candidate. It does not replace this ledger's capability definitions or status.
 
+## 2026-09-21 verification-loop audit
+
+Current closure evidence lives in `qa-learnings/verification-loop-2026-09-21/`.
+The audit found that the historical natural-supervision canary's unsolicited
+`strategy_change` was fabricated from two successful Sandbox deliveries, with
+no audience measurement or changed allocation. Its positive update claim is
+invalidated; historical passing test counts do not restore that claim.
+The runtime no longer emits this unsupported learning statement. A second fix
+rejects late supervisory events for missing Presences rather than falling back
+to the active identity.
+
+The strengthened seven-day test uses the real Chat composer, durable replay
+and reload checks, and explicit outcome → execution → intent joins. It passed
+with seven operator turns, one Agent-owned responsibility, five verified
+Sandbox outcomes, a durable correction, and zero unsupported strategy updates.
+This proves the deterministic quiet-operation/recovery slice, not real-model
+conversation quality or a genuine autonomous milestone/recap. AUT-010,
+EVAL-005, and UX-004 retain their positive/adversarial gates.
+
+Promotion is row-local: historical "Slice B/C after Slice A" ordering is not
+an additional behavioral requirement. Every actual dependency and declared
+composed gate must still be satisfied; separate unit and browser runs do not
+become one composed trajectory by appearing in the same report. Missing `/tmp`
+artifacts are unavailable evidence and must not be used for current promotion.
+
+### Current evidence limits and next discriminating runs
+
+SIM-001 is now PROVEN after independent final-runtime migration, new Agent-owned
+execution, restart/no-duplicate, and responsive review. The original twelve
+PARTIAL rows are not one indivisible gate.
+
+The 2026-09-21 seven-day measured trajectory still lacks a genuine learning
+transition; unlike the historical run, it fails rather than fabricating one.
+Its one-pixel media fixtures prove ingestion only. The real-model fork attempt
+created no new decision IDs and is `unexercised_not_demonstrated`, not evidence
+of equal forward choices. LEARN-002/003/004 and dependent autonomous positive
+update/ablation claims must not reuse either as completed learning proof.
+
+The next learning experiment must first establish an eligible post-checkpoint
+opportunity, then compare only new decisions under equal clock/world inputs
+with retained versus removed learning. A retirement claim needs comparable
+measured contradictions, and a media claim needs actual contrasting media with
+later attributed choice. Read the compact current report before historical
+checkpoint narratives: `qa-learnings/verification-loop-2026-09-21/review.md`.
+
+## 2026-09-18 autonomy recovery checkpoint
+
+`qa-learnings/autonomy-recovery-canary-2026-09-18.md` records a focused
+user-facing recovery finding and repair. The existing Chrome Bridge could be
+online and verified while an older billing-blocked Assignment remained
+`needs_operator`; verified Bridge identity now re-evaluates and reopens that
+same Assignment, requests an assignment-scoped wake, and preserves review and
+verified-outcome boundaries. The general Chat artifact capability also now
+resolves a scoped existing Asset and attaches it to the next private reply;
+the focused Chromium canary caught and verified the corresponding rendering
+path. This is supporting evidence only: the full browser-driven
+wrong-account → human intervention → publish → external verification canary
+remains unproven, so no existing PARTIAL capability is promoted. The same
+checkpoint now also contains a real user-level Chat → Chrome Bridge → X browser
+delivery: the exact harmless canary post is visible on `@example_agent`, while
+the runtime truthfully stopped at `verification-closed` because X API credits
+were exhausted. This proves delivery and fail-closed boundary reporting, but
+not API-backed verification or the adversarial wrong-account intervention path.
+
 ## Status vocabulary
 
 Use only `UNPROVEN`, `PARTIAL`, `PROVEN`, `REGRESSED`, and `BLOCKED`.
@@ -42,14 +106,18 @@ cancellation route, and independent public causal-trace checks; see
 `qa-learnings/slice-a-focused-rerun-2026-09-17.md` for the explicit oracle and
 commands. `SBX-004` and `SBX-008` remain PARTIAL because the required native
 race plus permission/retry causal cone has not yet been independently owned as
-one composed run. Slice B and Slice C remain gated behind that closure.
+one composed run. Slice B and Slice C were run after that closure in the
+historical audit, but that ordering is not a cross-capability prerequisite.
+Evaluate and promote B/C row-locally when each row's own candidate-bound gates
+are complete; an open A row does not withhold unrelated evidence.
 
 An independent verifier also passed the exercised SIM-001 legacy migration
 ablation on `38e97ca`: legacy operator work remained draft, historical Calendar
 data survived restart, Agent-owned Sandbox work executed without activation,
 and no live side effects occurred. Evidence is preserved in
-`qa-learnings/sim001-independent-verifier-38e97ca-2026-09-17.md`; this is
-supporting evidence only until the ordered closure sequence is complete.
+`qa-learnings/sim001-independent-verifier-38e97ca-2026-09-17.md`; it remains
+supporting evidence because SIM-001's own migration and no-duplicate-
+responsibility gates are open, not because another slice must close first.
 
 The corrected action-family learning implementation was verified on exact
 commit `67a7544` and is documented in
@@ -206,14 +274,14 @@ confidence estimate.
 | AUT-008 | Agent stays within Presence permissions and escalates only at the boundary | Autonomy never bypasses the Execution Envelope | `lib/execution-readiness.ts`, `tests/assignment-runtime.test.ts`, `tests/source-invariance.test.ts`, `lib/native-execution-delivery.ts`, `tests/native-execution-delivery.test.ts` (delivery rechecks paused/revoked authority before connector use) | PARTIAL | Rerun the independent adversarial suite against integrated main, including approved and queued live actions |
 | AUT-009 | Failed or uncertain delivery is not shown as success | Intent, execution, delivery, and outcome remain distinct | `tests/assignment-failure-recovery.test.ts`, `tests/assignment-domain.test.ts` (acknowledgement without matching Outcome remains `delivery_pending`); `docs/operational-autonomy-checklist.md` | PROVEN | Add live UI evidence for one failure state |
 | LEARN-001 | Outcomes become evidence tied to the declared goal | Metrics inform judgment rather than rewrite identity | `lib/social-strategy.ts`, `lib/growth-scope.ts`, `tests/social-strategy.test.ts`, `tests/sandbox.test.ts` (public metric path plus durable state reload), `qa-learnings/learning-audit-4d4903d-2026-09-17.md` (persisted-trajectory audit; candidate canonical run and public metric-path evidence) | PROVEN | No remaining gate in the declared goal-tied outcome-evidence contract |
-| LEARN-002 | Stored learning changes a later decision | Saved insight is not decorative memory | `lib/social-strategy.ts`, `lib/learning-runtime.ts`, `tests/autonomous-growth-cognition.test.ts`, `lib/learning-counterfactual.ts`; `tests/learning-counterfactual.test.ts` (SQLite round-trip, explicit decision-lineage gating, JSON-round-tripped Sandbox snapshots, public fork overlay namespacing, fresh-source overlay exclusion, source-restore preservation, serialized World A/World B retained-vs-removed learning, changed later runtime strategy, and selected-action attribution for quote/repost/like/follow) plus `lib/sandbox-replay.ts`/`lib/runtime.ts`; `qa-learnings/learning-audit-4d4903d-2026-09-17.md` | PARTIAL | Complete autonomous measured action-family trajectory, later allocation difference, and independent causal-cone review remain required |
+| LEARN-002 | Stored learning changes a later decision | Saved insight is not decorative memory | `lib/social-strategy.ts`, `lib/learning-runtime.ts`, `tests/autonomous-growth-cognition.test.ts`, `lib/learning-counterfactual.ts`; `tests/learning-counterfactual.test.ts` (SQLite round-trip, explicit decision-lineage gating, JSON-round-tripped Sandbox snapshots, public fork overlay namespacing, fresh-source overlay exclusion, source-restore preservation, serialized World A/World B retained-vs-removed learning, changed later runtime strategy, and selected-action attribution for quote/repost/like/follow) plus `lib/sandbox-replay.ts`/`lib/runtime.ts`; `qa-learnings/learning-audit-4d4903d-2026-09-17.md`; public-worker repair and bounded real-provider attempt: `qa-learnings/learn002-public-closure-2026-09-21/review.md` / `packet.json` (2026-09-21) | PARTIAL | First missing real transition: two comparable decisions attributed to the same pattern (one of five in the retained real run). Then measure, fork, and prove later behavioral transfer; deterministic strategy attribution and full observation-parent reconstruction are insufficient |
 | LEARN-003 | Patterns are scoped, confidence changes, and stale patterns retire | Tiny samples and context shifts do not create global rules | `lib/social-strategy.ts`, `lib/learning-runtime.ts`, `tests/learning-counterfactual.test.ts` (independent causal-decision counting, one-year recency gate, Presence/Channel/Agent scope regression, measured contradiction and bounded retirement) and `qa-learnings/learning-audit-4d4903d-2026-09-17.md` | PARTIAL | Prove the full autonomous contradiction/retirement trajectory through an independent learning adversary |
 | LEARN-004 | Relevant media is distinguished from arbitrary media | “Use images” is not a sufficient learned abstraction | `lib/asset-discovery.ts`, `lib/perception-runtime.ts`, `lib/runtime.ts`, `app/api/state/route.ts`, `lib/social-strategy.ts` (`MediaEvidenceProfile`), `lib/types.ts`, `tests/asset-intelligence.test.ts`, `tests/perception.test.ts`, `tests/learning-counterfactual.test.ts`, `tests/sandbox.test.ts` (three executable relevant/irrelevant/text-only variants with verified metric evidence and persisted profiles), `qa-learnings/media-learning-structure-2026-09-17.md`, `qa-learnings/release-candidate-2154c5c-2026-09-17.md`, `qa-learnings/release-candidate-249dfe2-2026-09-17.md` (canonical media truth-release slice passed) | PARTIAL | Independently verify that a later media choice changes for the learned reason |
 | LEARN-005 | User feedback persists as a durable constraint | Corrections survive the current turn and respect scope | `tests/ai.test.ts`, `tests/operator-chat-harness.test.ts` (typed `record_preference` saves scoped evidence, survives the worker merge boundary, and deduplicates), `tests/chat-feedback-process-boundary.test.ts` (Process A → termination → fresh Process B restores scoped evidence, then identical future input produces a different counterfactual social decision with zero executions and no foreign-Presence evidence), `tests/e2e/natural-supervision-feedback-loop.spec.ts` (public natural correction → concise acknowledgement → scoped evidence → later Sandbox decision changes), `tests/e2e/natural-supervision-seven-day.spec.ts` (updated seven-day golden trajectory persists the Day 3 correction while preserving an unrelated Day 4 repost), `lib/social-strategy.ts`, `tests/learning-counterfactual.test.ts`, `qa-learnings/chat-feedback-durability-2026-09-17.md`, `qa-learnings/natural-supervision-feedback-loop-2026-09-17.md` | PROVEN | Clean detached public seven-day trajectory proves the full correction-to-later-decision contract; no remaining gate in this row |
 | SBX-001 | Virtual time can advance Sandbox work | Scheduled work uses virtual time, not accidental wall time | `lib/temporal.ts`, `lib/runtime.ts`, `app/api/state/route.ts`; `tests/sandbox.test.ts`, `tests/sandbox-temporal-integration.test.ts`, `tests/sandbox-multi-rate-trajectory.test.ts`; canonical public seven-day trajectory and accelerated 1x/24x/96x runs; independent exact-candidate cross-rate verifier; durable attestation in `qa-learnings/certification-closure-11eaa8e-2026-09-17.md` | PROVEN | No remaining gap in the declared virtual-time contract |
 | SBX-002 | Events have defined causal ordering | Simultaneous, recurring, stale, and injected events are deterministic or explicit | `lib/runtime.ts` Scenario temporal adapter, `tests/scenarios.test.ts` (17 tests, including stable offset events and ordered replay), `tests/e2e/scenario-rehearsal.spec.ts` (4/4 clean Chromium run 2026-09-16); `tests/sandbox-temporal.test.ts` (13 tests, including multi-event event-local handler clocks and stale retry ordering); `tests/sandbox.test.ts` (persisted calendar dispatch plus typed causal parent assertions); `lib/sandbox-temporal.ts` and `lib/runtime.ts` at `0c68190` (central trace adapter preserves stable `parentIds` and durable `parentTypes`); `tests/e2e/mandatory-seven-day-no-babysitting.spec.ts` on the current checkpoint (explicit monotonic causal oracle); `tests/e2e/independent-causal-trace.spec.ts` (public CLI/API trajectory, verifier-owned typed-parent graph reconstruction, and monotonic virtual-time oracle; passed on a clean detached worktree containing product candidate `6359691`); `qa-learnings/release-candidate-6359691-2026-09-17.md` (canonical seven-day slices and release health) | PROVEN | No remaining gap in the declared causal ordering and typed-parent contract |
 | SBX-003 | Delayed outcomes arrive only after causes | Agent cannot learn from future or hidden consequences | `lib/runtime.ts`, `tests/e2e/scenario-rehearsal.spec.ts`, `tests/workstream-a-replay.test.ts`, `tests/sandbox-multi-rate-trajectory.test.ts`; canonical composed trajectory records delayed release; exact-candidate independent hidden-truth oracle observed no truth through minute 29 and one allowed release at minute 30; durable attestation in `qa-learnings/certification-closure-11eaa8e-2026-09-17.md` | PROVEN | No remaining gap in the declared delayed-release contract |
-| SBX-004 | Retry, cancellation, and backoff do not duplicate side effects | Recoverable failure remains visible and idempotent | `tests/assignment-failure-recovery.test.ts`, `tests/assignment-runtime.test.ts`, `tests/sandbox-temporal.test.ts` (success/exhaustion cancellation, retry-lineage fences, stale-event suppression), public `playground retry`/`cancel-retry` → virtual advance coverage in `tests/sandbox-temporal-integration.test.ts`, `lib/native-execution-delivery.ts` (durable post-handoff authority reconciliation), `tests/native-execution-delivery.test.ts` (pre-handoff cancellation, in-flight revocation receipt, and verifier-owned zero-connector-call retry-backoff oracle), `tests/runtime.test.ts` (durable native retry backoff and cancellation fence), `tests/x-connection.test.ts` (public `/api/x/manage` + `/api/state` retry/cancel route and external connector oracle), `qa-learnings/sbx-004-inflight-authority-barrier-2026-09-17.md`, and independent public audit on `5a822c8` covering cancel-before/after-attempt, duplicate scheduling, repeated cancellation, and no duplicate records; candidate `6359691` canonical composed slices and independent verifier passed | PARTIAL | The implementation and public/oracle gates are satisfied; promote only after the real native retry-backoff cancellation race is exercised inside the canonical composed trajectory and independently verified with the external side-effect oracle |
+| SBX-004 | Retry, cancellation, and backoff do not duplicate side effects | Recoverable failure remains visible and idempotent | `tests/assignment-failure-recovery.test.ts`, `tests/assignment-runtime.test.ts`, `tests/sandbox-temporal.test.ts` (success/exhaustion cancellation, retry-lineage fences, stale-event suppression), public `playground retry`/`cancel-retry` → virtual advance coverage in `tests/sandbox-temporal-integration.test.ts`, `lib/native-execution-delivery.ts` (durable post-handoff authority reconciliation), `tests/native-execution-delivery.test.ts` (pre-handoff cancellation, in-flight revocation receipt, and verifier-owned zero-connector-call retry-backoff oracle), `tests/runtime.test.ts` (durable native retry backoff and cancellation fence), `tests/x-connection.test.ts` (public `/api/x/manage` + `/api/state` retry/cancel route and external connector oracle), `qa-learnings/sbx-004-inflight-authority-barrier-2026-09-17.md`, and independent public audit on `5a822c8` covering cancel-before/after-attempt, duplicate scheduling, repeated cancellation, and no duplicate records; candidate `6359691` canonical composed slices and independent verifier passed | PARTIAL | Sandbox temporal and Native connector boundaries pass separately. Independently exercise public Native retry/cancel → persisted state → due delivery against a loopback HTTP oracle with an uncancelled control. Native execution must not be placed inside an isolated Sandbox; see `qa-learnings/aut008-sbx004-native-boundary-review-2026-09-21.md` |
 | SBX-005 | Runs reset and remain Presence/session isolated | Sandbox state cannot leak across runs or into live delivery | `tests/sandbox.test.ts`, `tests/agent-library-browser-projection.test.ts`; canonical public no-babysitting run recorded no live execution; exact-candidate independent reset/session oracle preserved the untouched session hash and production-escape oracle recorded zero production executions/outcomes, requests, native connections, or bridges; durable attestation in `qa-learnings/certification-closure-11eaa8e-2026-09-17.md` | PROVEN | No remaining gap in the declared reset/session/live-isolation contract |
 | SBX-006 | Seeded replay/fork is diagnostically useful | Inputs, world state, order, and provenance can be reconstructed | Existing Scenario evidence plus `lib/sandbox-replay.ts`, `scenarios/workstream-a-replay.json`, `tests/workstream-a-replay.test.ts`; exact-candidate independent public Process A → checkpoint/fork → terminate → fresh Process B → restore/replay passed with equivalent normalized state/trajectory, no duplicate mirrors or learning, no session leakage, and no live side effects; durable attestation in `qa-learnings/certification-closure-11eaa8e-2026-09-17.md` | PROVEN | Replay closure is complete; do not add replay-specific hardening absent a new integrated defect |
 | SBX-007 | Hidden simulator truth stays hidden from cognition | Only allowed observations become Agent context | Existing Scenario evidence plus Workstream A delayed-truth/replay tests; canonical delayed-outcome trajectory; exact-candidate independent hidden-truth release oracle; durable attestation in `qa-learnings/certification-closure-11eaa8e-2026-09-17.md` | PROVEN | No remaining gap in the declared hidden-truth boundary contract |
@@ -231,7 +299,11 @@ confidence estimate.
 | UX-004 | Chat is a lightweight, grounded supervisory interface | Responses are concise/action-first, use actual Growth/Calendar/plan state, infer operations from natural language, and support occasional Agent-initiated updates | `lib/supervisory-chat.ts`, `lib/operator-chat-harness.ts`, `lib/operator-initiated-communication.ts`, `tests/supervisory-chat.test.ts`, `tests/agent-initiated-communication.test.ts`, `tests/operator-chat-harness.test.ts`, `tests/e2e/natural-supervision-seven-day.spec.ts`, `tests/e2e/natural-supervision-feedback-loop.spec.ts`, `qa-learnings/release-candidate-249dfe2-2026-09-17.md` (exact candidate: grounded 7-day natural supervision and one non-routine update) | PARTIAL | Verify the complete trajectory and interruption threshold with an independent adversarial review |
 | UX-005 | Plan Intervention lets the user supervise any Agent-owned planned item | Calendar item → scoped conversational feedback → durable Agent-owned plan mutation; cancel/postpone/constrain/replan remain coherent without a task editor | `lib/types.ts` (`planIntervention`), `lib/operator-chat-harness.ts`, `lib/autonomy-worker.ts`, `lib/runtime.ts`, `app/client-page.tsx`, `tests/runtime.test.ts` (postpone/constrain/cancel synchronize linked Calendar projection and standing intent), `tests/e2e/mandatory-seven-day-no-babysitting.spec.ts` (natural correction → scoped constraint), `tests/e2e/chat-first-harness.spec.ts` (browser guidance and direct Agent-owned publishing-item cancellation both survive reload with a coherent successor projection), `tests/plan-intervention-process-boundary.test.ts`, `qa-learnings/plan-intervention-browser-2026-09-17.md`, `qa-learnings/calendar-plan-projection-audit-2026-09-17.md` | PROVEN | No remaining gate in the declared scoped intervention contract |
 | UX-003 | Environment and permission truth stays visible | Sandbox, review-gated, live, and disconnected states are not represented as equivalent | `app/client-page.tsx` / `app/globals.css` shared `environmentStateFor` projection; `qa-learnings/ux-003-environment-state-projection-2026-09-17.md`; `qa-learnings/final-candidate-01fdd69-2026-09-17.md`; exact candidate responsive Chromium desktop/mobile journey 8/8 passed; Sandbox, paused, approval-required, syncing, stale, disconnected, and connected labels are explicit in workspace/Activity surfaces; `qa-learnings/release-candidate-249dfe2-2026-09-17.md` (current-selector public desktop/mobile Activity checks passed; existing responsive review/navigation evidence reused) | PROVEN | No remaining gate in the declared environment/permission projection contract |
-| SIM-001 | Simplification preserves protected behavior | Deletion is preceded by capability-level ablation | `.agents/skills/design-simplifier/SKILL.md`, `CAPABILITY_LEDGER.md`, `qa-learnings/simplification-tasks-supervisory-2026-09-17.md`, `qa-learnings/product-review-tasks-supervisory-2026-09-17.md`; removed Tasks/Growth/Artifacts user-entry and full editor controls while retaining internal Assignments, Chat intervention, Calendar projection, and execution proof; responsive/artifact browser ablation passes; `qa-learnings/sim001-public-migration-38e97ca-2026-09-17.md` (clean public migration subset: legacy planning-only record preserved/drafted, historical Calendar link preserved, zero legacy execution, restart-stable) | PARTIAL | Independent capability-ablation review of legacy migration compatibility remains; prove new Agent-owned auto execution and no duplicate responsibility across initialization/restart/Sandbox session |
+| SIM-001 | Simplification preserves protected behavior | Deletion is preceded by capability-level ablation | `.agents/skills/design-simplifier/SKILL.md`, `CAPABILITY_LEDGER.md`, `qa-learnings/simplification-tasks-supervisory-2026-09-17.md`, `qa-learnings/product-review-tasks-supervisory-2026-09-17.md`; removed Tasks/Growth/Artifacts user-entry and full editor controls while retaining internal Assignments, Chat intervention, Calendar projection, and execution proof; `tests/e2e/responsive-workspace.spec.ts` (final isolated Chromium and mobile runs, 4/4 each, retained reports/logs under `qa-learnings/verification-loop-2026-09-21/`); `qa-learnings/sim001-planning-only-public-proof-20260921.md` final-runtime rerun (public planning-only migration, restart, fresh Sandbox Agent-owned responsibility, auto Sandbox execution/outcome, and no duplicate IDs across second restart; final source hashes and raw snapshot hashes retained) | PROVEN | No remaining gap in the declared migration/restart/new-Agent/no-duplicate contract |
+
+Header ablation evidence (2026-09-17): removed the repeated shared-workspace Agent avatar/name/handle/environment block and hid the single-Agent desktop sidebar row while retaining the multi-Agent portfolio switcher, mobile switcher, context-inspector access, Activity environment truth, and connection/settings recovery surfaces. The responsive navigation regression was updated to assert the surviving context action. No protected capability or authority boundary changed.
+
+Schedule scan ablation evidence (2026-09-18): defaulted Tasks to the current local day and removed automatic opening of the first blocked Assignment inspector. AUT-004 truthful Calendar projection, UX-005 scoped intervention, and UX-003 environment/recovery truth remain available through the visible item, filters, Calendar mode, and explicit `assignmentId` deep link. Live Chromium verification on the requested Presence showed 2 current responsibilities instead of 12 open items plus an unsolicited inspector; the deep-linked blocked Assignment still exposed readiness, failure, and guidance controls. No runtime state or authority capability was deleted.
 
 Latest integrated Sandbox evidence (2026-09-17): the real CLI-launched
 mandatory trajectory began with zero user Assignments, materialized one
@@ -967,9 +1039,54 @@ release-health candidate. It returns PASS for the canary claim, but the
 broader capability contracts still require their remaining adversarial and
 composed gates; no row is promoted.
 
+## 2026-09-18 Tasks simplification evidence
+
+The Schedule/Tasks UI now defaults to the current local day, keeps the Agent-owned
+publishing projection below current responsibilities, and removes the duplicate
+Goals section from Tasks. Growth remains the canonical goal/evidence surface.
+This is a presentation ablation only: Assignment records, schedule/calendar
+views, deep links, readiness and recovery details, operator intervention, and
+runtime authority are preserved. AUT-004, UX-003, and UX-005 remain in force;
+the live route was checked after the change with two current responsibilities
+visible and no unsolicited inspector.
+
+Readiness-contract ablation evidence (2026-09-18): the persisted preflight
+contract, checks, authority, timing, and verified-completion semantics remain;
+only the default disclosure changed. Ready Assignments now show the readiness
+result first and reveal contract detail on demand. Blocked or failed outcomes
+remain visible in the inspector for recovery.
+
 The exact candidate also passed the existing independent public safety checks:
 `tests/native-inflight-external-oracle.test.ts` (2/2, including cancellation
 during retry backoff with zero external requests) and
 `tests/e2e/independent-causal-trace.spec.ts` (1/1, typed-parent reconstruction).
 These strengthen SBX-004/SBX-008 evidence but do not substitute for the
 remaining full composed learning verifier or promote the learning rows.
+
+## 2026-09-21 bounded LEARN-002 public replay closure
+
+The public checkpoint-fork prerequisite now passes through the running isolated
+app: each deterministic retained/removed branch creates a new durable decision
+and verified Sandbox execution. Repairs make mock candidates honor publication
+history, scope strategy history/retrieval to the branch, preserve the retrieval
+objective at persistence, and retain actual model invocation/run usage links.
+No learning thresholds, scoring weights, or language prompts changed.
+
+The real OpenAI Luna Medium source worker produced five verified publications
+in six attempts. Independent reconstruction links all five to actual provider
+requests. Only one chose a reusable pattern; four explicitly chose novel
+exploration. The test stopped before metrics and real forks because no comparable
+pattern-attributed pair existed. This is not evidence that learning has no effect.
+
+`qa-learnings/learn002-public-closure-2026-09-21/packet.json` is **BLOCKED** for
+full transfer; its public-worker subgate is PASS. Deterministic and real trajectories
+are separately labelled, not composed into a real-learning claim. The mock branches
+publish identical text despite different strategy attribution. Full hidden checkpoint
+equivalence and observation-parent lineage remain unproven. LEARN-002/003/004 remain
+PARTIAL. Next: establish the missing naturally qualifying pair through public
+operation, then measure it and exercise the repaired fork path without forcing
+attribution. See the adjacent `review.md` and `independent.json` for raw-record joins.
+
+The packet binds execution candidate `1575b534c2781c1c978c908252272d37c61dae175effb3e2286ce8636c7c2cff`.
+This ledger-only documentation update follows that frozen packet and does not
+relabel either run with a newer candidate hash.

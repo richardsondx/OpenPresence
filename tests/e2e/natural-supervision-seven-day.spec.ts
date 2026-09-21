@@ -94,7 +94,7 @@ function compactDayEvidence(day: GoldenDay, before: JsonRecord, after: JsonRecor
 test.describe("Seven-day natural supervision trajectory", () => {
   test.setTimeout(180_000);
 
-  test("keeps high-level supervision natural while persisted Sandbox behavior does the judging", async ({ request }) => {
+  test("keeps high-level supervision natural while persisted Sandbox behavior does the judging", async ({ page, request }) => {
     test.skip(test.info().project.name === "mobile", "This is a runtime trajectory eval, not a viewport evaluation.");
     expect(golden.schema).toBe("openpresence.eval.natural-supervision-golden.v1");
     expect(golden.days).toHaveLength(7);
@@ -146,14 +146,29 @@ test.describe("Seven-day natural supervision trajectory", () => {
     expect(sessionId).toBeTruthy();
     expect(virtualStart).toBeTruthy();
 
+    await page.goto("/chat");
+    const composer = page.getByLabel("Message Natural Supervision Eval");
+    await expect(composer).toBeVisible();
+
     const evidence: JsonRecord[] = [];
     let previous = await readState(request);
     for (const day of golden.days) {
-      const clientRequestId = `natural-supervision-day-${day.day}`;
-      const chatResponse = await request.post("/api/state", {
-        data: { type: "sendPresenceNudge", presenceId, content: day.operatorUtterance, clientRequestId },
-      });
+      await composer.fill(day.operatorUtterance);
+      const sent = page.waitForResponse((response) => response.ok() && response.request().method() === "POST"
+        && response.url().endsWith("/api/state")
+        && response.request().postDataJSON()?.type === "sendPresenceNudge");
+      await page.getByRole("button", { name: "Send", exact: true }).click();
+      const chatResponse = await sent;
       expect(chatResponse.ok(), `Day ${day.day} supervision turn was not accepted.`).toBeTruthy();
+      const submitted = chatResponse.request().postDataJSON();
+      const clientRequestId = submitted.clientRequestId;
+      expect(submitted.content).toBe(day.operatorUtterance);
+      await expect.poll(async () => {
+        const messages = messagesFor(await readState(request), presenceId);
+        const operator = messages.find((message) => message.clientRequestId === clientRequestId);
+        return messages.filter((message) => message.role === "presence" && message.replyToMessageId === operator?.id).length;
+      }).toBe(1);
+      await expect(page.getByText(day.operatorUtterance, { exact: true })).toBeVisible();
       const afterChat = await readState(request);
       const chatMessages = messagesFor(afterChat, presenceId);
       const operatorMessage = chatMessages.find((message) => message.role === "operator" && message.clientRequestId === clientRequestId);
@@ -162,9 +177,22 @@ test.describe("Seven-day natural supervision trajectory", () => {
       expect(replies, `Day ${day.day} did not produce one private Agent reply.`).toHaveLength(1);
       expect(text(replies[0]?.content).trim().length).toBeGreaterThan(0);
       expect(text(replies[0]?.content)).not.toMatch(/worker|queue|execution envelope|api credits|prompt revision/i);
+      if (index === 0) {
+        expect(text(replies[0]?.content)).toMatch(/saved|ongoing responsibility|Agent-owned/i);
+        expect(text(replies[0]?.content)).not.toMatch(/not automatically a posting task|conversation first/i);
+      }
       if (day.day === 3) {
         expect(stateCollection(afterChat, "preferenceEvidence")).toHaveLength(1);
         expect(stateCollection(afterChat, "preferenceEvidence")[0]).toMatchObject({ source: "operator_explicit", scopeHint: "presence", reaction: "does_not_fit" });
+        // Replaying a committed browser request must not duplicate a correction,
+        // reply, or responsibility, including after a fresh page load.
+        expect((await request.post("/api/state", { data: submitted })).ok()).toBeTruthy();
+        await page.reload();
+        const replayed = await readState(request);
+        expect(messagesFor(replayed, presenceId).filter((message) => message.clientRequestId === clientRequestId)).toHaveLength(1);
+        expect(messagesFor(replayed, presenceId).filter((message) => message.replyToMessageId === operatorMessage?.id && message.role === "presence")).toHaveLength(1);
+        expect(stateCollection(replayed, "preferenceEvidence")).toHaveLength(1);
+        await expect(page.getByText(day.operatorUtterance, { exact: true })).toHaveCount(1);
       }
 
       const assignments = stateCollection(afterChat, "assignments");
@@ -227,6 +255,18 @@ test.describe("Seven-day natural supervision trajectory", () => {
     const finalAssignments = stateCollection(finalState, "assignments");
     const finalExecutions = stateCollection(finalState, "executions").filter((item) => item.sessionId === sessionId);
     const finalOutcomes = stateCollection(finalState, "outcomes").filter((item) => item.sessionId === sessionId);
+    const finalIntents = stateCollection(finalState, "socialIntents").filter((item) => item.sessionId === sessionId);
+    // Counts alone can pass with dangling or duplicate "success" records.
+    // Reconstruct the actual delivery chain independently from exported state.
+    expect(new Set(finalExecutions.map((item) => item.id)).size).toBe(finalExecutions.length);
+    expect(new Set(finalOutcomes.map((item) => item.executionId)).size).toBe(finalOutcomes.length);
+    for (const outcome of finalOutcomes) {
+      const execution = finalExecutions.find((item) => item.id === outcome.executionId);
+      expect(execution, `Outcome ${outcome.id} has no session execution`).toBeTruthy();
+      expect(execution).toMatchObject({ presenceId, environment: "sandbox", status: "succeeded", socialIntentId: outcome.socialIntentId });
+      expect(finalIntents.find((item) => item.id === execution?.socialIntentId), `Execution ${execution?.id} has no session intent`).toMatchObject({ presenceId, environment: "sandbox" });
+      expect(outcome).toMatchObject({ presenceId, environment: "sandbox", status: "succeeded" });
+    }
     const agentInitiatedMessages = messagesFor(finalState, presenceId).filter((message) => message.role === "presence" && message.agentInitiated);
     const elapsedMinutes = Math.round((Date.parse(text(finalSession?.virtualNow)) - Date.parse(virtualStart)) / 60_000);
     const trajectoryEvidence = {
@@ -257,9 +297,77 @@ test.describe("Seven-day natural supervision trajectory", () => {
     expect(finalExecutions.length).toBeGreaterThan(0);
     expect(finalOutcomes.filter((item) => item.status === "succeeded").length).toBeGreaterThan(0);
     expect(finalExecutions.every((item) => item.environment === "sandbox")).toBe(true);
-    expect(agentInitiatedMessages.length).toBeGreaterThan(0);
-    expect(agentInitiatedMessages.some((message) => message.agentInitiated?.kind === "strategy_change")).toBe(true);
+    // This fixture records delivery, not audience metrics or an actual strategy
+    // change. It proves quiet routine operation, not the positive update gate.
+    expect(stateCollection(finalState, "publicationMetricSnapshots")).toHaveLength(0);
+    expect(agentInitiatedMessages).toHaveLength(0);
     expect(agentInitiatedMessages.every((message) => !/action verified|delivery complete|published scheduled/i.test(text(message.content)))).toBe(true);
     expect(stateCollection(finalState, "preferenceEvidence")).toHaveLength(1);
+    await page.reload();
+    await expect(composer).toBeVisible();
+    await expect(page.getByText(golden.days[6]!.operatorUtterance, { exact: true })).toBeVisible();
+    await test.info().attach("supervision-trajectory", { body: JSON.stringify(trajectoryEvidence, null, 2), contentType: "application/json" });
+    await page.screenshot({ path: test.info().outputPath("supervision-chat.png"), fullPage: true });
+  });
+
+  test("independently handles paraphrased scope, explicit correction, semantic repeat, and replay without noise", async ({ page, request }) => {
+    test.skip(test.info().project.name === "mobile", "This is a runtime trajectory eval, not a viewport evaluation.");
+    const utterances = [
+      "I want you to own this account for builders, prioritizing useful evidence over posting often.",
+      "Please do not use screenshots unless we have inspected and grounded them.",
+      "Please do not use screenshots unless we have inspected and grounded them.",
+      "Keep the account useful and thoughtful this week.",
+    ];
+    expect((await request.post("/api/state", { data: { type: "reset" } })).ok()).toBeTruthy();
+    const createdResponse = await request.post("/api/state", {
+      data: { type: "createAgent", input: { name: "Independent Supervision Adversary", description: "Make evidence-backed agent decisions easier to understand.", audience: "AI builders", mode: "agent", handle: "@supervision_adversary", accent: "#D68754" } },
+    });
+    expect(createdResponse.ok()).toBeTruthy();
+    const created = await createdResponse.json() as JsonRecord;
+    const presenceId = text(created.presence?.id);
+    expect(presenceId).toBeTruthy();
+    const configured = await request.post("/api/state", { data: { type: "setPresence", patch: { connectionMode: "sandbox", execution: { post: "auto", reply: "auto", quote: "auto", repost: "auto", like: "auto", follow: "auto", message: "auto" }, selfDirectedAttention: { enabled: false, intensity: "balanced", mediaUnderstanding: "when_needed" } } } });
+    expect(configured.ok()).toBeTruthy();
+    const started = await request.post("/api/state", { data: { type: "startPlayground", presenceId, source: "fresh" } });
+    expect(started.ok()).toBeTruthy();
+    await page.goto("/chat");
+    const composer = page.getByLabel("Message Independent Supervision Adversary");
+    await expect(composer).toBeVisible();
+    const turnEvidence: JsonRecord[] = [];
+    for (const [index, content] of utterances.entries()) {
+      const before = await readState(request);
+      const beforeAssignments = stateCollection(before, "assignments");
+      const beforePreferences = stateCollection(before, "preferenceEvidence");
+      await composer.fill(content);
+      const sent = page.waitForResponse((response) => response.ok() && response.request().method() === "POST" && response.url().endsWith("/api/state") && response.request().postDataJSON()?.type === "sendPresenceNudge");
+      await page.getByRole("button", { name: "Send", exact: true }).click();
+      const response = await sent;
+      const submitted = response.request().postDataJSON();
+      await expect.poll(async () => messagesFor(await readState(request), presenceId).filter((message) => message.role === "operator" && message.clientRequestId === submitted.clientRequestId).length).toBe(1);
+      const after = await readState(request);
+      const operator = messagesFor(after, presenceId).find((message) => message.role === "operator" && message.clientRequestId === submitted.clientRequestId);
+      const replies = messagesFor(after, presenceId).filter((message) => message.role === "presence" && message.replyToMessageId === operator?.id);
+      expect(replies).toHaveLength(1);
+      expect(text(replies[0]?.content).trim().length).toBeGreaterThan(0);
+      expect(text(replies[0]?.content)).not.toMatch(/worker|queue|execution envelope|api credits|prompt revision/i);
+      if (index === 1 || index === 2) expect(text(replies[0]?.content)).toMatch(/screenshot|inspect|ground/i);
+      const assignments = stateCollection(after, "assignments");
+      const preferences = stateCollection(after, "preferenceEvidence");
+      if (index === 0) expect(assignments).toHaveLength(1);
+      if (index >= 2) expect(assignments).toHaveLength(1);
+      if (index === 1) expect(preferences).toHaveLength(1);
+      if (index === 2) expect(preferences).toHaveLength(1);
+      expect(stateCollection(after, "executions")).toHaveLength(0);
+      turnEvidence.push({ index, operatorId: operator?.id, replyId: replies[0]?.id, replyToMessageId: replies[0]?.replyToMessageId, reply: text(replies[0]?.content), assignmentDelta: assignments.length - beforeAssignments.length, preferenceDelta: preferences.length - beforePreferences.length });
+    }
+    const finalState = await readState(request);
+    expect(stateCollection(finalState, "assignments")).toHaveLength(1);
+    expect(stateCollection(finalState, "assignments")[0]).toMatchObject({ createdBy: "agent", status: "active", activation: { type: "continuous" } });
+    expect(stateCollection(finalState, "preferenceEvidence")).toHaveLength(1);
+    expect(stateCollection(finalState, "executions")).toHaveLength(0);
+    const initialAgentInitiated = messagesFor(finalState, presenceId).filter((message) => message.role === "presence" && message.agentInitiated);
+    expect(initialAgentInitiated).toHaveLength(0);
+    expect(stateCollection(finalState, "outcomes")).toHaveLength(0);
+    await test.info().attach("independent-supervision-adversary", { body: JSON.stringify({ schema: "openpresence.eval.natural-supervision-adversary.v1", utterances, turnEvidence, initialAgentInitiatedCount: 0, finalAgentInitiatedCount: initialAgentInitiated.length, assignmentCount: stateCollection(finalState, "assignments").length, preferenceCount: stateCollection(finalState, "preferenceEvidence").length, executionCount: stateCollection(finalState, "executions").length, outcomeCount: stateCollection(finalState, "outcomes").length }, null, 2), contentType: "application/json" });
   });
 });

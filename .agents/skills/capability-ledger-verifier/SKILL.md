@@ -41,6 +41,24 @@ safety.
 
 ## Update loop
 
+Start with affected rows and their linked evidence, not the ledger's full
+historical narrative. For each remaining gate record its observable assertion,
+cheapest valid trigger, independent oracle, candidate/run binding, and exact
+missing result. Reuse unchanged evidence only when its artifacts still exist
+and its code, fixture, configuration, and oracle dependencies remain valid.
+
+Do not mistake a larger test count for closure. Negative checks need a positive
+control showing that the forbidden effect would otherwise be possible; learning
+needs real measured lineage and a later decision difference. A fixture-written
+success label, mocked model choice, or synthetic metric row cannot establish
+the corresponding real-model or world-outcome claim.
+
+Promote a row when its own behavioral contract is satisfied. Historical batch
+ordering is not a dependency. If a gate demands incompatible environments (for
+example Native execution inside an isolated Sandbox), document the correction
+and verify each real boundary, plus any actual interaction, on the same candidate.
+Do not call separate runs one causal trajectory. Keep unresolved claims explicit.
+
 After each meaningful implementation or verification cycle:
 
 1. update affected statuses and evidence;

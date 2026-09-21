@@ -10,6 +10,15 @@ import { resolveProactiveUpdate } from "../lib/attention-coordinator";
 import { createAgent, normalizeState, recordRuntimeEvent } from "../lib/runtime";
 
 describe("importance-thresholded Agent-initiated communication", () => {
+  it("rejects a missing Presence instead of routing an update through the active identity", () => {
+    const source = createAgent({ name: "Genny", description: "Build useful things", audience: "builders", mode: "agent", handle: "genny", accent: "#000000" });
+    const before = structuredClone(source);
+    const result = recordAgentInitiatedUpdate(source, "deleted-presence", { id: "late-event", kind: "problem", title: "A responsibility is blocked", detail: "An old Presence needs attention." });
+    expect(result.recorded).toBe(false);
+    expect(result.state).toEqual(before);
+    expect(source).toEqual(before);
+  });
+
   it("writes one unsolicited update to the durable Presence conversation and dedupes retries", () => {
     const source = {
       agent: { id: "agent-1" },

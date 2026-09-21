@@ -4,7 +4,7 @@ test.beforeEach(async ({ page, request }) => {
   expect((await request.post("/api/state", { data: { type: "reset" } })).ok()).toBeTruthy();
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
-  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await page.getByRole("button", { name: "Meet my Agent", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Chat with Jenny" })).toBeAttached();
 });
 
@@ -12,13 +12,13 @@ function navigation(page: import("@playwright/test").Page) {
   return page.getByRole("navigation", { name: (page.viewportSize()?.width ?? 1440) < 768 ? "Mobile navigation" : "Desktop navigation" });
 }
 
-test("five destinations preserve Agent scope and Tasks remain a supervisory projection", async ({ page }) => {
+test("daily destinations preserve Agent scope and Tasks remain a supervisory projection", async ({ page }) => {
   const nav = navigation(page);
-  await expect(nav.getByRole("button")).toHaveText(["Chat", "Tasks", "People", "Growth", "Artifacts"]);
+  await expect(nav.getByRole("button")).toHaveText(["Chat", "🪄Delegate", "Tasks", "People", "Growth", "Artifacts"]);
   for (const [name, route] of [["Tasks", "/schedule"], ["People", "/people"], ["Growth", "/growth"], ["Artifacts", "/artifacts"], ["Chat", "/chat"]]) {
     await nav.getByRole("button", { name, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(route + "(?:\\?|$)"));
-    await expect(page.getByRole("button", { name: "About Jenny" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Open context sidebar" })).toBeVisible();
     await expect(nav.getByRole("button", { name, exact: true })).toHaveAttribute("aria-current", "page");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
@@ -36,7 +36,8 @@ test("five destinations preserve Agent scope and Tasks remain a supervisory proj
   await expect(page.getByRole("button", { name: "Back to Chat", exact: true })).toBeVisible();
   await expect(page.getByLabel("Edit Assignment instruction")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Save changes", exact: true })).toHaveCount(0);
-  await expect(page.getByText(/Jenny will add work here when Chat or her autonomous plan calls for it/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /No responsibilities on/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Show all days", exact: true })).toBeVisible();
 });
 
 test("chat remains usable with media picker, durable messages, and reload", async ({ page }) => {
@@ -49,9 +50,10 @@ test("chat remains usable with media picker, durable messages, and reload", asyn
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).not.toBeVisible();
   await expect(compose).toHaveValue("Keep this conversation private. What can you help me with?");
+  const priorPresenceMessages = await page.locator(".operator-chat-message.is-presence").count();
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page.locator(".operator-chat-message.is-operator")).toContainText("Keep this conversation private.");
-  await expect(page.locator(".operator-chat-message.is-presence").last()).toBeVisible({ timeout: 60000 });
+  await expect.poll(() => page.locator(".operator-chat-message.is-presence").count(), { timeout: 60000 }).toBeGreaterThan(priorPresenceMessages);
   await page.reload();
   await expect(page.locator(".operator-chat-message.is-operator")).toContainText("Keep this conversation private.");
   const composerBounds = await page.locator(".operator-chat-composer").boundingBox();
@@ -67,8 +69,13 @@ test("Agent menu retains setup and testing without competing daily tabs", async 
   if ((page.viewportSize()?.width ?? 1440) < 768) await page.getByRole("button", { name: "Switch agent or open settings" }).click();
   await page.getByRole("button", { name: "Agent menu", exact: true }).click();
   await expect(page.getByRole("menuitem").filter({ hasText: "Knowledge" })).toHaveCount(0);
+  const rehearsalSession = page.waitForResponse(response => response.url().includes("/api/state")
+    && response.request().method() === "POST"
+    && (response.request().postData()?.includes('"newPresenceChatSession"') ?? false)
+    && response.ok());
   await page.getByRole("menuitem").filter({ hasText: "Test agent" }).click();
   await expect(page).toHaveURL(/\/rehearsal/);
+  await rehearsalSession;
   await expect(navigation(page).getByRole("button", { name: "Chat", exact: true })).toBeVisible();
 });
 
@@ -87,8 +94,10 @@ test("existing media survives send and reload, and Agent details stay compact", 
   await page.getByRole("button", { name: "Attach media or files" }).click();
   await page.locator(".chat-media-grid button").first().click();
   await page.getByLabel("Message Jenny", { exact: true }).fill("Describe this image in this private conversation.");
+  const priorMediaPresenceMessages = await page.locator(".operator-chat-message.is-presence").count();
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  await expect(page.locator(".operator-chat-message.is-presence").last()).toBeVisible({ timeout: 60000 });
+  await expect(page.locator(".operator-chat-message.is-operator").filter({ hasText: "Describe this image in this private conversation." })).toBeVisible();
+  await expect.poll(() => page.locator(".operator-chat-message.is-presence").count(), { timeout: 60000 }).toBeGreaterThan(priorMediaPresenceMessages);
   await page.reload();
   const receipt = page.locator(".chat-media-receipts img").first();
   await expect(receipt).toBeVisible();
@@ -99,8 +108,10 @@ test("existing media survives send and reload, and Agent details stay compact", 
   expect(messages.some((message: { attachments?: { existingAssetId?: string }[] }) => message.attachments?.some(attachment => attachment.existingAssetId === snapshot.assets[0].id))).toBe(true);
   expect(snapshot.assets).toHaveLength(1);
   await page.getByRole("button", { name: "Open context sidebar" }).click();
-  const inspector = page.getByRole("complementary", { name: "Activity inspector" });
-  await expect(inspector.getByRole("navigation", { name: "Agent details" }).getByRole("button")).toHaveText(["Activity", "About"]);
+  const inspector = page.getByRole("complementary", { name: "Today inspector" });
+  const details = inspector.getByRole("navigation", { name: "Agent details" });
+  await expect(details.getByRole("button")).toHaveCount(3);
+  for (const name of ["Today", "Needs you", "About"]) await expect(details.getByRole("button", { name, exact: true })).toBeVisible();
   await inspector.getByRole("button", { name: "About", exact: true }).click();
   await expect(page.getByRole("complementary", { name: "About inspector" })).toBeVisible();
   await page.keyboard.press("Escape");

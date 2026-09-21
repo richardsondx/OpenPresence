@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -10,7 +10,7 @@ const vitestBin = join(process.cwd(), "node_modules/vitest/vitest.mjs");
 function runPhase(phase: "A" | "B", databasePath: string) {
   return execFileSync(process.execPath, [vitestBin, "run", childTest, "--reporter=dot"], {
     cwd: process.cwd(),
-    env: { ...process.env, CHAT_FEEDBACK_PHASE: phase, OPENPRESENCE_DB_PATH: databasePath, OPENPRESENCE_TEST_MODE: "1", OPENPRESENCE_ALLOW_DATABASE_INIT: "1" },
+    env: { ...process.env, CHAT_FEEDBACK_PHASE: phase, OPENPRESENCE_VITEST_DB_PATH: databasePath, OPENPRESENCE_DB_PATH: databasePath, OPENPRESENCE_TEST_MODE: "1", OPENPRESENCE_ALLOW_DATABASE_INIT: "1" },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -22,6 +22,7 @@ describe("Chat feedback process-boundary contract", () => {
     const databasePath = join(directory, "workspace.db");
     try {
       const phaseA = runPhase("A", databasePath);
+      expect(existsSync(databasePath), "Process A must persist to the declared isolated database.").toBe(true);
       const phaseB = runPhase("B", databasePath);
       expect(phaseA).toContain('"phase":"A"');
       expect(phaseB).toContain('"phase":"B"');

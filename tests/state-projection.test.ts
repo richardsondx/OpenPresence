@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { gunzipSync } from "node:zlib";
 import { GET as healthGet } from "../app/runtime/health/route";
 import { GET as stateGet } from "../app/api/state/route";
-import { readStateReadToken, readStateVersion } from "../lib/db";
+import { readStateReadToken, readStateVersion, writeState } from "../lib/db";
 import { createAgent, initialState } from "../lib/runtime";
 import { expireElapsedPursuitWindows } from "../lib/state-projection";
 import { browserWorkspaceProjection, growthWorkspaceProjection } from "../lib/state-browser-projection";
@@ -173,6 +173,7 @@ describe("state read projections", () => {
   });
 
   it("keeps non-selected Presence configuration out of the Activity read model", async () => {
+    writeState(createAgent({ name: "Projection Agent", description: "Exercise a populated Activity projection.", mode: "agent", handle: "@projection_agent", accent: "#777777" }));
     const response = await stateGet(new Request("http://localhost/api/state?projection=activity"));
     const body = await response.json();
 

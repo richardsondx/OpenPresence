@@ -96,7 +96,7 @@ test.beforeEach(async ({ request }) => {
 });
 test.afterEach(async ({ page }) => { await page.unrouteAll({ behavior: "ignoreErrors" }); });
 
-test("blocked X task explains the recovery, preserves composer context, and checks through the chat outbox", async ({ page, request }) => {
+test("blocked X billing stays in delivery evidence and does not interrupt Chat", async ({ page, request }) => {
   const identity = await createAgent(page, request);
   const fixture: HealthFixture = { presenceId: identity.presenceId, incidentId: "incident-x-credits-v1", mode: "blocked" };
   const instruction = "Publish the launch note when the public X route is available.";
@@ -107,30 +107,8 @@ test("blocked X task explains the recovery, preserves composer context, and chec
   await installBlockedTaskFixture(page, instruction);
   await installHealthFixture(page, fixture);
 
-  const sendBodies: Array<Record<string, unknown>> = [];
-  page.on("request", (requestEvent) => {
-    if (requestEvent.method() !== "POST" || new URL(requestEvent.url()).pathname !== "/api/state") return;
-    const body = requestEvent.postDataJSON() as Record<string, unknown> | null;
-    if (body?.type === "sendPresenceNudge") sendBodies.push(body);
-  });
-
   await page.goto(`/chat?agentId=${identity.agentId}&presenceId=${identity.presenceId}`);
-  const history = page.locator(".operator-chat-history");
-  const notice = history.getByTestId("operator-chat-needs-you");
-  await expect(notice).toBeVisible();
-  await expect(notice.getByText("X access needs a recheck", { exact: true })).toBeVisible();
-  await page.screenshot({ path: "qa-learnings/chat-attention-2026-09-13/desktop.png" });
-  await expect(notice.getByText("Task details", { exact: true })).toBeVisible();
-  await notice.getByText("Task details", { exact: true }).click();
-  await expect(notice).toContainText("Publish the launch note");
-  await expect(notice).toContainText("X API credits are exhausted.");
-  await expect(notice.getByRole("link", { name: "X Developer Console", exact: true })).toHaveAttribute("href", "https://console.x.com/");
-  await expect(notice.getByRole("link", { name: /Settings/i })).toHaveCount(0);
-  // The task is authoritative if the advisory health projection lags behind it.
-  fixture.mode = "healthy";
-  await page.reload();
-  await expect(notice).toBeVisible();
-  await expect(notice.getByText("X access needs a recheck", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("operator-chat-needs-you")).toHaveCount(0);
 
   const composer = page.getByLabel("Message Genny", { exact: true });
   await page.getByRole("button", { name: "Attach media or files", exact: true }).click();
@@ -138,20 +116,11 @@ test("blocked X task explains the recovery, preserves composer context, and chec
   await page.locator('input[aria-label="Upload an image"]').setInputFiles({ name: "recovery-context.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64") });
   await expect(page.getByText("recovery-context.png", { exact: true })).toBeVisible();
   await composer.fill("Keep this draft while I check credits.");
-
-  await notice.getByRole("button", { name: "Check again", exact: true }).click();
-  await expect.poll(() => sendBodies.length).toBeGreaterThan(0);
-  expect(sendBodies[0]).toMatchObject({ type: "sendPresenceNudge", clientRequestId: expect.any(String) });
-  expect(String(sendBodies[0]?.content ?? "")).toMatch(/credit|X/i);
-  await expect.poll(async () => {
-    const saved = await request.get(`/api/state?projection=chat&presenceId=${identity.presenceId}`).then((response) => response.json());
-    return saved.operatorConversations?.flatMap((conversation: { messages: Array<{ clientRequestId?: string }> }) => conversation.messages).some((message: { clientRequestId?: string }) => message.clientRequestId === sendBodies[0]?.clientRequestId);
-  }).toBe(true);
   await expect(composer).toHaveValue("Keep this draft while I check credits.");
   await expect(page.getByText("recovery-context.png", { exact: true })).toBeVisible();
 });
 
-test("Not now survives diagnostic churn, new work resurfaces, and resolved health removes the card", async ({ page, request }) => {
+test("X billing does not resurface a paused-work reminder during diagnostic churn", async ({ page, request }) => {
   const identity = await createAgent(page, request);
   const fixture: HealthFixture = { presenceId: identity.presenceId, incidentId: "incident-x-credits-v1", mode: "blocked" };
   const instruction = "Publish the launch note when the public X route is available.";
@@ -164,13 +133,9 @@ test("Not now survives diagnostic churn, new work resurfaces, and resolved healt
   await page.goto(`/chat?agentId=${identity.agentId}&presenceId=${identity.presenceId}`);
 
   const notice = page.getByTestId("operator-chat-needs-you");
-  await expect(notice).toBeVisible();
-  await notice.getByRole("button", { name: "Not now", exact: true }).click();
   await expect(notice).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Show paused work", exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByTestId("operator-chat-needs-you")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Show paused work", exact: true })).toBeVisible();
 
   fixture.incidentId = "incident-x-credits-v2";
   await page.reload();
@@ -194,7 +159,7 @@ test("pure X-credit health notices stay out of private Chat without a blocked ta
   await expect(page.getByTestId("operator-chat-needs-you")).toHaveCount(0);
 });
 
-test("blocked-work card fits a narrow Chat viewport without horizontal overflow", async ({ page, request }) => {
+test("billing evidence does not add a narrow Chat interruption", async ({ page, request }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const identity = await createAgent(page, request);
   const fixture: HealthFixture = { presenceId: identity.presenceId, incidentId: "incident-x-credits-mobile", mode: "blocked" };
@@ -207,10 +172,7 @@ test("blocked-work card fits a narrow Chat viewport without horizontal overflow"
   await installHealthFixture(page, fixture);
   await page.goto(`/chat?agentId=${identity.agentId}&presenceId=${identity.presenceId}`);
   const notice = page.getByTestId("operator-chat-needs-you");
-  await expect(notice).toBeVisible();
+  await expect(notice).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  const bounds = await notice.boundingBox();
-  expect(bounds).not.toBeNull();
-  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
   await page.screenshot({ path: "qa-learnings/chat-attention-2026-09-13/mobile.png" });
 });

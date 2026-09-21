@@ -22,8 +22,8 @@ import {
   nativeRetryIsDue,
 } from "./runtime";
 import { deleteXPost, followXUser, likeXPost, publishSealedXPost, readNativeXCredentials, repostXPost } from "./x";
-import { isTestRuntime } from "./test-runtime";
 import { xNativeWriteUnavailable } from "./x-credits";
+import { isTestRuntime } from "./test-runtime";
 import { PublicationSecurityError, sealExecutionForDelivery } from "./publication-security";
 import { detectDuplicateVerifiedExecutionOutcomes } from "./public-action-safety";
 import { hasObservedOwnReplyForTarget } from "./duplicate-public-outcome";
@@ -72,6 +72,7 @@ function nativeAuthorityChanged(source: OpenPresenceState, execution: OpenPresen
   const currentMode = currentPresence?.execution[execution.affordance] ?? currentPresence?.execution[affordance];
   const durableMode = durablePresence?.execution[execution.affordance] ?? durablePresence?.execution[affordance];
   if (currentPresence?.status === "paused" || durablePresence?.status === "paused") return "The Presence was paused while the native connector was in flight.";
+  if (!currentPresence || !durablePresence) return "The Presence authority was unavailable while the native connector was in flight.";
   if (currentMode === "off" || durableMode === "off") return "The Presence execution permission was revoked while the native connector was in flight.";
   return undefined;
 }
@@ -97,19 +98,59 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
     // boundary so a restarted worker cannot replay an action already verified
     // by an earlier invocation of the same attention episode.
     const durable = readStateSnapshotForContext({ presenceId: execution.presenceId });
-    const durablePresence = durable.presences.find((item) => item.id === execution.presenceId) ?? durable.presence;
-    const currentPresence = next.presences.find((item) => item.id === execution.presenceId) ?? next.presence;
-    const currentMode = currentPresence?.execution[execution.affordance];
-    if (durablePresence?.status === "paused" || currentPresence?.status === "paused" || currentMode === "off") {
+    const durableExecution = durable.executions.find((item) => item.id === execution.id);
+    const sameBaseWorkspaceRevision = durableExecution
+      ? source.workspaceRevision !== undefined
+        && durable.workspaceRevision !== undefined
+        && source.workspaceRevision === durable.workspaceRevision
+      : false;
+    const isFreshApproval = Boolean(durableExecution && sameBaseWorkspaceRevision && execution.status === "approved" && durableExecution.status === "awaiting-review");
+    const isFreshRetry = Boolean(durableExecution && sameBaseWorkspaceRevision && execution.status === "queued" && durableExecution.status === "failed");
+    const isFreshLanguageOverride = Boolean(durableExecution && sameBaseWorkspaceRevision && execution.status === "queued" && durableExecution.status === "blocked" && durableExecution.failure?.code === "LANGUAGE_POLICY_VIOLATION");
+    const durableExecutionAuthorized = !durableExecution || isFreshApproval || isFreshRetry || isFreshLanguageOverride || (
+      durableExecution.environment === "live"
+      && durableExecution.connector === "native"
+      && nativeRetryIsDue(durableExecution)
+      && ((durableExecution.status === "queued" && durableExecution.mode === "auto") || durableExecution.status === "approved")
+    );
+    const durablePresence = durable.presences.find((item) => item.id === execution.presenceId) ?? (durable.presence?.id === execution.presenceId ? durable.presence : undefined);
+    const currentPresence = next.presences.find((item) => item.id === execution.presenceId) ?? (next.presence?.id === execution.presenceId ? next.presence : undefined);
+    const affordance = execution.affordance.replace(/^x\./, "");
+    const currentMode = currentPresence?.execution[execution.affordance] ?? currentPresence?.execution[affordance];
+    const durableMode = durablePresence?.execution[execution.affordance] ?? durablePresence?.execution[affordance];
+    const authorityUnavailable = !durablePresence || !currentPresence;
+    if (!durableExecutionAuthorized) {
+      const staleIndex = next.executions.findIndex((item) => item.id === execution.id);
+      if (staleIndex >= 0 && durableExecution) {
+        // Replace the record so obsolete optional failure/retry fields cannot
+        // survive a merge into an authoritative terminal receipt or review hold.
+        next.executions[staleIndex] = structuredClone(durableExecution);
+      }
+      continue;
+    }
+    if (authorityUnavailable || durablePresence?.status === "paused" || currentPresence?.status === "paused" || currentMode === "off" || durableMode === "off") {
       const paused = next.executions.find((item) => item.id === execution.id);
       if (paused) {
         paused.status = "cancelled";
-        const revoked = currentMode === "off" && currentPresence?.status !== "paused";
-        paused.failure = { code: revoked ? "EXECUTION_REVOKED" : "PRESENCE_PAUSED", message: revoked ? "The Presence execution permission was revoked before delivery. No external action was attempted." : "The Presence was paused before delivery. No external action was attempted.", retryable: false };
-        paused.reviewReason = revoked ? "The Presence execution permission was revoked before delivery." : "The Presence was paused before delivery.";
+        const revoked = (currentMode === "off" || durableMode === "off") && currentPresence?.status !== "paused";
+        const unavailable = authorityUnavailable;
+        paused.failure = { code: unavailable ? "PRESENCE_AUTHORITY_UNAVAILABLE" : revoked ? "EXECUTION_REVOKED" : "PRESENCE_PAUSED", message: unavailable ? "The Presence authority was unavailable before delivery. No external action was attempted." : revoked ? "The Presence execution permission was revoked before delivery. No external action was attempted." : "The Presence was paused before delivery. No external action was attempted.", retryable: false };
+        paused.reviewReason = unavailable ? "The Presence authority was unavailable before delivery." : revoked ? "The Presence execution permission was revoked before delivery." : "The Presence was paused before delivery.";
         paused.updatedAt = new Date().toISOString();
         const action = next.actions.find((item) => item.executionId === paused.id);
-        if (action) { action.status = "skipped"; action.reason = "The Presence was paused before delivery; no external action was attempted."; }
+        if (action) { action.status = "skipped"; action.reason = paused.reviewReason; }
+      }
+      continue;
+    }
+    if (execution.status === "queued" && execution.mode === "auto" && (currentMode === "review" || durableMode === "review")) {
+      const review = next.executions.find((item) => item.id === execution.id);
+      if (review) {
+        review.status = "awaiting-review";
+        review.mode = "review";
+        review.reviewReason = "The Presence execution envelope changed to review before delivery.";
+        review.updatedAt = new Date().toISOString();
+        const action = next.actions.find((item) => item.executionId === review.id);
+        if (action) action.status = "review";
       }
       continue;
     }
@@ -148,7 +189,28 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
       continue;
     }
     const expectedHandle = next.presences.find((item) => item.id === execution.presenceId)?.handle ?? next.presence?.handle;
-    const connection = next.nativeConnections.find((item) => item.presenceId === execution.presenceId && item.access === "read-write" && nativeConnectionCanWrite(item, expectedHandle));
+    const sourceConnection = next.nativeConnections.find((item) => item.presenceId === execution.presenceId && item.access === "read-write" && nativeConnectionCanWrite(item, expectedHandle));
+    // The worker snapshot may outlive a disconnect, account switch, or
+    // connector revocation. Never let a source-only connection cross the
+    // external write boundary; retain the existing needs-attention/backoff
+    // semantics by applying the same writability predicate to the durable
+    // connection record.
+    const durableConnection = sourceConnection
+      ? durable.nativeConnections.find((item) => item.id === sourceConnection.id && item.presenceId === execution.presenceId && item.account?.id === sourceConnection.account?.id && item.access === "read-write" && nativeConnectionCanWrite(item, durablePresence.handle))
+      : undefined;
+    if (sourceConnection && !durableConnection) {
+      const stale = next.executions.find((item) => item.id === execution.id);
+      if (stale) {
+        stale.status = "cancelled";
+        stale.failure = { code: "NATIVE_CONNECTION_AUTHORITY_UNAVAILABLE", message: "The native connector authority changed before delivery. No external action was attempted.", retryable: false };
+        stale.reviewReason = "The durable native connector is disconnected, revoked, or bound to another account.";
+        stale.updatedAt = new Date().toISOString();
+        const action = next.actions.find((item) => item.executionId === stale.id);
+        if (action) { action.status = "skipped"; action.reason = "The durable native connector authority changed before delivery; no external action was attempted."; }
+      }
+      continue;
+    }
+    const connection = sourceConnection && durableConnection ? sourceConnection : undefined;
     const unavailableNativeConnection = next.nativeConnections.find((item) => item.presenceId === execution.presenceId && item.channelId === "x" && xNativeWriteUnavailable(item));
     if (!connection && unavailableNativeConnection && browserBridgeFor(next, execution.presenceId, execution.affordance)) {
       next = rerouteExecutionToBrowser(next, execution.id, "The X API write route is unavailable; the authorized Chrome Bridge is the continuity route for this public action.");
@@ -218,7 +280,7 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
         } else if (isPersonBlockingError(message)) {
           next = failNativeExecution(next, execution.id, message);
           next = recordPersonBlockedFromExecution(next, execution.id, message, "native_delivery");
-        } else if (isMentionRestrictedError(message)) {
+        } else if (isMentionRestrictedError(message) || xNativeWriteUnavailable({ deliveryError: message })) {
           console.log("Native channel action rejected; learning browser fallback", execution.id);
           next = rerouteExecutionToBrowser(next, execution.id, message);
           next = markNativeConnectionNeedsAttention(next, execution.presenceId, message);
@@ -267,7 +329,7 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
         } else if (isPersonBlockingError(message)) {
           next = failNativeExecution(next, execution.id, message);
           next = recordPersonBlockedFromExecution(next, execution.id, message, "native_delivery");
-        } else if (isMentionRestrictedError(message)) {
+        } else if (isMentionRestrictedError(message) || xNativeWriteUnavailable({ deliveryError: message })) {
           console.log("Native channel action rejected; learning browser fallback", execution.id);
           next = rerouteExecutionToBrowser(next, execution.id, message);
           next = markNativeConnectionNeedsAttention(next, execution.presenceId, message);

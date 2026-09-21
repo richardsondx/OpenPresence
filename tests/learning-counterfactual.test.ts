@@ -92,6 +92,8 @@ describe("pure learning counterfactual", () => {
     }));
     state.socialDecisions = decisions;
     state.outcomes = decisions.map((decision, index) => ({ id: `outcome-${index + 1}`, socialIntentId: decision.socialIntentId!, executionId: `execution-${index + 1}`, presenceId: presence.id, status: "succeeded" as const, observedAt: decision.createdAt, metrics: {}, evidence: [], environment: "sandbox" as const, sessionId: session.id }));
+    state.publicationMetricSnapshots = decisions.map((decision, index) => ({ id: `metric-${index + 1}`, presenceId: presence.id, mirrorObjectId: `mirror-${index + 1}`, observedAt: decision.createdAt, publicationAgeSeconds: 3600, impressions: 100 + index, likes: 10, source: "sandbox" as const, observationStatus: "observed" as const }));
+    state.mirrorObjects.push(...state.publicationMetricSnapshots.map((snapshot) => ({ id: snapshot.mirrorObjectId, presenceId: presence.id, sessionId: session.id, environment: "sandbox", visibility: "public", objectType: "post", observedAt: snapshot.observedAt, occurredAt: snapshot.observedAt, content: { text: "Measured fixture" } } as never)));
     state.growthEvidenceRecords = state.outcomes.map((outcome, index) => ({ id: `growth-evidence-${index + 1}`, agentId: state.agent!.id, presenceId: presence.id, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Verified simulated performance outcome.", sourceRefs: [{ kind: "publication_metric" as const, id: `metric-${index + 1}`, sourcePresenceId: presence.id, observedAt: outcome.observedAt }], verified: true, causalDecisionIds: [decisions[index]!.id], causalMirrorObjectIds: [], sandboxSessionId: session.id, mediaProfile: { mode: "media" as const, semanticKind: "chart" as const, visualRole: "evidence" as const, decorative: false, fit: "relevant" as const, relationship: "proof" as const }, createdAt: outcome.observedAt }));
 
     materializeSandboxOutcomeLearning(state, presence.id, session.id, "2026-09-17T12:00:00.000Z");
@@ -104,6 +106,87 @@ describe("pure learning counterfactual", () => {
     expect(later.retrievalRun.relevantGrowthHypothesisIds).toContain(hypothesis?.id);
     expect(later.prompt).toContain("media evidence: media/relevant/proof/chart");
     expect(learningAdjustmentForPattern(state, presence, strategyId, session.id)).toBeGreaterThan(0);
+  });
+
+  it("changes the later candidate allocation only when synthetic measured learning is retained", () => {
+    const state = startPlaygroundSession(createAgent({ name: "Allocation ablation", description: "Compare later strategy allocation with measured learning present and removed.", audience: "AI builders", mode: "agent", handle: "@allocation_ablation", accent: "#7c3aed" }));
+    const presence = state.presence!;
+    const session = state.playgroundSessions[0]!;
+    const learnedPattern = "social.x.v1.selective-amplification";
+    const baselinePattern = "social.x.v1.useful-disagreement";
+    const evidence = ["allocation-evidence-a", "allocation-evidence-b"].map((id, index) => ({
+      id,
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      kind: "WORLD_OUTCOME" as const,
+      claimScope: "presence" as const,
+      statement: "Synthetic verified outcome fixture for the selected action family.",
+      sourceRefs: [{ kind: "publication_metric" as const, id: `allocation-metric-${index}` }],
+      verified: true,
+      causalDecisionIds: [`allocation-decision-${index}`],
+      sandboxSessionId: session.id,
+      createdAt: `2026-09-1${index + 1}T12:00:00.000Z`,
+    }));
+    state.growthEvidenceRecords = evidence;
+    state.socialDecisions = evidence.map((record, index) => ({
+      id: record.causalDecisionIds![0]!,
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      environment: "sandbox" as const,
+      sessionId: session.id,
+      sandboxSessionId: session.id,
+      focalMirrorObjectIds: [],
+      decision: "repost" as const,
+      summary: "Synthetic measured action allocation fixture.",
+      influences: [],
+      socialIntentId: `allocation-intent-${index}`,
+      socialStrategy: {
+        retrievalRunId: `allocation-run-${index}`,
+        consideredPatternIds: [learnedPattern, baselinePattern],
+        selectedByAct: [{ act: "repost", patternId: learnedPattern }],
+      },
+      createdAt: record.createdAt,
+    }));
+    state.outcomes = evidence.map((record, index) => ({
+      id: `allocation-outcome-${index}`,
+      socialIntentId: `allocation-intent-${index}`,
+      executionId: `allocation-execution-${index}`,
+      presenceId: presence.id,
+      status: "succeeded" as const,
+      observedAt: record.createdAt,
+      metrics: {},
+      evidence: [],
+      environment: "sandbox" as const,
+      sessionId: session.id,
+    }));
+    state.publicationMetricSnapshots = evidence.map((record, index) => ({ id: `allocation-metric-${index}`, presenceId: presence.id, mirrorObjectId: `allocation-mirror-${index}`, observedAt: record.createdAt, publicationAgeSeconds: 3600, impressions: 100 + index, likes: 10, source: "sandbox" as const, observationStatus: "observed" as const }));
+    state.mirrorObjects.push(...state.publicationMetricSnapshots.map((snapshot) => ({ id: snapshot.mirrorObjectId, presenceId: presence.id, sessionId: session.id, environment: "sandbox", visibility: "public", objectType: "post", observedAt: snapshot.observedAt, occurredAt: snapshot.observedAt, content: { text: "Measured fixture" } } as never)));
+    materializeSandboxOutcomeLearning(state, presence.id, session.id, "2026-09-17T12:00:00.000Z");
+
+    const retained = compileSocialStrategyContext(state, presence, { invocation: "allocation ablation", objective: "choose a useful amplification", availableActions: ["repost"], sandboxSessionId: session.id });
+    const removed = structuredClone(state);
+    removed.growthHypotheses = removed.growthHypotheses?.filter((hypothesis) => hypothesis.sandboxSessionId !== session.id);
+    const removedContext = compileSocialStrategyContext(removed, removed.presence!, { invocation: "allocation ablation", objective: "choose a useful amplification", availableActions: ["repost"], sandboxSessionId: session.id });
+
+    expect(retained.retrievalRun.relevantGrowthHypothesisIds).toContain(`sandbox-learning:${session.id}:${learnedPattern}`);
+    expect(retained.retrievalRun.consideredPatterns[0]?.id).toBe(learnedPattern);
+    expect(removedContext.retrievalRun.relevantGrowthHypothesisIds).not.toContain(`sandbox-learning:${session.id}:${learnedPattern}`);
+    expect(learningAdjustmentForPattern(state, presence, learnedPattern, session.id)).toBeGreaterThan(0);
+    expect(learningAdjustmentForPattern(removed, removed.presence!, learnedPattern, session.id)).toBe(0);
+  });
+
+  it.each(["missing", "unavailable", "zero", "one-measured-decision", "wrong-mirror-session", "wrong-presence-snapshot"])("rejects %s metric support despite two successful decisions", (mode) => {
+    const state = startPlaygroundSession(createAgent({ name: "Evidence boundary", description: "Reject unsupported metric lineage.", audience: "AI builders", mode: "agent", handle: "@evidence_boundary", accent: "#7c3aed" }));
+    const presence = state.presence!;
+    const session = state.playgroundSessions[0]!;
+    const timestamp = "2026-09-11T12:00:00.000Z";
+    state.socialDecisions = [0, 1].map((index) => ({ id: `decision-${index}`, agentId: state.agent!.id, presenceId: presence.id, environment: "sandbox" as const, sessionId: session.id, sandboxSessionId: session.id, focalMirrorObjectIds: [], decision: "reply" as const, summary: "A distinct decision", influences: [], socialIntentId: `intent-${index}`, socialStrategy: { retrievalRunId: `run-${index}`, consideredPatternIds: ["social.x.v1.useful-disagreement"], selectedByAct: [{ act: "reply", patternId: "social.x.v1.useful-disagreement" }] }, createdAt: timestamp }));
+    state.outcomes = [0, 1].map((index) => ({ id: `outcome-${index}`, socialIntentId: `intent-${index}`, executionId: `execution-${index}`, presenceId: presence.id, status: "succeeded" as const, observedAt: timestamp, metrics: {}, evidence: [], environment: "sandbox" as const, sessionId: session.id }));
+    state.growthEvidenceRecords = [0, 1].map((index) => ({ id: `evidence-${index}`, agentId: state.agent!.id, presenceId: presence.id, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Synthetic evidence boundary fixture.", sourceRefs: [{ kind: "publication_metric" as const, id: `metric-${index}`, sourcePresenceId: presence.id }], verified: true, causalDecisionIds: [`decision-${mode === "one-measured-decision" ? 0 : index}`], sandboxSessionId: session.id, createdAt: timestamp }));
+    state.publicationMetricSnapshots = mode === "missing" ? [] : [0, 1].map((index) => ({ id: `metric-${index}`, presenceId: mode === "wrong-presence-snapshot" && index === 1 ? "other-presence" : presence.id, mirrorObjectId: `mirror-${index}`, observedAt: timestamp, publicationAgeSeconds: 3600, impressions: mode === "zero" ? 0 : 100, source: "sandbox" as const, observationStatus: mode === "unavailable" ? "unavailable" as const : "observed" as const }));
+    state.mirrorObjects.push(...state.publicationMetricSnapshots.map((snapshot, index) => ({ id: snapshot.mirrorObjectId, presenceId: presence.id, sessionId: mode === "wrong-mirror-session" && index === 1 ? "other-session" : session.id, environment: "sandbox", visibility: "public", objectType: "post", observedAt: snapshot.observedAt, occurredAt: snapshot.observedAt, content: { text: "Measured fixture" } } as never)));
+    materializeSandboxOutcomeLearning(state, presence.id, session.id, timestamp);
+    expect(state.growthHypotheses?.filter((item) => item.sandboxSessionId === session.id)).toHaveLength(0);
   });
 
   it("preserves the selected non-post action family in Sandbox learning targets", () => {
@@ -131,6 +214,8 @@ describe("pure learning counterfactual", () => {
     })));
     state.socialDecisions = decisions;
     state.outcomes = decisions.map((decision, index) => ({ id: `action-family-outcome-${index}`, socialIntentId: decision.socialIntentId!, executionId: `action-family-execution-${index}`, presenceId: presence.id, status: "succeeded" as const, observedAt: decision.createdAt, metrics: {}, evidence: [], environment: "sandbox" as const, sessionId: session.id }));
+    state.publicationMetricSnapshots = decisions.map((decision, index) => ({ id: `action-family-metric-${index}`, presenceId: presence.id, mirrorObjectId: `action-family-mirror-${index}`, observedAt: decision.createdAt, publicationAgeSeconds: 3600, impressions: 100 + index, likes: 10, source: "sandbox" as const, observationStatus: "observed" as const }));
+    state.mirrorObjects.push(...state.publicationMetricSnapshots.map((snapshot) => ({ id: snapshot.mirrorObjectId, presenceId: presence.id, sessionId: session.id, environment: "sandbox", visibility: "public", objectType: "post", observedAt: snapshot.observedAt, occurredAt: snapshot.observedAt, content: { text: "Measured fixture" } } as never)));
     state.growthEvidenceRecords = decisions.map((decision, index) => ({ id: `action-family-evidence-${index}`, agentId: state.agent!.id, presenceId: presence.id, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Measured Sandbox action-family outcome.", sourceRefs: [{ kind: "publication_metric" as const, id: `action-family-metric-${index}`, sourcePresenceId: presence.id, observedAt: decision.createdAt }], verified: true, causalDecisionIds: [decision.id], causalMirrorObjectIds: [], sandboxSessionId: session.id, createdAt: decision.createdAt }));
 
     materializeSandboxOutcomeLearning(state, presence.id, session.id, "2026-09-17T12:00:00.000Z");
@@ -160,11 +245,18 @@ describe("pure learning counterfactual", () => {
       createdAt: `2026-09-1${sampleIndex + 1}T12:00:00.000Z`,
     })));
     state.socialDecisions = decisions;
+    state.socialDecisions.forEach((decision, index) => { decision.socialIntentId = `intent-${index}`; });
+    state.outcomes = decisions.map((decision, index) => ({ id: `outcome-${index}`, socialIntentId: decision.socialIntentId!, executionId: `execution-${index}`, presenceId: presence.id, status: "succeeded" as const, observedAt: decision.createdAt, metrics: {}, evidence: [], environment: "sandbox" as const, sessionId: session.id }));
     state.publicationMetricSnapshots = decisions.map((decision, index) => ({ id: `metric-${index}`, presenceId: presence.id, mirrorObjectId: `mirror-${index}`, observedAt: decision.createdAt, publicationAgeSeconds: 3600, impressions: index < 2 ? 100 : 800, likes: index < 2 ? 2 : 20, source: "sandbox" as const, observationStatus: "observed" as const }));
+    state.mirrorObjects.push(...state.publicationMetricSnapshots.map((snapshot) => ({ id: snapshot.mirrorObjectId, presenceId: presence.id, sessionId: session.id, environment: "sandbox", visibility: "public", objectType: "post", observedAt: snapshot.observedAt, occurredAt: snapshot.observedAt, content: { text: "Measured fixture" } } as never)));
     state.growthEvidenceRecords = state.publicationMetricSnapshots.map((snapshot, index) => ({ id: `evidence-${index}`, agentId: state.agent!.id, presenceId: presence.id, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Measured Sandbox performance.", sourceRefs: [{ kind: "publication_metric" as const, id: snapshot.id, sourcePresenceId: presence.id, observedAt: snapshot.observedAt }], verified: true, causalDecisionIds: [decisions[index]!.id], causalMirrorObjectIds: [], sandboxSessionId: session.id, createdAt: snapshot.observedAt }));
     const hypothesisId = `sandbox-learning:${session.id}:${patterns[0]}`;
     state.growthHypotheses = [{ id: hypothesisId, agentId: state.agent!.id, originatingPresenceId: presence.id, scope: "presence", statement: "Proof-led originals may work for this audience.", status: "supported", confidence: "high", patternIds: [patterns[0]!], supportingEvidenceIds: ["evidence-0", "evidence-1"], contradictingEvidenceIds: [], derivedFrom: [], decisionTargets: [{ strategyId: patterns[0], effect: 1.5 }], reviewHistory: [], createdAt: "2026-09-11T12:00:00.000Z", updatedAt: "2026-09-11T12:00:00.000Z", sandboxSessionId: session.id }];
 
+    const mixedAge = structuredClone(state);
+    mixedAge.publicationMetricSnapshots.forEach((snapshot, index) => { if (index >= 2) snapshot.publicationAgeSeconds = 7200; });
+    reconcileSandboxPerformanceLearning(mixedAge, presence.id, session.id, "2026-09-17T12:00:00.000Z");
+    expect(mixedAge.growthHypotheses![0]?.status).toBe("supported");
     reconcileSandboxPerformanceLearning(state, presence.id, session.id, "2026-09-17T12:00:00.000Z");
     const hypothesis = state.growthHypotheses[0]!;
     expect(hypothesis.status).toBe("weakened");
@@ -172,6 +264,14 @@ describe("pure learning counterfactual", () => {
     expect(hypothesis.contradictingEvidenceIds).toEqual(["evidence-0", "evidence-1"]);
     expect(learningAdjustmentForPattern(state, presence, patterns[0]!, session.id)).toBe(0);
     expect(learningStateForPresence(state, presence, session.id).hypotheses).toHaveLength(0);
+
+    const zeroTie = structuredClone(state);
+    zeroTie.growthHypotheses![0]!.status = "supported";
+    zeroTie.growthHypotheses![0]!.confidence = "high";
+    zeroTie.growthHypotheses![0]!.contradictingEvidenceIds = [];
+    zeroTie.publicationMetricSnapshots.forEach((snapshot) => { snapshot.impressions = 0; snapshot.likes = 0; });
+    reconcileSandboxPerformanceLearning(zeroTie, presence.id, session.id, "2026-09-17T12:00:00.000Z");
+    expect(zeroTie.growthHypotheses![0]?.status).toBe("supported");
   });
 
   it("retires a Sandbox hypothesis after repeated measured contradictions", () => {
@@ -180,17 +280,21 @@ describe("pure learning counterfactual", () => {
     const session = state.playgroundSessions[0]!;
     const decisions = [0, 1, 2, 3].map((sampleIndex) => ({
       id: `retire-own-${sampleIndex}`, agentId: state.agent!.id, presenceId: presence.id, environment: "sandbox" as const, sessionId: session.id,
+      socialIntentId: `retire-intent-own-${sampleIndex}`,
       focalMirrorObjectIds: [], decision: "original_post" as const, summary: "Measured strategy decision.", influences: [],
       socialStrategy: { retrievalRunId: `retire-own-run-${sampleIndex}`, consideredPatternIds: ["social.x.v1.proof-led-original"], selectedByAct: [{ act: "original_post", patternId: "social.x.v1.proof-led-original" }] },
       createdAt: `2026-09-${10 + sampleIndex}T12:00:00.000Z`,
     })).concat([0, 1].map((sampleIndex) => ({
       id: `retire-alt-${sampleIndex}`, agentId: state.agent!.id, presenceId: presence.id, environment: "sandbox" as const, sessionId: session.id,
+      socialIntentId: `retire-intent-alt-${sampleIndex}`,
       focalMirrorObjectIds: [], decision: "original_post" as const, summary: "Measured alternative decision.", influences: [],
       socialStrategy: { retrievalRunId: `retire-alt-run-${sampleIndex}`, consideredPatternIds: ["social.x.v1.selective-amplification"], selectedByAct: [{ act: "original_post", patternId: "social.x.v1.selective-amplification" }] },
       createdAt: `2026-09-${14 + sampleIndex}T12:00:00.000Z`,
     })));
     state.socialDecisions = decisions;
+    state.outcomes = decisions.map((decision, index) => ({ id: `retire-outcome-${index}`, socialIntentId: decision.socialIntentId!, executionId: `retire-execution-${index}`, presenceId: presence.id, status: "succeeded" as const, observedAt: decision.createdAt, metrics: {}, evidence: [], environment: "sandbox" as const, sessionId: session.id }));
     state.publicationMetricSnapshots = decisions.map((decision, index) => ({ id: `retire-metric-${index}`, presenceId: presence.id, mirrorObjectId: `retire-mirror-${index}`, observedAt: decision.createdAt, publicationAgeSeconds: 3600, impressions: index < 4 ? 100 : 800, likes: index < 4 ? 2 : 20, source: "sandbox" as const, observationStatus: "observed" as const }));
+    state.mirrorObjects.push(...state.publicationMetricSnapshots.map((snapshot) => ({ id: snapshot.mirrorObjectId, presenceId: presence.id, sessionId: session.id, environment: "sandbox", visibility: "public", objectType: "post", observedAt: snapshot.observedAt, occurredAt: snapshot.observedAt, content: { text: "Measured fixture" } } as never)));
     state.growthEvidenceRecords = state.publicationMetricSnapshots.map((snapshot, index) => ({ id: `retire-evidence-${index}`, agentId: state.agent!.id, presenceId: presence.id, kind: "WORLD_OUTCOME" as const, claimScope: "presence" as const, statement: "Measured Sandbox performance.", sourceRefs: [{ kind: "publication_metric" as const, id: snapshot.id, sourcePresenceId: presence.id, observedAt: snapshot.observedAt }], verified: true, causalDecisionIds: [decisions[index]!.id], causalMirrorObjectIds: [], sandboxSessionId: session.id, createdAt: snapshot.observedAt }));
     state.growthHypotheses = [{ id: `sandbox-learning:${session.id}:social.x.v1.proof-led-original`, agentId: state.agent!.id, originatingPresenceId: presence.id, scope: "presence", statement: "Proof-led originals may work.", status: "supported", confidence: "high", patternIds: ["social.x.v1.proof-led-original"], supportingEvidenceIds: [], contradictingEvidenceIds: [], derivedFrom: [], decisionTargets: [{ strategyId: "social.x.v1.proof-led-original", effect: 1.5 }], reviewHistory: [], createdAt: decisions[0]!.createdAt, updatedAt: decisions[0]!.createdAt, sandboxSessionId: session.id }];
 

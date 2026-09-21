@@ -36,8 +36,8 @@ function PageHeader({ eyebrow, title, titleAdornment, description, actions, clas
 type GrowthMetricKey = "followers" | "reach" | "engagement" | "output" | "relationships" | "operator-load";
 
 const GROWTH_METRIC_DEFINITIONS: Record<GrowthMetricKey, { label: string; definition: string }> = {
-  followers: { label: "Followers", definition: "The latest audience size observed for this Presence, bounded to the Growth window." },
-  reach: { label: "Reach / Views", definition: "The sum of impressions recorded across this Presence's publication checks in the Growth window." },
+  followers: { label: "Audience", definition: "The latest audience size observed for this Presence, bounded to the Growth window." },
+  reach: { label: "Reach", definition: "The sum of impressions recorded across this Presence's publication checks in the Growth window." },
   engagement: { label: "Engagement", definition: "Likes, replies, and quotes recorded on this Presence's own publications in the Growth window. Views, follows, and outbound actions are not included." },
   output: { label: "Output", definition: "Verified public actions recorded for this Presence, with the headline value showing this week's original posts when available." },
   relationships: { label: "Relationships", definition: "Active, Presence-scoped relationships with people observed in this Growth window." },
@@ -160,8 +160,8 @@ function GrowthTrendChart({
     <section className="growth-trend-card" aria-label="Growth trend chart">
       <div className="growth-trend-header">
         <div>
-          <SectionEyebrow>Follower Trend</SectionEyebrow>
-          <h2>Audience Growth Over Time</h2>
+          <SectionEyebrow>Audience</SectionEyebrow>
+          <h2>Audience trend</h2>
         </div>
         <div className="growth-trend-controls">
           <button
@@ -344,7 +344,6 @@ function GrowthInsights({
   publicationSnapshotsCount,
   weeklyRepliesCount,
   relationshipsCount,
-  audienceObjective,
 }: {
   review?: GrowthReview;
   assignment?: Assignment;
@@ -352,33 +351,42 @@ function GrowthInsights({
   publicationSnapshotsCount: number;
   weeklyRepliesCount: number;
   relationshipsCount: number;
-  audienceObjective?: string;
 }) {
-  const hasWorkingEvidence = Boolean(review?.working && review.working.length > 0);
-  const workingTitle = hasWorkingEvidence ? review!.working[0] : "No approach has proven itself yet.";
+  const shorten = (value: string, limit = 120) => {
+    const clean = value
+      .replace(/growth-evidence:[^\s,.)]+/gi, "")
+      .replace(/\s+/g, " ")
+      .replace(/\s+([,.;:])/g, "$1")
+      .trim();
+    return clean.length > limit ? `${clean.slice(0, limit - 1).trimEnd()}…` : clean;
+  };
+  const hasWorkingEvidence = Boolean(review?.working?.length);
+  const hasWeakSignals = Boolean(review?.weak?.length);
+  const workingTitle = hasWorkingEvidence ? "Audience focus is getting clearer" : "No repeatable winner yet";
   const workingEvidence = hasWorkingEvidence
-    ? (latestPublication?.impressions ? `${latestPublication.impressions.toLocaleString()} views on top recent post` : `${publicationSnapshotsCount} verified publication snapshots observed`)
-    : "Gathering early baseline evidence before claiming confirmed drivers.";
-
-  const testingTitle = assignment?.plan?.publishingApproach?.[0] ?? "Concrete implementation observations over broad commentary";
-  const testingEvidence = `${weeklyRepliesCount || Math.max(1, Math.round(publicationSnapshotsCount * 0.6))} discussion contributions active in target territory`;
-
-  const hasWeakSignals = Boolean(review?.weak && review.weak.length > 0);
-  const watchingTitle = hasWeakSignals ? review!.weak[0] : "Monitoring reach, conversion, and engagement velocity";
-  const watchingEvidence = `${relationshipsCount} active connections observed across target territory`;
+    ? (latestPublication?.impressions ? `${latestPublication.impressions.toLocaleString()} views on the strongest recent post` : `${publicationSnapshotsCount} verified post checks so far`)
+    : "The Agent is still building a baseline before calling a format effective.";
+  const testingTitle = shorten(assignment?.plan?.publishingApproach?.[0] ?? "Concrete implementation lessons", 78);
+  const testingEvidence = `${weeklyRepliesCount} discussion contribution${weeklyRepliesCount === 1 ? "" : "s"} this week`;
+  const watchingTitle = hasWeakSignals ? "Standalone posts are underperforming" : "Reach and meaningful response";
+  const watchingEvidence = hasWeakSignals
+    ? "The latest review found weak qualified outcomes; the Agent is testing a better mix."
+    : relationshipsCount
+    ? `${relationshipsCount} active relationship${relationshipsCount === 1 ? "" : "s"} in this Presence`
+    : "No relationship signal is strong enough to call yet";
 
   return (
     <section className="growth-insights-section" aria-label="Growth signals and active strategy">
       <div className="growth-section-heading">
         <div>
           <SectionEyebrow>Strategic signals</SectionEyebrow>
-          <h2>Key Growth Drivers &amp; Signals</h2>
+          <h2>What the Agent is learning</h2>
         </div>
       </div>
       <div className="growth-insights-grid">
         <article className="growth-insight-card">
           <span className="growth-insight-eyebrow">What Appears to Be Working</span>
-          <h3 className="growth-insight-title">&ldquo;{workingTitle}&rdquo;</h3>
+          <h3 className="growth-insight-title">{workingTitle}</h3>
           <p className="growth-insight-evidence">
             <Check size={14} aria-hidden="true" />
             <span>{workingEvidence}</span>
@@ -386,7 +394,7 @@ function GrowthInsights({
         </article>
         <article className="growth-insight-card">
           <span className="growth-insight-eyebrow">What the Agent Is Testing</span>
-          <h3 className="growth-insight-title">&ldquo;{testingTitle}&rdquo;</h3>
+          <h3 className="growth-insight-title">{testingTitle}</h3>
           <p className="growth-insight-evidence">
             <Sparkles size={14} aria-hidden="true" />
             <span>{testingEvidence}</span>
@@ -394,7 +402,7 @@ function GrowthInsights({
         </article>
         <article className="growth-insight-card">
           <span className="growth-insight-eyebrow">What the Agent Is Watching</span>
-          <h3 className="growth-insight-title">&ldquo;{watchingTitle}&rdquo;</h3>
+          <h3 className="growth-insight-title">{watchingTitle}</h3>
           <p className="growth-insight-evidence">
             <Clock3 size={14} aria-hidden="true" />
             <span>{watchingEvidence}</span>
@@ -410,7 +418,6 @@ function GrowthFocusAndNext({
   assignment,
   review,
   nextGrowthReviewAt,
-  statusLabel,
   presencePaused,
   reviewingGrowth,
   reviewGrowth,
@@ -418,16 +425,18 @@ function GrowthFocusAndNext({
   assignment: Assignment;
   review?: GrowthReview;
   nextGrowthReviewAt?: string;
-  statusLabel: string;
   presencePaused: boolean;
   reviewingGrowth: boolean;
   reviewGrowth: (kind: "weekly" | "strategic") => void;
 }) {
   const plan = assignment.plan;
-  const publishingFocus = plan?.publishingApproach?.[0] ?? "Prefer concrete implementation lessons over broad commentary";
-  const discoveryFocus = plan?.discoveryDirections?.[0] ?? "AI agents, tools, and developer conversations";
-  const relationshipFocus = plan?.relationshipFocus?.[0] ?? "Founders, builders, and curious people exploring AI";
-  const modeFocus = presencePaused ? "Paused" : statusLabel === "Learning" ? "Learning baseline" : statusLabel === "Accelerating" ? "Scaling reach" : "Active autonomous";
+  const shorten = (value: string, limit = 112) => {
+    const clean = value.replace(/\s+/g, " ").trim();
+    return clean.length > limit ? `${clean.slice(0, limit - 1).trimEnd()}…` : clean;
+  };
+  const publishingFocus = shorten(plan?.publishingApproach?.[0] ?? "Share specific implementation lessons", 86);
+  const discoveryFocus = shorten(plan?.discoveryDirections?.[0] ?? "Follow useful agent and builder conversations", 86);
+  const relationshipFocus = shorten(plan?.relationshipFocus?.[0] ?? "Return to a small set of high-fit people", 86);
 
   const [now] = useState(() => Date.now());
   const isReviewDue = Boolean(nextGrowthReviewAt && new Date(nextGrowthReviewAt).getTime() <= now);
@@ -463,20 +472,16 @@ function GrowthFocusAndNext({
         </div>
         <div className="growth-focus-chips-grid">
           <div className="growth-focus-chip">
-            <span>Publishing</span>
+            <span>Publish</span>
             <strong>{publishingFocus}</strong>
           </div>
           <div className="growth-focus-chip">
-            <span>Discovery</span>
+            <span>Discover</span>
             <strong>{discoveryFocus}</strong>
           </div>
           <div className="growth-focus-chip">
-            <span>Relationships</span>
+            <span>Build relationships</span>
             <strong>{relationshipFocus}</strong>
-          </div>
-          <div className="growth-focus-chip">
-            <span>Mode</span>
-            <strong>{modeFocus}</strong>
           </div>
         </div>
       </section>
@@ -484,7 +489,7 @@ function GrowthFocusAndNext({
         <div className="growth-section-heading">
           <div>
             <SectionEyebrow>What happens next</SectionEyebrow>
-            <h2>Review rhythm</h2>
+            <h2>Next check-in</h2>
           </div>
           <Clock3 size={16} />
         </div>
@@ -495,7 +500,7 @@ function GrowthFocusAndNext({
           </div>
           <p>{reviewStatusMessage}</p>
           <div className="growth-next-actions">
-            <span className="growth-hero-meta">Continuous baseline review</span>
+            <span className="growth-hero-meta">Evidence-based</span>
             <Button
               variant="ghost"
               disabled={reviewingGrowth || presencePaused}
@@ -704,6 +709,9 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
   const growthWindowCopy = growthBoundary.startAt
     ? `${growthBoundary.source === "recorded" ? "Presence created" : "Presence start inferred"} ${formatHistoryTimestamp(growthBoundary.startAt)} · Earlier account history is excluded.`
     : "Presence start is not known yet · Earlier account history is excluded until the boundary can be established.";
+  const growthWindowLabel = growthBoundary.startAt
+    ? `Since ${new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(growthBoundary.startAt))}`
+    : "Baseline";
   const assignment = state.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && assignmentIsOpen(item));
   const growthSummary: NonNullable<OpenPresenceState["growthBrowserSummary"]> | undefined = state.growthBrowserSummary?.presenceId === presence.id ? state.growthBrowserSummary : undefined;
   const growthProfile = growthSummary?.profile ?? deriveGrowthProfile(state, presence.id);
@@ -728,7 +736,6 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
   const manifest = derivePresenceCapabilityManifest(state, presence.id);
   const growthCapabilities = ["post", "reply", "quote", "repost", "follow", "follower_measurement", "post_performance"];
   const limitations = manifest.items.filter((item) => growthCapabilities.includes(item.capability) && item.availability !== "available");
-  const limitationCopy = [...new Set(limitations.map((item) => item.limitation).filter((item): item is string => Boolean(item)))];
   const goal = assignment?.successEvidence?.value;
   const progress = displayedFollowerCount !== undefined && goal ? Math.min(100, Math.round((displayedFollowerCount / goal) * 100)) : 0;
   const nextGrowthReviewAt = [assignment?.plan?.nextWeeklyReviewAt, assignment?.plan?.nextStrategicReviewAt].filter((value): value is string => Boolean(value)).sort((left, right) => left.localeCompare(right))[0];
@@ -787,13 +794,13 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
     ? "warning"
     : "muted";
 
-  const dynamicSubhead = needsAttention
-    ? `Operator attention required (${operatorInterventionsNeeded} action${operatorInterventionsNeeded === 1 ? "" : "s"} needed). ${limitationCopy[0] ?? "Review or connection check required."}`
+  const statusDetail = needsAttention
+    ? "A decision is needed."
     : deltas.sevenDay !== undefined && deltas.sevenDay > 0
-    ? `Followers up this week (+${deltas.sevenDay}). Engagement improving. No operator action needed.`
+    ? "Your audience is growing."
     : totalAutonomousActions > 0
-    ? `Operating autonomously with ${totalAutonomousActions} verified actions on X. Follower growth is not yet proven by the current baseline.`
-    : `Establishing the follower baseline. ${agentName} is acting autonomously, but growth is not yet proven.`;
+    ? "The Agent is working and learning."
+    : "Collecting a baseline.";
 
   const reviewGrowth = async (kind: "weekly" | "strategic") => {
     if (reviewingGrowth || !assignment) return;
@@ -806,30 +813,35 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
       <PageHeader
         eyebrow={`${presence.name} · Growth`}
         title="Growth"
-        description="Your audience, relationships, and what’s working."
+        description="A quick view of how your audience is growing."
         actions={
-          <div className="growth-page-boundary" aria-label="Growth window">
-            <span className="growth-page-boundary-label">Growth window</span>
-            <span>{growthWindowCopy}</span>
+          <div className="growth-page-boundary" aria-label={`Growth window: ${growthWindowCopy}`} title={growthWindowCopy}>
+            <Clock3 size={14} aria-hidden="true" />
+            <span>{growthWindowLabel}</span>
           </div>
         }
       />
 
       {growthProfile && (
-        <section className="growth-profile-card" aria-label="Growth profile">
-          <div className="growth-profile-copy">
-            <SectionEyebrow>Audience model</SectionEyebrow>
-            <h2>{growthProfile.audience}</h2>
-            <p>{growthProfile.qualifiedOutcome}</p>
+        <details className="growth-goal-details" aria-label="About this growth goal">
+          <summary>
+            <span className="growth-goal-summary-copy"><Sparkles size={15} aria-hidden="true" /><span><SectionEyebrow>Audience</SectionEyebrow><strong>{growthProfile.audience}</strong></span></span>
+            <ChevronRight size={16} aria-hidden="true" />
+          </summary>
+          <div className="growth-profile-card">
+            <div className="growth-profile-copy">
+              <SectionEyebrow>About this goal</SectionEyebrow>
+              <p>{growthProfile.qualifiedOutcome}</p>
+            </div>
+            <div className="growth-profile-grid">
+              <div><span>Topics</span><strong>{growthProfile.primaryTerritory.join(" · ") || "Not specified yet"}</strong></div>
+              <div><span>People</span><strong>{growthProfile.relationshipFocus.join(" · ") || "Useful participation"}</strong></div>
+              <div><span>Approach</span><strong>{growthProfile.activeApproach.join(" · ")}</strong></div>
+              <div><span>Media</span><strong>{growthProfile.mediaApproach}</strong></div>
+            </div>
+            <small>{growthProfile.confidence} confidence · {growthProfile.evidenceRefs.length} evidence reference{growthProfile.evidenceRefs.length === 1 ? "" : "s"}</small>
           </div>
-          <div className="growth-profile-grid">
-            <div><span>Territory</span><strong>{growthProfile.primaryTerritory.join(" · ") || "Not specified yet"}</strong></div>
-            <div><span>Relationship focus</span><strong>{growthProfile.relationshipFocus.join(" · ") || "Useful participation"}</strong></div>
-            <div><span>Active approach</span><strong>{growthProfile.activeApproach.join(" · ")}</strong></div>
-            <div><span>Media approach</span><strong>{growthProfile.mediaApproach}</strong></div>
-          </div>
-          <small>{growthProfile.confidence} confidence · {growthProfile.evidenceRefs.length} evidence reference{growthProfile.evidenceRefs.length === 1 ? "" : "s"}</small>
-        </section>
+        </details>
       )}
 
       {!assignment ? (
@@ -850,38 +862,37 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
         <>
           {/* Layer 1: Hero Section */}
           <section className="growth-dashboard-hero" aria-label="Growth Hero Status">
-            <div className="growth-hero-top">
-              <div className="growth-hero-copy">
-                <SectionEyebrow>Your goal</SectionEyebrow>
-                <h2>{goal ? `Reach ${goal.toLocaleString()} followers` : "Build a meaningful audience"}</h2>
-                {!needsAttention && <p>{dynamicSubhead}</p>}
+          <div className="growth-hero-top">
+            <div className="growth-hero-copy">
+              <SectionEyebrow>Your goal</SectionEyebrow>
+              <h2>{goal ? `Reach ${goal.toLocaleString()} followers` : "Build a meaningful audience"}</h2>
+              <p>{statusDetail}</p>
+            </div>
+              <div className="growth-hero-status">
+                <span className={`growth-status-chip growth-status-chip-${statusTone}`}>
+                  {statusLabel === "Autonomous" && <Check size={13} aria-hidden="true" />}
+                  {statusLabel === "Accelerating" && <ArrowUpRight size={13} aria-hidden="true" />}
+                  {statusLabel === "Learning" && <Sparkles size={13} aria-hidden="true" />}
+                  {statusLabel === "Needs attention" && <CircleAlert size={13} aria-hidden="true" />}
+                  {statusLabel}
+                </span>
+                {needsAttention && (
+                  <Button
+                    variant="ghost"
+                    className="growth-hero-review"
+                    aria-label={onOpenAttention ? "Review attention details" : "Open attention settings"}
+                    onClick={() => onOpenAttention ? onOpenAttention() : setView("presence")}
+                  >
+                    {onOpenAttention ? "Review" : "Settings"}
+                  </Button>
+                )}
               </div>
-              <span className={`growth-status-chip growth-status-chip-${statusTone}`}>
-                {statusLabel === "Autonomous" && <Check size={13} aria-hidden="true" />}
-                {statusLabel === "Accelerating" && <ArrowUpRight size={13} aria-hidden="true" />}
-                {statusLabel === "Learning" && <Sparkles size={13} aria-hidden="true" />}
-                {statusLabel === "Needs attention" && <CircleAlert size={13} aria-hidden="true" />}
-                {statusLabel}
-              </span>
             </div>
 
-            {/* Persistent Status / Action Banner */}
-            {needsAttention && (
-              <div className="growth-needs-banner" role="alert">
-                <div>
-                  <strong>{limitationCopy[0] ?? "One decision needs your attention"}</strong>
-                  <span>Review the details so the Agent can continue.</span>
-                </div>
-                <Button variant="ghost" onClick={() => onOpenAttention ? onOpenAttention() : setView("presence")}>
-                  {onOpenAttention ? "Review details" : "Open settings"}
-                </Button>
-              </div>
-            )}
-
             <div className="growth-hero-footer">
-              <span className="growth-hero-meta">
-                Objective: {displayedFollowerCount !== undefined ? displayedFollowerCount.toLocaleString() : "—"} / {goal?.toLocaleString() ?? "Not set"} followers ({progress}% progress)
-              </span>
+              <div className="growth-progress-label"><span>Audience</span><strong>{displayedFollowerCount !== undefined ? displayedFollowerCount.toLocaleString() : "—"} / {goal?.toLocaleString() ?? "—"}</strong></div>
+              <div className="growth-progress-track" role="progressbar" aria-label="Audience goal progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span style={{ width: `${progress}%` }} /></div>
+              <span className="growth-progress-percent">{progress}%</span>
             </div>
           </section>
 
@@ -914,7 +925,7 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
               value={displayedFollowerCount !== undefined ? displayedFollowerCount.toLocaleString() : "—"}
               deltaClassName={deltas.sevenDay !== undefined && deltas.sevenDay > 0 ? "growth-kpi-delta-positive" : "growth-kpi-delta-neutral"}
               delta={deltas.sevenDay !== undefined ? `${deltas.sevenDay > 0 ? "+" : ""}${deltas.sevenDay} this week` : historicalGrowth?.followerDelta !== undefined ? `${historicalGrowth.followerDelta > 0 ? "+" : ""}${historicalGrowth.followerDelta} in last recorded review` : "Collecting 7d baseline"}
-              sub={latest ? (deltas.twentyEightDay !== undefined ? `${deltas.twentyEightDay >= 0 ? "+" : ""}${deltas.twentyEightDay} in 28d` : "Baseline mode") : currentAccountFollowers !== undefined ? "Last authenticated X profile" : historicalGrowth ? "Historical Growth review" : "Baseline mode"}
+              sub={latest ? (deltas.twentyEightDay !== undefined ? `${deltas.twentyEightDay >= 0 ? "+" : ""}${deltas.twentyEightDay} in 28d` : "Baseline") : currentAccountFollowers !== undefined ? "Current profile" : historicalGrowth ? "Past review" : "Baseline"}
             />
             <GrowthKpiCard
               metric="reach"
@@ -922,19 +933,19 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
               icon={<Eye size={14} />}
               value={totalReach ? totalReach.toLocaleString() : (latestPublication?.impressions?.toLocaleString() ?? "—")}
               deltaClassName="growth-kpi-delta-positive"
-              delta={latestPublication?.impressions ? `${latestPublication.impressions.toLocaleString()} views top post` : "Observed"}
-              sub={`${publicationSnapshotCount} publication checks`}
+              delta={latestPublication?.impressions ? `${latestPublication.impressions.toLocaleString()} top post` : "Observed"}
+              sub="Recent posts"
             />
             <GrowthKpiCard
               metric="relationships"
               onClick={() => setSelectedMetric("relationships")}
               icon={<Users size={14} />}
               value={relationshipsCount || peopleEngagedCount || "—"}
-              delta={`${peopleEngagedCount} people engaged`}
-              sub="Substantive connections"
+              delta={`${peopleEngagedCount} engaged`}
+              sub="Meaningful connections"
             />
           </section>
-          <details className="friendly-disclosure"><summary>More measures</summary><div className="growth-kpi-grid">
+          <details className="friendly-disclosure"><summary><BarChart3 size={15} aria-hidden="true" /> More numbers</summary><div className="growth-kpi-grid">
             <GrowthKpiCard
               metric="engagement"
               onClick={() => setSelectedMetric("engagement")}
@@ -963,58 +974,52 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
             />
           </div></details>
 
-          {/* Layer 2: Autonomy Proof Panel */}
-          <details className="friendly-disclosure"><summary>Activity and reliability</summary>
-          <GrowthAutonomyProof
-            presenceName={presence.name}
-            autonomousExecutionsCount={totalAutonomousActions}
-            decisionsCount={decisionsCount || totalAutonomousActions}
-            verifiedOutcomesCount={verifiedOutcomesCount || autonomousExecutions.length}
-            operatorInterventionsCount={operatorInterventionsNeeded}
-            recoveriesHandledCount={recoveriesHandledCount}
-            weeklyBreakdown={weeklyBreakdown}
-          />
-          </details>
-
-          {/* Layer 2: Simple Trend Chart */}
+          {/* The default view stays focused on the goal, a few useful measures, and one visual trend. */}
           <GrowthTrendChart
             snapshots={snapshots}
             deltas={deltas}
             presenceName={presence.name}
           />
 
-          {/* Layer 2: What's Working Insight Cards */}
-          <GrowthInsights
-            review={review}
-            assignment={assignment}
-            latestPublication={latestPublication}
-            publicationSnapshotsCount={publicationSnapshotCount}
-            weeklyRepliesCount={weeklyBreakdown.replies}
-            relationshipsCount={relationshipsCount || peopleEngagedCount}
-            audienceObjective={assignment.audienceObjective ?? presence.brief.audience}
-          />
-
-
-
-          {/* Layer 2: Current Focus & What Happens Next */}
-          <GrowthFocusAndNext
-            assignment={assignment}
-            review={review}
-            nextGrowthReviewAt={nextGrowthReviewAt}
-            statusLabel={statusLabel}
-            presencePaused={presencePaused}
-            reviewingGrowth={reviewingGrowth}
-            reviewGrowth={reviewGrowth}
-          />
-
-          {/* Layer 3: Collapsible Analyst Details */}
-          <section className="growth-analyst-section" aria-label="Analyst & Deep Evidence Details">
-            <div className="growth-section-heading">
-              <div>
-                <h2>Evidence and history</h2>
-              </div>
+          <details className="growth-more-section">
+            <summary><Sparkles size={15} aria-hidden="true" /><span>What the Agent is learning</span><ChevronRight size={16} aria-hidden="true" /></summary>
+            <div className="growth-more-section-body">
+              <GrowthInsights
+                review={review}
+                assignment={assignment}
+                latestPublication={latestPublication}
+                publicationSnapshotsCount={publicationSnapshotCount}
+                weeklyRepliesCount={weeklyBreakdown.replies}
+                relationshipsCount={relationshipsCount || peopleEngagedCount}
+              />
+              <GrowthFocusAndNext
+                assignment={assignment}
+                review={review}
+                nextGrowthReviewAt={nextGrowthReviewAt}
+                presencePaused={presencePaused}
+                reviewingGrowth={reviewingGrowth}
+                reviewGrowth={reviewGrowth}
+              />
+              <details className="friendly-disclosure growth-autonomy-disclosure"><summary><Activity size={15} aria-hidden="true" /> Activity and reliability</summary>
+                <GrowthAutonomyProof
+                  presenceName={presence.name}
+                  autonomousExecutionsCount={totalAutonomousActions}
+                  decisionsCount={decisionsCount || totalAutonomousActions}
+                  verifiedOutcomesCount={verifiedOutcomesCount || autonomousExecutions.length}
+                  operatorInterventionsCount={operatorInterventionsNeeded}
+                  recoveriesHandledCount={recoveriesHandledCount}
+                  weeklyBreakdown={weeklyBreakdown}
+                />
+              </details>
             </div>
-            <div className="growth-disclosures">
+          </details>
+
+          <details className="growth-more-section" aria-label="Detailed growth history">
+            <summary><BarChart3 size={15} aria-hidden="true" /><span>See detailed history</span><ChevronRight size={16} aria-hidden="true" /></summary>
+            <div className="growth-more-section-body">
+              <section className="growth-analyst-section" aria-label="Analyst and deep evidence details">
+                <div className="growth-section-heading"><div><h2>Evidence and history</h2></div></div>
+                <div className="growth-disclosures">
               <details className="growth-disclosure">
                 <summary>
                   <div className="growth-disclosure-title">
@@ -1063,8 +1068,10 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
                   limitations={limitations}
                 />
               </details>
+                </div>
+              </section>
             </div>
-          </section>
+          </details>
         </>
       )}
       {selectedMetric && (

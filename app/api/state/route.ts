@@ -3538,6 +3538,17 @@ function mergeAssignmentWorkerResult(latest: OpenPresenceState, worked: OpenPres
   next.assetUsages = mergeById(next.assetUsages, worked.assetUsages.filter((item) => item.assignmentId === assignmentId));
   next.claimGrounding = mergeById(next.claimGrounding, worked.claimGrounding.filter((item) => worked.publications.some((publication) => publication.id === item.publicationId && publication.assignmentId === assignmentId)));
   next.socialIntents = mergeById(next.socialIntents, worked.socialIntents.filter((item) => item.assignmentId === assignmentId));
+  // Preserve cognition alongside its delivered work. Without these records,
+  // publication metrics cannot join back to the strategy that produced them.
+  next.resourceUsageEvents = mergeById(next.resourceUsageEvents, worked.resourceUsageEvents.filter((item) => item.runId === runId));
+  const intentIds = new Set(worked.socialIntents.filter((item) => item.assignmentId === assignmentId).map((item) => item.id));
+  const decisions = worked.socialDecisions.filter((item) => item.socialIntentId && intentIds.has(item.socialIntentId));
+  next.socialDecisions = mergeById(next.socialDecisions, decisions.filter((item) => !next.socialDecisions.some((existing) => existing.id === item.id)));
+  const retrievalIds = new Set(decisions.map((item) => item.socialStrategy?.retrievalRunId).filter(Boolean));
+  next.socialStrategyRetrievalRuns = mergeById(next.socialStrategyRetrievalRuns ?? [], (worked.socialStrategyRetrievalRuns ?? []).filter((item) => retrievalIds.has(item.id) && !(next.socialStrategyRetrievalRuns ?? []).some((existing) => existing.id === item.id)));
+  next.outcomes = mergeById(next.outcomes, worked.outcomes.filter((item) => intentIds.has(item.socialIntentId) && !next.outcomes.some((existing) => existing.id === item.id)));
+  const decisionIds = new Set(decisions.map((item) => item.id));
+  next.growthEvidenceRecords = mergeById(next.growthEvidenceRecords ?? [], (worked.growthEvidenceRecords ?? []).filter((item) => item.causalDecisionIds?.some((id) => decisionIds.has(id)) && !(next.growthEvidenceRecords ?? []).some((existing) => existing.id === item.id)));
   next.executions = mergeById(next.executions, worked.executions.filter((item) => item.assignmentId === assignmentId));
   next.mirrorObjects = mergeById(next.mirrorObjects, worked.mirrorObjects.filter((item) => item.assignmentId === assignmentId));
   next.mirrorEvents = mergeById(next.mirrorEvents, worked.mirrorEvents.filter((item) => item.sessionId === workedAssignment?.sessionId));
@@ -4203,15 +4214,13 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
     ? (cognitionSource.growthHypotheses ?? []).find((hypothesis) => hypothesis.sandboxSessionId === sessionId && hypothesis.template?.source === "observed_post" && !["retired", "disfavored"].includes(hypothesis.status))
     : undefined;
   const selectedSourceBackedTemplate = requestedSourceBackedTemplate ?? autonomousSourceBackedTemplate;
-  const originalStrategyContext = selectedSourceBackedTemplate
-    ? compileSocialStrategyContext(cognitionSource, presence, {
-      invocation: "original_publication",
-      objective: rehearsal?.inspiration ?? "source-backed autonomous original publication",
+  const originalStrategyContext = compileSocialStrategyContext(cognitionSource, presence, {
+      invocation: isAssignment ? "assignment" : "original_publication",
+      objective: assignment?.instruction ?? rehearsal?.inspiration ?? attentionInstruction ?? (inbound?.content?.text || "Consider an original publication"),
       availableActions,
       sandboxSessionId: sessionId,
-      strategyTemplateId: selectedSourceBackedTemplate.id,
-    })
-    : undefined;
+      strategyTemplateId: selectedSourceBackedTemplate?.id,
+    });
   if (publishingContext) {
     actionSource = recordPublishingPlanWork(actionSource, { ...publishingContext, stage: "considered", detail: `The Agent considered original expression during the ${publishingWindow?.purpose ?? "publishing"} window.` });
   }
@@ -4254,7 +4263,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
         confidence: preliminaryJudgment.confidence,
       }), "neutral", { sessionId, sourceObjectId: inbound?.id });
     }
-    decision = await generateAgentSocialDecision(cognitionSource, `${prompt}${judgmentContext}`, availableActions, { assignmentMode: isAssignment, presence, peopleNote, strategyContext: originalStrategyContext, requireStrategySelection: !inbound && availableActions.includes("post"), requireTemplateSelection: Boolean(originalStrategyContext?.retrievalRun.selectedTemplateId) });
+    decision = await generateAgentSocialDecision(cognitionSource, `${prompt}${judgmentContext}`, availableActions, { assignmentMode: isAssignment, presence, peopleNote, invocationId: scope.invocationId, runId: assignmentContext?.assignmentRunId, usageOrigin: isAssignment ? "assignment" : "self_directed_discovery", strategyContext: originalStrategyContext, requireStrategySelection: !inbound && availableActions.includes("post"), requireTemplateSelection: Boolean(originalStrategyContext?.retrievalRun.selectedTemplateId) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "The selected Agent runtime could not evaluate this simulated world.";
     const title = inbound ? "Model processing blocked" : "Sandbox evaluation unavailable";
@@ -4285,7 +4294,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
       const recoveryInstruction = isPublishingWindow
         ? "This is an eligible Agent-owned publishing window. A no_op leaves the standing responsibility unfinished. Produce one distinct, evidence-backed original post now when no hard safety or channel constraint prevents it. Preserve the selected reusable strategy when one is applicable; return action=post with the complete publication text."
         : "This is an explicit exact-quantity posting Assignment. A no_op does not satisfy this Assignment. Produce the next original post now, grounded in the supplied Presence context. Return action=post with the complete publication text; do not return no_op merely because the world is quiet or because the operator asked for a batch.";
-      const recovered = await generateAgentSocialDecision(cognitionSource, `${prompt}${judgmentContext}\n\n${recoveryInstruction}`, availableActions, { assignmentMode: true, presence, strategyContext: originalStrategyContext, requireStrategySelection: true, requireTemplateSelection: Boolean(originalStrategyContext?.retrievalRun.selectedTemplateId) });
+      const recovered = await generateAgentSocialDecision(cognitionSource, `${prompt}${judgmentContext}\n\n${recoveryInstruction}`, availableActions, { assignmentMode: true, presence, invocationId: scope.invocationId, runId: assignmentContext?.assignmentRunId, usageOrigin: "assignment", strategyContext: originalStrategyContext, requireStrategySelection: true, requireTemplateSelection: Boolean(originalStrategyContext?.retrievalRun.selectedTemplateId) });
       if (recovered.action === "post" && cleanSandboxDraft(recovered.text)) decision = recovered;
     } catch {
       // The normal no-op/rejection path below records the failed candidate.
@@ -4820,14 +4829,13 @@ async function applySandboxTemporalEvents(source: OpenPresenceState, sessionId: 
           const assignment = next.assignments.find((item) => item.id === value.assignmentId && item.sessionId === sessionId);
           if (assignment?.followThrough?.status === "awaiting_measurement" && assignment.followThrough.measurementEventId === outcomeId && assignment.followThrough.deliveryOutcomeId === value.deliveryOutcomeId) {
             const measuredAt = new Date(event.at).toISOString();
-            assignment.followThrough = { ...assignment.followThrough, status: "measured", measuredAt, learningRecordedAt: measuredAt, planRevision: (assignment.revision ?? 0) + 1 };
+            assignment.followThrough = { ...assignment.followThrough, status: "measured", measuredAt, planRevision: (assignment.revision ?? 0) + 1 };
             assignment.revision = (assignment.revision ?? 0) + 1;
             assignment.status = "completed";
             assignment.work = { ...assignmentWorkDefaults(assignment), phase: "completed" };
             assignment.lastOutcome = { class: "assignment_completed", message: "The delayed outcome was measured and incorporated into the plan. This responsibility is complete.", at: measuredAt };
             assignment.updatedAt = measuredAt;
             assignment.attemptHistory = [...(assignment.attemptHistory ?? []), { id: `attempt-${randomUUID()}`, attempt: assignment.work.attempts, phase: "completed" as const, outcome: "assignment_completed" as const, message: assignment.lastOutcome.message, at: measuredAt }].slice(-24);
-            recordSandboxTrajectoryInPlace(next, sessionId, "learning", { assignmentId: assignment.id, deliveryOutcomeId: value.deliveryOutcomeId, measurementEventId: outcomeId, lesson: "Measured outcome evidence revised the next decision for this responsibility.", causal: { parentIds: [value.deliveryOutcomeId, event.id] } }, measuredAt);
             recordSandboxTrajectoryInPlace(next, sessionId, "replan", { assignmentId: assignment.id, measurementEventId: outcomeId, planRevision: assignment.revision, reason: "The measured outcome closed delivery follow-through and revised the next plan decision.", causal: { parentIds: [event.id] } }, measuredAt);
             const updatedSession = next.playgroundSessions.find((item) => item.id === sessionId);
             if (updatedSession?.temporalSnapshot) {
@@ -7510,15 +7518,24 @@ export async function POST(request: Request) {
         return `I’m not able to answer yet. ${message}`;
       });
       const lastMessage = conversation?.messages.at(-1);
-      if (lastMessage?.role === "agent") lastMessage.content = reply;
       if (conversation) conversation.updatedAt = new Date().toISOString();
       const exactOperatorText = parsed.content.match(/^publish exactly\s*:\s*([\s\S]+)$/i)?.[1]?.trim();
+      let chatReply = reply;
       if ((isExplicitXPostRequest(parsed.content) || exactOperatorText) && next.presence?.channel === "x") {
         const existingExecutionIds = new Set(next.executions.map((item) => item.id));
         next = formChatPostIntent(next, exactOperatorText ?? reply, undefined, exactOperatorText ? "operator" : "agent");
         const chatExecutionIds = new Set(next.executions.filter((item) => !existingExecutionIds.has(item.id)).map((item) => item.id));
         next = await deliverNativeExecutions(next, chatExecutionIds);
+        const execution = next.executions.find((item) => chatExecutionIds.has(item.id));
+        if (execution?.connector === "bridge") {
+          chatReply = execution.status === "succeeded"
+            ? "Published and verified through the authorized browser."
+            : execution.status === "queued"
+              ? "Queued through the authorized browser. I’ll count it only after the browser confirms the public result."
+              : execution.failure?.message ?? "The authorized browser could not confirm the public result, so nothing is being reported as published.";
+        }
       }
+      if (lastMessage?.role === "agent") lastMessage.content = chatReply;
       next.messages = conversation?.messages ?? next.messages;
       writeState(next);
       return stateResponse(request, next);

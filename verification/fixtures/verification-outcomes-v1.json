@@ -1,0 +1,47 @@
+{
+  "fixtureVersion": "verification-outcomes-v1",
+  "purpose": "Permanent deterministic outcome fixtures for JEV triage contract tests.",
+  "externalWorldProof": false,
+  "cases": [
+    {
+      "id": "valid-safety-stop",
+      "deterministicResult": "SAFETY_STOP",
+      "status": "SAFETY_STOP",
+      "failureClass": "safety_stop",
+      "authority": "deterministic",
+      "evidence": "The requested action crosses a protected authority or external-world boundary."
+    },
+    {
+      "id": "blocked-execution",
+      "deterministicResult": "BLOCKED",
+      "status": "BLOCKED",
+      "failureClass": "unknown",
+      "authority": "deterministic",
+      "evidence": "The bounded executor cannot continue and has no safe recovery action."
+    },
+    {
+      "id": "indeterminate-evidence",
+      "deterministicResult": "INDETERMINATE",
+      "status": "INDETERMINATE",
+      "failureClass": "unknown",
+      "authority": "deterministic",
+      "evidence": "The available evidence does not establish the postcondition."
+    },
+    {
+      "id": "environment-failure",
+      "deterministicResult": "FAILURE",
+      "status": "FAILURE",
+      "failureClass": "environment",
+      "authority": "deterministic",
+      "evidence": "A required local service, dependency, or runtime failed before the assertion could run."
+    },
+    {
+      "id": "real-product-regression",
+      "deterministicResult": "FAILURE",
+      "status": "FAILURE",
+      "failureClass": "product",
+      "authority": "deterministic",
+      "evidence": "The app reached the expected route but the deterministic product assertion failed."
+    }
+  ]
+}

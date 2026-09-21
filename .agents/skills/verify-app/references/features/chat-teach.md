@@ -38,6 +38,14 @@ For an operator boundary, use `getByTestId("operator-chat-needs-you")` inside `.
 
 Proof must show the submitted operator message and the correct user-facing receipt, then confirm the relevant persisted conversation/nudge/proposal state. An internal model response without the visible composer flow is insufficient.
 
+The seven-day supervision regression submits every turn through the composer,
+replays a committed correction, reloads, and joins Sandbox outcomes to their
+executions and intents (`tests/e2e/natural-supervision-seven-day.spec.ts`). It
+proves deterministic conversation persistence, request deduplication, and quiet
+routine operation. Its AI mock does not prove real-model understanding. Delivery
+counts alone must never produce a learning or strategy-change message; positive
+milestone/update claims need a separate measured, causally supported trajectory.
+
 ## Gotchas
 
 - AI mock output is deterministic only in the harness test runtime.
@@ -87,7 +95,7 @@ Proof must show the submitted operator message and the correct user-facing recei
 - The Agent avatar or context toggle opens Activity / About. Activity lists actionable approvals, blocked tasks, and current work; selecting a task opens that exact task in Tasks. About links to settings, Knowledge, Test agent, and Usage. No duplicated Calendar or Analytics tabs.
 - On mobile the inspector is a focus-contained sheet; Escape closes it and returns focus.
 - The composer plus button offers Upload an image and Your uploaded images. Selecting existing media preserves its asset reference and inspected context through send and reload, without creating another library item. X-discovered or Agent-selected media is intentionally excluded from this user-authored attachment picker. Presence access is checked before attaching.
-- Navigate from Media, Growth, or Usage back to Chat with existing assignments. Compact snapshots must retain timestamps, and Chat must tolerate a partial snapshot during the transition. No runtime overlay or missing message history.
+- Navigate from Artifacts/Media, Growth, or Usage back to Chat with existing assignments. Compact snapshots must retain timestamps, and Chat must tolerate a partial snapshot during the transition. No runtime overlay or missing message history.
 
 ## Chat layout and recovery (2026-09-15)
 

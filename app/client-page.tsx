@@ -2476,10 +2476,6 @@ function AgentWorkspaceShell({
     { view: "growth", label: "Growth", icon: <TrendingUp size={22} /> },
     { view: "assets", label: "Artifacts", icon: <ImageIcon size={22} /> },
   ];
-  const foregroundRun = (state.operationalRuns ?? []).find((run) => run.presenceId === presence.id && run.kind === "operator_chat" && ["running", "queued", "recovering", "reconciling"].includes(run.state));
-  const foregroundStatus = foregroundRun ? foregroundRun.state === "queued" ? "Message queued" : foregroundRun.state === "running" ? "Working on your request" : "Reconnecting to your task" : undefined;
-  const environmentState = environmentStateFor(state, presence);
-  const environmentLabel = environmentState.label;
   const navigation = (placement: string) => <nav className={`agent-navigation ${placement}`} aria-label={`${placement === "desktop-navigation" ? "Desktop" : "Mobile"} navigation`}>{destinations.map((destination) => <button key={destination.view} type="button" aria-current={view === destination.view || destination.view === "schedule" && view === "work" ? "page" : undefined} title={destination.label} onClick={() => { setView(destination.view); setAgentMenuOpen(false); }}>{destination.icon}<span>{destination.label}</span></button>)}</nav>;
   return (
     <main className={`app-shell theme-${theme} ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${agentMenuOpen ? "agent-menu-open" : ""}`}>
@@ -2506,7 +2502,6 @@ function AgentWorkspaceShell({
       <section className={`${view === "chat" || view === "teach" || view === "rehearsal" ? "workspace workspace-chat" : "workspace"} ${view === "knowledge" ? "workspace-knowledge" : ""} ${inspector ? "has-inspector" : ""}`}>
         <header className="topbar">
           <button type="button" className="mobile-agent-menu-button" aria-label="Switch agent or open settings" aria-expanded={agentMenuOpen} onClick={() => setAgentMenuOpen((open) => !open)}><PanelLeft size={21} /></button>
-          <button type="button" className="workspace-agent-heading" aria-label={`About ${agent.name}`} onClick={() => setInspector((current) => current ? null : "today")}><PresenceGlyph accent={agent.accent} name={agent.name} avatarVariant={agent.avatarVariant} /><span><strong>{agent.name}</strong><small role={foregroundStatus ? "status" : undefined}>{foregroundStatus ?? `${presence.handle} · ${channelLabel(presence.channel, state.channelDefinitions)}`}</small>{(view !== "chat" || environmentState.tone !== "healthy") && <small className={`workspace-agent-environment workspace-agent-environment-${environmentState.tone}`}>{environmentLabel}</small>}</span></button>
           <div className="topbar-actions context-controls" aria-label="Workspace controls">
             <button type="button" className="context-control context-sidebar-toggle" aria-label={inspector ? "Collapse context sidebar" : "Open context sidebar"} aria-pressed={Boolean(inspector)} title={inspector ? "Collapse context sidebar" : "Open context sidebar"} onClick={() => setInspector((current) => current ? null : "today")}>{inspector ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}</button>
           </div>
@@ -7362,13 +7357,13 @@ function OperatorChatActionTimelineEvent({ event }: { event: OperatorConversatio
   </div>;
 }
 
-function OperatorChatAttachmentPreview({ attachments }: { attachments: PresenceChatAttachment[] }) {
+function OperatorChatAttachmentPreview({ attachments, heading = "Image to review", detail = "Use it only if it strengthens the post" }: { attachments: PresenceChatAttachment[]; heading?: string; detail?: string }) {
   const visualAttachments = attachments.filter((attachment) => ["image", "gif", "chart"].includes(attachment.kind));
   if (!visualAttachments.length) return null;
   return <section className="operator-chat-decision-media" aria-label="Image available for this decision" data-testid="operator-chat-decision-media">
     <div className="operator-chat-decision-media-heading">
-      <strong>Image to review</strong>
-      <span>Use it only if it strengthens the post</span>
+      <strong>{heading}</strong>
+      <span>{detail}</span>
     </div>
     <div className="operator-chat-decision-media-grid">
       {visualAttachments.map((attachment) => {
@@ -7620,12 +7615,12 @@ function DelegateView({ setView, agentName, onChoose }: { setView: (view: View) 
     setView("chat");
   };
   return <div className="page delegate-page" data-testid="delegate-page">
-    <div className="delegate-intro">
-      <span className="eyebrow">Delegate to your Agent</span>
-      <h1>What should I take on?</h1>
-      <p>A few things you can hand off to {agentName}.</p>
-      <small>Choose a starting point. I’ll open Chat with a draft for you to edit before anything is sent.</small>
-    </div>
+    <PageHeader
+      className="delegate-header"
+      eyebrow={`${agentName} · Delegate`}
+      title="What should I take on?"
+      description={<>A few things you can hand off to {agentName}. Choose a starting point. I’ll open Chat with a draft for you to edit before anything is sent.</>}
+    />
     <div className="delegate-categories">
       {DELEGATION_CATEGORIES.map((category) => <section className="delegate-category" key={category.title} aria-labelledby={`delegate-${category.title}`}>
         <h2 id={`delegate-${category.title}`}>{category.title}</h2>
@@ -7861,7 +7856,7 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
             {!isToolActivity && <div className="operator-chat-message-meta"><strong>{item.role === "operator" ? "You" : item.role === "presence" ? presence.name : "OpenPresence"}</strong><span>{formatTime(item.timestamp)}</span></div>}
             <OperatorChatMessageBody message={item} state={state} />
             {acknowledgedReaction && <OperatorChatReaction reaction={acknowledgedReaction} />}
-            {item.role === "presence" && item.choices?.length && decisionAttachments.length ? <OperatorChatAttachmentPreview attachments={decisionAttachments} /> : null}
+            {item.role === "presence" && decisionAttachments.length ? <OperatorChatAttachmentPreview attachments={decisionAttachments} heading={item.choices?.length ? "Image to review" : "Attached artifact"} detail={item.choices?.length ? "Use it only if it strengthens the post" : "Recovered from the Agent’s authorized artifact library"} /> : null}
             {item.role === "presence" && item.choices?.length ? <div className="operator-chat-choices" role="group" aria-label="Choose an option">{item.choices.map((choice, index) => {
               const requestId = `choice:${item.id}:${index}`;
               const selected = allVisibleMessages.some((message) => message.clientRequestId?.startsWith(`choice:${item.id}:`));
@@ -13953,7 +13948,7 @@ function ScheduleView({
   const presenceName = selectedPresence?.name ?? "this Presence";
   const timezone = presenceTimezone(selectedPresence);
   const [viewMode, setViewMode] = useState<"list" | "week">("list");
-  const [scheduleDayFilter, setScheduleDayFilter] = useState<ScheduleDayFilter>("all");
+  const [scheduleDayFilter, setScheduleDayFilter] = useState<ScheduleDayFilter>(() => weekdayInTimezone(new Date(), timezone) as ScheduleDayFilter);
   const [scheduleRecurrenceFilter, setScheduleRecurrenceFilter] = useState<ScheduleRecurrenceFilter>("all");
   const [compactSchedule, setCompactSchedule] = useState(true);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(() => typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("assignmentId"));
@@ -13965,19 +13960,11 @@ function ScheduleView({
   const [scheduleNow] = useState(() => Date.now());
   const visibleSlots: CalendarSlot[] = [];
   const visibleAssignments = state.assignments.filter((item) => item.presenceId === presenceId && item.status !== "cancelled");
-  const goalAssignments = visibleAssignments.filter((assignment) => assignment.activation?.type === "continuous");
   const taskAssignments = visibleAssignments.filter((assignment) => assignment.activation?.type !== "continuous");
   const filteredVisibleAssignments = taskAssignments.filter((assignment) => assignmentMatchesRecurrenceFilter(assignment, scheduleRecurrenceFilter));
   const projectedPublishingPlan = derivePublishingPlanProjection(state, presenceId);
   const projectedPlanWindows = (projectedPublishingPlan?.windows ?? []).filter((window) => window.status === "future" || window.status === "active");
   const publishingResponsibility = visibleAssignments.find((assignment) => assignment.id === selectedPresence?.publishingInitiative.assignmentId || assignment.origin === "publishing_initiative");
-  const scheduleDecisionAssignment = visibleAssignments.find((assignment) => ["needs_operator", "blocked"].includes(assignment.status));
-  const didAutoFocusDecision = useRef(false);
-  useEffect(() => {
-    if (didAutoFocusDecision.current || !scheduleDecisionAssignment) return;
-    didAutoFocusDecision.current = true;
-    setSelectedAssignmentId(scheduleDecisionAssignment.id);
-  }, [scheduleDecisionAssignment]);
   const processingAssignments = visibleAssignments.filter((assignment) => {
     const { isProcessing } = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId);
     return isProcessing;
@@ -14037,7 +14024,7 @@ function ScheduleView({
       <PageHeader
         eyebrow={presenceName}
         title="Tasks"
-        description={<>What {presenceName} should resolve, when it can happen, and what has been verified.</>}
+        description={<>A calm view of what {presenceName} is handling now and what comes next.</>}
         actionsClassName="heading-actions calendar-heading-actions"
         actions={<>
           <Button variant="ghost" onClick={() => setView("chat")} title="Return to the Agent conversation">
@@ -14069,27 +14056,6 @@ function ScheduleView({
           {processingAssignments.length > 1 && <span className="schedule-banner-count">+{processingAssignments.length - 1} more</span>}
         </div>
       )}
-      {projectedPlanWindows.length > 0 && (
-        <section className="schedule-plan-projection" aria-label="Agent publishing plan">
-          <div className="schedule-plan-projection-heading">
-            <div>
-              <SectionEyebrow>Agent plan</SectionEyebrow>
-              <h2>Flexible publishing windows</h2>
-            </div>
-            <span>Jenny decides in the moment</span>
-          </div>
-          <p className="schedule-plan-projection-note">These are opportunities Jenny is holding open—not guaranteed posts. Open the responsibility to give her context or change direction.</p>
-          <div className="schedule-plan-projection-list">
-            {projectedPlanWindows.map((window) => (
-              <button type="button" className="schedule-plan-projection-item" key={window.id} onClick={() => publishingResponsibility && openAssignment(publishingResponsibility)} disabled={!publishingResponsibility}>
-                <span className="schedule-plan-projection-time">{new Date(window.startAt).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} · {new Date(window.startAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
-                <strong>{window.summary}</strong>
-                <small>{window.status === "active" ? "Open now" : "Upcoming · Jenny will evaluate it"}</small>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
       {selectedAssignment && (
         <aside
           ref={assignmentInspectorRef}
@@ -14099,7 +14065,7 @@ function ScheduleView({
         >
           <div className="assignment-inspector-header">
             <div>
-              <SectionEyebrow>Task assignment</SectionEyebrow>
+              <SectionEyebrow>Details</SectionEyebrow>
               <h2>{selectedAssignment.activation?.type === "continuous" ? "Ongoing goal" : "Task details"}</h2>
             </div>
             <button type="button" aria-label="Close Assignment details" onClick={() => setSelectedAssignmentId(null)}><X size={16} /></button>
@@ -14118,25 +14084,25 @@ function ScheduleView({
             );
           })()}
           <div className="assignment-inspector-summary">
-            <SectionEyebrow>Task summary</SectionEyebrow>
+            <SectionEyebrow>Summary</SectionEyebrow>
             <h3>{selectedAssignment.title || cleanUserFacingAssignmentInstruction(selectedAssignment.instruction)}</h3>
             {selectedAssignment.description && <p>{selectedAssignment.description}</p>}
           </div>
-          <details><summary>Instructions and constraints</summary><p>{selectedAssignment.instruction}</p></details>
+          <details><summary>More about this</summary><p>{selectedAssignment.instruction}</p></details>
           <div className="assignment-inspector-meta">
-            <div><span>Schedule</span><strong>{assignmentTimingLabel(selectedAssignment)}</strong><small>{selectedAssignment.status === "expired_incomplete" ? "The deadline passed before this attempt finished. Choose a new window to try again." : selectedAssignment.schedule?.date ? `Starts once on ${assignmentDateLabel(selectedAssignment)} at ${selectedAssignment.schedule.time}.` : selectedAssignment.schedule ? `Starts every ${selectedAssignment.schedule.day} at ${selectedAssignment.schedule.time}.` : selectedAssignment.activation?.type === "continuous" ? "Progress is tracked over time in Growth." : selectedAssignment.timeframe?.deadline ? "Work is limited to this time window." : "No start time is set."}</small></div>
-            <div><span>Current attempt</span><strong>{selectedAssignment.status === "expired_incomplete" ? "Ended incomplete" : selectedAssignment.status === "draft" ? (["ready", "ready_with_assumptions"].includes(selectedAssignment.preflight?.status ?? "") ? "Not started" : "Needs information") : selectedAssignment.status.replaceAll("_", " ")}</strong><small>{assignmentScheduleProgress(selectedAssignment)}</small></div>
+            <div><span>When</span><strong>{assignmentTimingLabel(selectedAssignment)}</strong><small>{selectedAssignment.status === "expired_incomplete" ? "The deadline passed before this attempt finished. Choose a new window to try again." : selectedAssignment.schedule?.date ? `Starts once on ${assignmentDateLabel(selectedAssignment)} at ${selectedAssignment.schedule.time}.` : selectedAssignment.schedule ? `Starts every ${selectedAssignment.schedule.day} at ${selectedAssignment.schedule.time}.` : selectedAssignment.activation?.type === "continuous" ? "Progress is tracked over time in Growth." : selectedAssignment.timeframe?.deadline ? "Work is limited to this time window." : "No start time is set."}</small></div>
+            <div><span>Status</span><strong>{selectedAssignment.status === "expired_incomplete" ? "Ended incomplete" : selectedAssignment.status === "draft" ? (["ready", "ready_with_assumptions"].includes(selectedAssignment.preflight?.status ?? "") ? "Not started" : "Needs information") : selectedAssignment.status.replaceAll("_", " ")}</strong><small>{assignmentScheduleProgress(selectedAssignment)}</small></div>
           </div>
           {(() => {
             const pursuit = (state.assignmentPursuitWindows ?? []).filter((item) => item.assignmentId === selectedAssignment.id && (isPromotionBurstWindow(item) ? ["active", "paused", "completed"].includes(item.status) : ["active", "paused"].includes(item.status))).sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())[0];
             if (!pursuit) return null;
             return <AssignmentPursuitCard state={state} pursuit={pursuit} assignmentTitle={cleanUserFacingAssignmentInstruction(selectedAssignment.instruction)} presenceName={presenceName} mutate={mutate} now={scheduleNow} compact />;
           })()}
-          {selectedAssignment.preflight && !["expired_incomplete", "completed", "completed_with_adaptation", "failed", "cancelled"].includes(selectedAssignment.status) && <section className={`assignment-preflight assignment-preflight-${selectedAssignment.preflight.status}`} aria-label="Assignment check">
-            <div className="assignment-preflight-header"><div><SectionEyebrow>Assignment check</SectionEyebrow><h3>{selectedAssignment.preflight.status === "ready" ? "Ready to work" : selectedAssignment.preflight.status === "ready_with_assumptions" ? "Ready with assumptions" : selectedAssignment.preflight.status === "needs_input" ? "Needs information" : "Blocked"}</h3></div><span className="assignment-preflight-status">{selectedAssignment.preflight.status === "ready" || selectedAssignment.preflight.status === "ready_with_assumptions" ? "ready" : selectedAssignment.preflight.status.replaceAll("_", " ")}</span></div>
+          {selectedAssignment.preflight && !["expired_incomplete", "completed", "completed_with_adaptation", "failed", "cancelled"].includes(selectedAssignment.status) && !(selectedAssignment.lastOutcome && ["needs_operator", "blocked", "failed", "expired_incomplete"].includes(selectedAssignment.status)) && <section className={`assignment-preflight assignment-preflight-${selectedAssignment.preflight.status}`} aria-label="Assignment check">
+            <div className="assignment-preflight-header"><div><SectionEyebrow>Readiness</SectionEyebrow><h3>{selectedAssignment.preflight.status === "ready" ? "Ready to work" : selectedAssignment.preflight.status === "ready_with_assumptions" ? "Ready with assumptions" : selectedAssignment.preflight.status === "needs_input" ? "Needs information" : "Blocked"}</h3></div><span className="assignment-preflight-status">{selectedAssignment.preflight.status === "ready" || selectedAssignment.preflight.status === "ready_with_assumptions" ? "ready" : selectedAssignment.preflight.status.replaceAll("_", " ")}</span></div>
             <p>{selectedAssignment.preflight.semanticSummary}</p>
-            <details className="assignment-preflight-details" open={["needs_input", "blocked"].includes(selectedAssignment.preflight.status)}>
-              <summary>Readiness details <span>Outcome, assumptions, and checks</span></summary>
+            <details className="assignment-preflight-details" open={false}>
+              <summary>{selectedAssignment.preflight.status === "blocked" ? "Why this is blocked" : selectedAssignment.preflight.status === "needs_input" ? "What you need to provide" : "See how Genny will handle it"}</summary>
               <div className="assignment-preflight-details-body">
                 {selectedAssignment.preflight.contract && <div className="assignment-contract"><div><span>Outcome</span><strong>{selectedAssignment.preflight.contract.deliverable}</strong></div><div><span>Done when</span><strong>{selectedAssignment.preflight.contract.successEvidence}</strong></div><div><span>Genny decides</span><small>{selectedAssignment.preflight.contract.agentDecides.join(" · ")}</small></div>{selectedAssignment.preflight.contract.assumptions.length > 0 && <div><span>Assumptions</span><small>{selectedAssignment.preflight.contract.assumptions.join(" ")}</small></div>}</div>}
                 <div className="assignment-readiness-checks">{selectedAssignment.preflight.checks.map((check) => <div key={check.label} className={`assignment-readiness-check assignment-readiness-${check.status}`}><span aria-hidden="true">{check.status === "pass" ? "✓" : check.status === "warning" ? "!" : "×"}</span><div><strong>{check.label}</strong><small>{check.detail}</small></div></div>)}</div>
@@ -14158,7 +14124,7 @@ function ScheduleView({
               </small>
             </section>
           )}
-          <p className="assignment-inspector-note">{presenceName} chooses the approach. You can follow progress here and change the task when needed.</p>
+          <p className="assignment-inspector-note">{presenceName} handles the work. Add guidance only when you want to change the direction.</p>
           <form className="assignment-intervention" onSubmit={(event) => { event.preventDefault(); void sendPlanIntervention(selectedAssignment); }}>
             <div className="assignment-intervention-heading">
               <label htmlFor="assignment-intervention-input">Tell {presenceName} something about this</label>
@@ -14213,8 +14179,28 @@ function ScheduleView({
       ) : (
         <>
           <ScheduleList assignments={filteredVisibleAssignments} presenceName={presenceName} timezone={timezone} state={state} runningLiveAssignmentId={runningLiveAssignmentId} dayFilter={scheduleDayFilter} onDayFilterChange={setScheduleDayFilter} recurrenceFilter={scheduleRecurrenceFilter} onRecurrenceFilterChange={setScheduleRecurrenceFilter} onAssignment={openAssignment} />
-          <GoalsSection goals={goalAssignments} presenceName={presenceName} state={state} onAssignment={openAssignment} />
         </>
+      )}
+      {projectedPlanWindows.length > 0 && (
+        <section className="schedule-plan-projection" aria-label="Agent publishing plan">
+          <div className="schedule-plan-projection-heading">
+            <div>
+              <SectionEyebrow>Coming up</SectionEyebrow>
+              <h2>Open opportunities</h2>
+            </div>
+            <span>{presenceName} decides in the moment</span>
+          </div>
+          <p className="schedule-plan-projection-note">These are flexible opportunities, not guaranteed posts. Open one to guide {presenceName}.</p>
+          <div className="schedule-plan-projection-list">
+            {projectedPlanWindows.map((window) => (
+              <button type="button" className="schedule-plan-projection-item" key={window.id} onClick={() => publishingResponsibility && openAssignment(publishingResponsibility)} disabled={!publishingResponsibility}>
+                <span className="schedule-plan-projection-time">{new Date(window.startAt).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} · {new Date(window.startAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
+                <strong>{window.summary}</strong>
+                <small>{window.status === "active" ? "Open now" : "Upcoming · Jenny will evaluate it"}</small>
+              </button>
+            ))}
+          </div>
+        </section>
       )}
     </div>
   );
@@ -14249,6 +14235,8 @@ function ScheduleList({
     ? scheduledAssignments
     : scheduledAssignments.filter((assignment) => {
         if (assignmentOccursOnDay(assignment, dayFilter)) return true;
+        // Type filters are an explicit request to find work outside today's scan.
+        if (recurrenceFilter !== "all" && !assignment.schedule) return true;
         if (dayFilter !== today) return false;
         const processing = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing;
         return processing || ["needs_operator", "blocked"].includes(assignment.status);
@@ -14274,7 +14262,7 @@ function ScheduleList({
       </div>
       <div className="schedule-list-row-copy">
         <div className="schedule-list-row-kicker">
-          <strong>{assignment.origin === "publishing_initiative" ? `${presenceName} · Agent-owned` : assignment.createdBy === "operator" ? "You · Operator assignment" : "Agent-owned assignment"}</strong>
+          <strong>{assignment.createdBy === "operator" ? "From you" : `From ${presenceName}`}</strong>
           <span className="schedule-recurrence-badge">{assignment.activation?.type === "continuous" ? "Goal" : oneTime ? "One-time" : "Weekly"}</span>
           {proc.isProcessing && <span className="schedule-processing-badge"><LoaderCircle size={9} className="spin" /> Working now · {proc.phaseLabel}</span>}
           {assignmentCompletedToday(assignment, state) && !proc.isProcessing && <span className="schedule-completed-badge"><CheckCircle2 size={10} /> Done today</span>}
@@ -14289,17 +14277,17 @@ function ScheduleList({
   return <section className="schedule-list" aria-label="Schedule list">
     <div className="schedule-list-header">
       <div>
-        <SectionEyebrow>Responsibilities</SectionEyebrow>
-        <h2>What needs to happen</h2>
-        <p>See the next authorized responsibility at a glance. Verified work stays visible as done; repeating responsibilities remain ready for their next window.</p>
+        <SectionEyebrow>Today</SectionEyebrow>
+        <h2 aria-label="What needs to happen"><span aria-hidden="true">Today’s work</span></h2>
+        <p>Open an item to see its status or give {presenceName} a little direction. Completed work stays available below.</p>
         <div className="schedule-list-summary" aria-label="Schedule summary"><span><strong>{completedTodayCount}</strong> done today</span><span><strong>{currentAssignments.length}</strong> open</span></div>
       </div>
       <div className="schedule-list-header-controls">
-        <div className="schedule-day-filter-label">Assignment type</div>
+        <div className="schedule-day-filter-label">Type</div>
         <div className="feed-filter schedule-recurrence-filter" role="group" aria-label="Assignment type filter">
           {scheduleRecurrenceFilters.map((item) => <button type="button" key={item.value} className={recurrenceFilter === item.value ? "active" : ""} aria-pressed={recurrenceFilter === item.value} onClick={() => onRecurrenceFilterChange(item.value)}>{item.label}</button>)}
         </div>
-        <div className="schedule-day-filter-label">Show days</div>
+        <div className="schedule-day-filter-label">Day</div>
         <div className="feed-filter schedule-day-filter" role="group" aria-label="Scheduled responsibility filter">
             {scheduleDayFilters.map((item) => {
               const isToday = item.value === today;

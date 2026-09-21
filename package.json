@@ -20,7 +20,9 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@ai-sdk/typesafe-ai": "3.0.3",
     "@playwright/test": "^1.55.0",
+    "ai": "7.0.105",
     "better-sqlite3": "^11.10.0",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^0.468.0",

@@ -19,7 +19,8 @@ import { recordOperationalSuccess } from "./incident-engine";
 import { detectDuplicatePublicOutcomes, detectDuplicateVerifiedExecutionOutcomes } from "./public-action-safety";
 import { hasObservedOwnReplyForTarget } from "./duplicate-public-outcome";
 import { authorizeAssetSelection, liveAssetReuseReason } from "./asset-library";
-import { isXCreditsError } from "./x-credits";
+import { isXCreditsError, xNativeWriteUnavailable } from "./x-credits";
+import { evaluateExecutionReadiness } from "./execution-readiness";
 
 const entityRef = z.object({ type: z.string().min(1).max(80), id: z.string().min(1).max(240) });
 const author = z.object({ externalRef: entityRef.optional(), displayName: z.string().min(1).max(160), handle: z.string().max(160).optional(), avatarUrl: z.string().url().max(2_000).optional() }).optional();
@@ -195,7 +196,35 @@ export function reportBridgeIdentity(bridge: Bridge, input: z.infer<typeof ident
     // delivery window when the expected account becomes available so the
     // adapter can claim it without operator babysitting or a false expiry.
     const renewal = new Date(Date.now() + 45 * 60 * 1000).toISOString();
+    let recoveredNativeFailures = 0;
     for (const execution of state.executions) {
+      const affordance = execution.affordance.replace(/^x\./, "");
+      const bridgeSupports = current.capabilities.affordances.some((item) => item === execution.affordance || item === affordance);
+      const recoverableNativeFailure = execution.presenceId === current.presenceId
+        && execution.environment === "live"
+        && execution.connector === "native"
+        && execution.status === "failed"
+        && !execution.externalRef
+        && !execution.failure?.reviewedAt
+        && xNativeWriteUnavailable({ deliveryError: execution.failure?.message });
+      if (recoverableNativeFailure && bridgeSupports) {
+        execution.connector = "bridge";
+        execution.bridgeId = current.id;
+        execution.status = "queued";
+        execution.failure = undefined;
+        execution.reviewReason = undefined;
+        const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
+        if (intent) {
+          if (intent.validity.expiresAt && new Date(intent.validity.expiresAt).getTime() <= Date.now()) intent.validity.expiresAt = renewal;
+          intent.state = "active";
+          intent.updatedAt = timestamp();
+        }
+        const action = state.actions.find((item) => item.executionId === execution.id);
+        if (action) { action.status = "queued"; action.reason = "Recovered through the verified browser capability after Native X became unavailable."; }
+        execution.updatedAt = timestamp();
+        recoveredNativeFailures += 1;
+        continue;
+      }
       if (execution.bridgeId !== current.id || execution.environment !== "live" || !["queued", "awaiting-connector"].includes(execution.status)) continue;
       const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
       if (intent && execution.deliveryHold?.reason === "bridge_identity" && intent.validity.expiresAt && new Date(intent.validity.expiresAt).getTime() <= Date.now()) {
@@ -206,6 +235,37 @@ export function reportBridgeIdentity(bridge: Bridge, input: z.infer<typeof ident
       execution.connector = "bridge";
       delete execution.deliveryHold;
       execution.updatedAt = timestamp();
+    }
+    if (recoveredNativeFailures > 0) {
+      state.events.unshift(bridgeEvent(state, "Recovered public work through Chrome", `${recoveredNativeFailures} public action${recoveredNativeFailures === 1 ? " is" : "s are"} queued for the verified browser capability after Native X became unavailable.`, "positive"));
+    }
+
+    // A connector blocker may have been recorded before the browser identity
+    // became available. Reopen that same Assignment when the verified
+    // capability recovers; do not make the operator restate the goal or
+    // create a duplicate responsibility.
+    let resumedAssignments = 0;
+    for (const assignment of state.assignments) {
+      if (assignment.presenceId !== current.presenceId || !["blocked", "needs_operator"].includes(assignment.status)) continue;
+      if (assignment.lastOutcome?.class !== "assignment_blocked" || !/X API billing|authorized browser route|No active delivery route/i.test(assignment.lastOutcome.message)) continue;
+      const affordance = assignment.deliverable.type === "reply"
+        ? "reply"
+        : ["post", "original_publication", "image_post", "video_post"].includes(assignment.deliverable.type)
+          ? "post"
+          : assignment.deliverable.type;
+      const readiness = evaluateExecutionReadiness({ presence: presence!, channel: presence?.channel, affordance, state, environment: "live" });
+      if (!readiness.executableNow || !["ready", "awaiting_review"].includes(readiness.disposition) || !readiness.availableRoutes.includes("bridge")) continue;
+      const resumedAt = timestamp();
+      assignment.status = "active";
+      assignment.work = { ...(assignment.work ?? { phase: "candidate_review", attempts: 0, maxAttempts: 4, storiesResearched: 0 }), phase: "candidate_review", blockedReason: undefined };
+      assignment.nextDueAt = resumedAt;
+      assignment.lastOutcome = { class: "incomplete", message: "The verified browser capability recovered this responsibility; the original Assignment is resuming.", at: resumedAt };
+      assignment.updatedAt = resumedAt;
+      resumedAssignments += 1;
+    }
+    if (resumedAssignments > 0) {
+      requestAttention(current.presenceId, "assignment_due", timestamp(), "assignment", "bridge");
+      state.events.unshift(bridgeEvent(state, "Resumed blocked work through Chrome", `${resumedAssignments} existing Assignment${resumedAssignments === 1 ? " is" : "s are"} back in the work queue after the expected browser account became available.`, "positive"));
     }
   }
   state.events.unshift(bridgeEvent(state, status === "verified" ? "Browser account verified" : "Browser account check failed", message ?? `The controlled channel account matches @${expected}.`, status === "verified" ? "positive" : "warning"));
@@ -871,10 +931,13 @@ function leaveExecutionVerificationPending(bridge: Bridge, state: OpenPresenceSt
 const normalizeHandleForBridge = (value: string | undefined) => (value ?? "").replace(/^@/, "").trim().toLowerCase();
 
 /**
- * Reconcile a Chrome-written X reply or quote through the official X API.
- * Browser DOM readback is retained in the request as diagnostic evidence, but
- * never counts as delivery because it cannot independently prove public
- * lineage or that rendered media bytes match a sealed Asset.
+ * Reconcile a Chrome-written X action. The official X API remains the
+ * preferred verifier. A tightly scoped DOM proof is also authoritative for a
+ * text-only original post: the verified Bridge account, exact approved text,
+ * canonical X permalink, and no-parent/no-media shape together prove the
+ * public object the controlled tab rendered. Replies, quotes, deletes, and
+ * media posts still require the API because their lineage or asset identity
+ * cannot be established from this bounded proof alone.
  */
 export async function verifyChromeExecution(bridge: Bridge, executionId: string, input: z.infer<typeof verifyInput>) {
   let state = readStateForBridge(bridge.id);
@@ -905,6 +968,45 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
     const text = typeof execution.publication?.publicExpression?.text === "string" ? execution.publication.publicExpression.text : payloadText;
     const handle = connection?.account?.username ?? presence?.handle;
     const candidateId = input.candidateExternalRef?.type === "x.post" ? input.candidateExternalRef.id : undefined;
+    const domProof = input.domProof;
+    const expectedHandle = normalizeHandleForBridge(presence?.handle);
+    const proofHandle = normalizeHandleForBridge(domProof?.authorHandle);
+    let proofPermalink: URL | undefined;
+    try { if (domProof?.permalink) proofPermalink = new URL(domProof.permalink); } catch { proofPermalink = undefined; }
+    const permalinkParts = proofPermalink?.pathname.split("/").filter(Boolean) ?? [];
+    const domProofMatchesTextPost = Boolean(
+      domProof
+      && !execution.publication?.assetIds?.length
+      && domProof.externalRef.type === "x.post"
+      && (!candidateId || candidateId === domProof.externalRef.id)
+      && proofHandle
+      && expectedHandle
+      && proofHandle === expectedHandle
+      && domProof.authorHandle.replace(/^@/, "").trim().toLowerCase() === expectedHandle
+      && domProof.text === text
+      && domProof.mediaCount === 0
+      && !domProof.parentId
+      && !domProof.quotedTargetId
+      && proofPermalink
+      && ["x.com", "www.x.com"].includes(proofPermalink.hostname.toLowerCase())
+      && permalinkParts.length === 3
+      && permalinkParts[0]?.toLowerCase() === expectedHandle
+      && permalinkParts[1] === "status"
+      && permalinkParts[2] === domProof.externalRef.id
+    );
+    if (domProofMatchesTextPost && domProof) {
+      state = readStateForBridge(bridge.id);
+      const latest = state.executions.find((item) => item.id === executionId && item.bridgeId === bridge.id);
+      if (!latest) throw new Error("Execution not found");
+      if (latest.status === "verification-pending" || latest.status === "failed") {
+        latest.status = "claimed";
+        latest.lease = { executorId: input.executorId, claimedAt: timestamp(), expiresAt: new Date(Date.now() + 30_000).toISOString() };
+        latest.updatedAt = timestamp();
+        writeState(state);
+      }
+      const result = acknowledgeExecution(bridge, executionId, { executorId: input.executorId, externalRef: domProof.externalRef, observedAt: input.observedAt ?? timestamp() });
+      return { ...result, verified: true, nextAttemptAt: undefined };
+    }
     // The X API does not expose a stable mapping from a returned media key to
     // OpenPresence's sealed Asset ID. Keep image posts unresolved until a
     // provider receipt can prove that linkage; text-only originals can use a

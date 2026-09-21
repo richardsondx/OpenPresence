@@ -198,7 +198,7 @@ function conversationFor(state: OpenPresenceState, presenceId: string, threadId?
 }
 
 /** Record a normal private turn without creating an attention request. */
-export function recordOperatorConversationMessage(source: OpenPresenceState, input: { presenceId: string; threadId?: string; content: string; choices?: Array<{ label: string; content: string }>; reaction?: import("./types").OperatorChatReaction; role?: "operator" | "presence" | "system"; replyToMessageId?: string; clientRequestId?: string; assignmentId?: string }) {
+export function recordOperatorConversationMessage(source: OpenPresenceState, input: { presenceId: string; threadId?: string; content: string; choices?: Array<{ label: string; content: string }>; reaction?: import("./types").OperatorChatReaction; attachments?: PresenceChatAttachment[]; role?: "operator" | "presence" | "system"; replyToMessageId?: string; clientRequestId?: string; assignmentId?: string }) {
   const state = clone(source);
   const presence = state.presences.find((item) => item.id === input.presenceId) ?? state.presence;
   if (!presence) throw new Error("That Presence is not available.");
@@ -218,6 +218,7 @@ export function recordOperatorConversationMessage(source: OpenPresenceState, inp
     content: input.content.trim(),
     choices: input.role === "presence" ? input.choices : undefined,
     reaction: input.role === "presence" ? input.reaction : undefined,
+    attachments: input.role === "presence" ? input.attachments : undefined,
     timestamp,
     causalTime: sandboxSession ? { clock: "sandbox", at: sandboxSession.virtualNow, sessionId: sandboxSession.id } : { clock: "wall", at: timestamp },
     clientRequestId: input.role === "presence" ? undefined : input.clientRequestId,

@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
+import { writeFile } from "node:fs/promises";
 
 type RecordValue = Record<string, unknown>;
 const cliPath = join(process.cwd(), "bin/openpresence.mjs");
@@ -61,11 +62,20 @@ test.describe("Independent public causal-trace verifier", () => {
     expect(session).toBeTruthy();
     const trace = asRecords(asRecord(session?.temporalSnapshot).trajectory);
     expect(trace.length).toBeGreaterThan(0);
+    const artifactPath = test.info().outputPath("public-causal-trace.json");
+    await writeFile(artifactPath, JSON.stringify({ sessionId, trace }, null, 2));
+    await test.info().attach("public-causal-trace", { path: artifactPath, contentType: "application/json" });
+    const observedKinds = new Set(trace.map((entry) => entry.kind));
+    for (const required of ["observation", "decision", "intent", "permission_decision", "execution", "result", "outcome", "retry_scheduled"]) {
+      expect(observedKinds.has(required), `The scenario did not exercise required transition ${required}`).toBe(true);
+    }
+    expect(new Set(trace.map((entry) => entry.sequence)).size, "Duplicate trajectory sequence numbers make causal reconstruction ambiguous.").toBe(trace.length);
 
     const transitionKinds = new Set(["event_fired", "event_stale", "event_cancelled", "observation", "decision", "intent", "permission_decision", "execution", "result", "outcome", "learning", "replan", "retry_scheduled", "retry_attempted", "retry_failed", "retry_succeeded", "retry_exhausted", "outcome_cancelled"]);
     const parentTypes = new Set(["mirror_object", "sandbox_event", "social_intent", "execution", "outcome", "permission_decision", "temporal_event", "learning_update", "plan_mutation", "assignment"]);
     const traceIds = new Set<string>();
     const traceEventIds = new Set<string>();
+    const firstSeenAt = new Map<string, number>();
     for (const entry of trace) {
       if (typeof entry.id === "string") traceIds.add(entry.id);
       if (typeof entry.eventId === "string") traceEventIds.add(entry.eventId);
@@ -77,6 +87,7 @@ test.describe("Independent public causal-trace verifier", () => {
       if (typeof externalRef.id === "string") traceIds.add(externalRef.id as string);
       const time = entry.time;
       expect(typeof time, `Trace entry ${String(entry.id)} has no virtual time.`).toBe("number");
+      for (const id of [...traceIds, ...traceEventIds]) if (!firstSeenAt.has(id)) firstSeenAt.set(id, trace.indexOf(entry));
     }
     expect(trace.every((entry, index) => index === 0 || Number(entry.time) >= Number(trace[index - 1]?.time)), "Trace ordering is not monotonic.").toBe(true);
 
@@ -93,8 +104,10 @@ test.describe("Independent public causal-trace verifier", () => {
       for (const parent of parents) {
         if (!traceIds.has(parent) && !traceEventIds.has(parent)) failures.push(`${kind}:${String(entry.id)} references missing parent ${parent}`);
         if (typeof types[parent] !== "string" || !parentTypes.has(types[parent] as string)) failures.push(`${kind}:${String(entry.id)} has untyped parent ${parent}`);
+        if ((firstSeenAt.get(parent) ?? Infinity) > trace.indexOf(entry)) failures.push(`${kind}:${String(entry.id)} references a future cause ${parent}`);
       }
     }
+    console.info(`[independent-causal-trace] ${JSON.stringify({ sessionId, records: trace.length, kinds: [...observedKinds], failures })}`);
     expect(failures, `Independent causal reconstruction failures: ${JSON.stringify(failures)}`).toEqual([]);
   });
 });

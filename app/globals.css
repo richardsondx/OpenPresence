@@ -1632,6 +1632,22 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .assignment-preflight { display: grid; gap: 12px; padding: 14px; border: 1px solid #d9d0c7; border-radius: 7px; background: rgba(255,255,255,.64); }.assignment-preflight-ready { border-color: #b9d3bf; background: #f7fbf8; }.assignment-preflight-ready_with_assumptions { border-color: #e5c58f; background: #fffaf1; }.assignment-preflight-needs_input, .assignment-preflight-blocked { border-color: #e7b59e; background: #fff5f1; }.assignment-preflight-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }.assignment-preflight-header h3 { margin: 4px 0 0; font-size: 16px; }.assignment-preflight-status { color: var(--muted); font: 9px "DM Mono", monospace; letter-spacing: .06em; text-transform: uppercase; }.assignment-preflight > p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }.assignment-contract { display: grid; gap: 8px; padding: 10px; border: 1px solid rgba(120,100,80,.18); border-radius: 6px; background: rgba(255,255,255,.65); }.assignment-contract > div { display: grid; gap: 3px; }.assignment-contract span, .assignment-readiness-check strong, .assignment-preflight-issues > strong { color: var(--muted); font: 9px "DM Mono", monospace; text-transform: uppercase; letter-spacing: .05em; }.assignment-contract strong { font-size: 11px; line-height: 1.35; }.assignment-contract small, .assignment-readiness-check small { color: var(--muted); font-size: 10px; line-height: 1.4; }.assignment-readiness-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }.assignment-readiness-check { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 7px; align-items: start; padding: 8px; border: 1px solid var(--line); border-radius: 5px; background: rgba(255,255,255,.55); }.assignment-readiness-check > span { display: grid; width: 18px; height: 18px; place-items: center; border-radius: 50%; color: #52715e; background: #eaf3ed; font: 11px "DM Mono", monospace; }.assignment-readiness-warning > span { color: #9b6b25; background: #fff0c9; }.assignment-readiness-fail > span { color: #a65836; background: #ffe5dc; }.assignment-readiness-check > div { display: grid; gap: 3px; min-width: 0; }.assignment-preflight-issues { display: grid; gap: 4px; padding-top: 9px; border-top: 1px solid rgba(155,79,47,.2); }.assignment-preflight-issues ul { margin: 0; padding-left: 17px; color: #9b4f2f; font-size: 10px; line-height: 1.45; }
 @media (max-width: 900px) { .week-calendar-toolbar { align-items: flex-start; flex-direction: column; }.week-calendar-toolbar-side { width: 100%; justify-items: start; }.week-calendar-legend { justify-content: flex-start; }.calendar-heading-actions { justify-content: flex-start; } }
 @media (max-width: 680px) { .calendar-heading-actions { width: 100%; align-items: stretch; }.calendar-heading-actions .scope-summary { order: -1; }.calendar-view-toggle { flex: 1; }.calendar-view-toggle button { flex: 1; }.calendar-heading-actions > .button { flex: 1; }.week-calendar-toolbar h2 { font-size: 18px; }.week-calendar-toolbar p { line-height: 1.5; }.week-grid { min-width: 850px; }.compact-calendar-day { grid-template-columns: 78px minmax(0, 1fr); }.compact-calendar-day-label { padding: 13px 10px; }.compact-calendar-day-label strong { font-size: 15px; }.compact-calendar-item { grid-template-columns: 1fr; gap: 4px; padding: 9px 10px; }.compact-calendar-item small { white-space: normal; }.assignment-readiness-checks { grid-template-columns: 1fr; } }
+
+/* The everyday Tasks scan is intentionally quiet. Detail remains available in the inspector. */
+.schedule-list-row-description { display: none; }
+.schedule-list-row { padding-block: 11px; }
+.schedule-list-row-copy { gap: 3px; }
+.schedule-list-row-kicker { gap: 6px; font-size: 8px; }
+.schedule-list-row h3 { font-size: 13px; }
+.schedule-list-header p { max-width: 560px; }
+.schedule-list-header-controls { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,253,250,.7); }
+.schedule-day-filter-label { font-size: 8px; }
+.schedule-plan-projection { margin-top: 28px; margin-bottom: 0; padding: 12px 14px; border-color: var(--line); background: #fffdfa; }
+.schedule-plan-projection-heading h2 { font-size: 16px; }
+.schedule-plan-projection-heading > span { color: var(--muted); text-transform: none; letter-spacing: 0; }
+.schedule-plan-projection-note { font-size: 10px; }
+.schedule-plan-projection-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.schedule-plan-projection-item { padding: 9px 10px; border-color: var(--line); background: #fff; }
 @media (max-width: 680px) { .activity-pursuit-grid, .assignment-pursuit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.assignment-pursuit-scale label { grid-template-columns: 1fr; gap: 5px; } }
 
 /* Calendar is historical truth. Schedule owns future Standing Intents. */
@@ -4031,28 +4047,8 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .growth-recovered-context-stats strong { font-size: 18px; }
 .growth-recovered-context-stats span { color: var(--muted); font: 9px "DM Mono", monospace; text-transform: uppercase; letter-spacing: .04em; }
 
-/* Needs You Alert Banner */
-.growth-needs-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 18px;
-  border: 1px solid #f2b8b0;
-  border-left: 4px solid #d94331;
-  border-radius: 6px;
-  background: #fff5f3;
-  color: #83271b;
-}
-.growth-needs-banner strong {
-  display: block;
-  font-size: 13px;
-  margin-bottom: 2px;
-}
-.growth-needs-banner span {
-  font-size: 11px;
-  opacity: .9;
-}
+.growth-hero-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.growth-hero-review { min-height: 30px; padding: 5px 8px; font-size: 11px; }
 
 /* KPI Scoreboard */
 .growth-kpi-grid {
@@ -7291,11 +7287,10 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .app-shell .operator-chat-page .send-button { width: 44px; height: 44px; }
 .app-shell .operator-chat-thinking { margin-left: 0; font-size: 13px; }
 .app-shell .page:not(.page-chat) > .page-heading { margin-bottom: 20px; }
-.delegate-page { max-width: 820px; margin: 0 auto; padding-bottom: 40px; }
-.delegate-intro { max-width: 610px; margin-bottom: 42px; }
-.delegate-intro h1 { margin: 10px 0 9px; font-size: clamp(34px, 5vw, 52px); line-height: .98; letter-spacing: -.08em; }
-.delegate-intro p { margin: 0 0 10px; font-size: 16px; color: var(--ink); }
-.delegate-intro small { display: block; max-width: 520px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.delegate-page { max-width: 1140px; margin: 0 auto; padding-bottom: 40px; }
+.delegate-header { margin-bottom: 28px; }
+.delegate-header h1 { max-width: 760px; }
+.delegate-header p { max-width: 760px; }
 .delegate-categories { display: grid; gap: 34px; }
 .delegate-category h2 { margin: 0 0 13px; font-size: 16px; letter-spacing: -.04em; }
 .delegate-list { display: grid; gap: 2px; }
@@ -7365,9 +7360,7 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
   .app-shell .inspector-view-nav button { min-height: 48px; }
   .app-shell .page h1 { font-size: 28px; }
   .app-shell .delegate-page { padding: 24px 16px calc(100px + env(safe-area-inset-bottom)); }
-  .delegate-intro { margin-bottom: 30px; }
-  .delegate-intro h1 { font-size: 36px; }
-  .delegate-intro p { font-size: 15px; }
+  .delegate-header { margin-bottom: 30px; }
   .delegate-categories { gap: 27px; }
   .delegate-suggestion { grid-template-columns: 38px minmax(0, 1fr) 16px; gap: 11px; padding: 13px 4px; }
   .delegate-suggestion-icon { width: 34px; height: 34px; border-radius: 10px; }
@@ -7528,7 +7521,6 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .growth-page .growth-dashboard-hero { padding: 20px; border: 1px solid var(--line); border-radius: 20px; }
 .growth-page .growth-hero-copy h2 { margin: 6px 0; font-size: 24px; }
 .growth-page .growth-status-chip { font-size: 11px; text-transform: none; }
-.growth-page .growth-needs-banner { margin: 12px 0 0; padding: 12px; background: #fff8ef; border: 1px solid #e6c9ac; border-radius: 12px; color: #704523; }
 .growth-page .growth-hero-footer { padding-top: 12px; margin-top: 12px; }
 .growth-page .growth-kpi-grid { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
 .growth-page .growth-kpi-card { padding: 16px; border: 0; border-radius: 16px; background: var(--surface); }
@@ -7641,7 +7633,6 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
   .growth-page .growth-hero-top { align-items: start; gap: 12px; }
   .growth-page .growth-hero-copy h2 { font-size: 21px; }
   .growth-page .growth-kpi-card { min-height: 0; padding: 16px; }
-  .growth-page .growth-needs-banner { flex-direction: column; align-items: stretch; }
   .growth-page .growth-hero-meta { white-space: normal; font-family: inherit; font-size: 12px; }
   .watching-page .watchlist-toolbar { flex-wrap: wrap; gap: 10px; }
   .watch-card-disclosure .watch-card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -7667,12 +7658,51 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 /* Keep secondary pages compact before their useful content. */
 .growth-page .growth-scope-note { margin: 0; padding: 0; }
 .growth-page .growth-scope-note > summary { min-height: 44px; display: list-item; align-content: center; }
-.growth-page-boundary { display: grid; gap: 4px; max-width: 440px; color: var(--muted); font-size: 11px; line-height: 1.4; text-align: right; }
+.growth-page-boundary { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; line-height: 1.4; white-space: nowrap; }
 .growth-page-boundary-label { color: var(--ink); font: 10px "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.growth-goal-details,
+.growth-more-section { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.growth-goal-details > summary,
+.growth-more-section > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 54px; padding: 12px 16px; cursor: pointer; list-style: none; }
+.growth-goal-details > summary::-webkit-details-marker,
+.growth-more-section > summary::-webkit-details-marker { display: none; }
+.growth-goal-details > summary > svg:last-child,
+.growth-more-section > summary > svg:last-child { flex: 0 0 auto; color: var(--muted); transition: transform .16s ease; }
+.growth-goal-details[open] > summary > svg:last-child,
+.growth-more-section[open] > summary > svg:last-child { transform: rotate(90deg); }
+.growth-goal-summary-copy { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.growth-goal-summary-copy > svg { flex: 0 0 auto; color: var(--agent-accent); }
+.growth-goal-summary-copy > span { display: grid; gap: 3px; min-width: 0; }
+.growth-goal-summary-copy .eyebrow { margin: 0; }
+.growth-goal-summary-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.growth-goal-details .growth-profile-card { border: 0; border-top: 1px solid var(--line); border-radius: 0 0 12px 12px; }
+.growth-more-section > summary { justify-content: flex-start; color: var(--ink); font-size: 13px; font-weight: 650; }
+.growth-more-section > summary > svg:first-child { color: var(--agent-accent); }
+.growth-more-section > summary > svg:last-child { margin-left: auto; }
+.growth-more-section-body { display: grid; gap: 20px; padding: 0 16px 16px; }
+.growth-more-section-body > .growth-insights-section,
+.growth-more-section-body > .growth-focus-section,
+.growth-more-section-body > .growth-autonomy-disclosure,
+.growth-more-section-body > .growth-analyst-section { margin: 0; }
+.growth-autonomy-disclosure > summary { display: flex; align-items: center; gap: 8px; }
+.growth-autonomy-disclosure > summary svg { color: var(--agent-accent); }
+.growth-hero-footer { align-items: center; }
+.growth-progress-label { display: grid; gap: 2px; min-width: max-content; }
+.growth-progress-label span { color: var(--muted); font-size: 10px; }
+.growth-progress-label strong { font-size: 12px; }
+.growth-dashboard-hero .growth-progress-track { flex: 1; height: 8px; margin: 0; overflow: hidden; border-radius: 999px; background: var(--surface-subtle); }
+.growth-dashboard-hero .growth-progress-track > span { display: block; height: 100%; border-radius: inherit; background: var(--agent-accent); transition: width .2s ease; }
+.growth-progress-percent { min-width: 34px; color: var(--muted); font: 10px "DM Mono", monospace; text-align: right; }
+.growth-kpi-help { display: none; }
+.growth-kpi-inspect { font-size: 0; }
+.growth-kpi-inspect svg { width: 13px; height: 13px; }
+.growth-page .friendly-disclosure > summary { display: flex; align-items: center; gap: 8px; }
 .exploration-layout:not(.has-selection) { grid-template-columns: 1fr; }
 .exploration-row em { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 @media (max-width: 767px) {
   .growth-page-boundary { max-width: none; text-align: left; }
+  .growth-hero-footer { align-items: stretch; flex-wrap: wrap; }
+  .growth-dashboard-hero .growth-progress-track { order: 3; flex-basis: 100%; }
   .assets-page > .page-heading { display: grid; grid-template-columns: 1fr; justify-items: start; text-align: left; gap: 10px; }
   .assets-page > .page-heading > div { width: 100%; }
   .assets-page .assets-toolbar-panel { padding: 0; }

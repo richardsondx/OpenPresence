@@ -42,12 +42,15 @@ export function ChatAttention({ state, health, busy, onCheck, onReview }: {
   const browserRouteAvailable = Boolean(presence?.channel === "x" && state.bridges.some((bridge) => bridge.presenceId === presence.id && bridge.name.startsWith("OpenPresence Chrome") && bridgeExecutionStatus(bridge) === "connected"));
   const billingContinuingInBrowser = billing && browserRouteAvailable;
   const duplicate = incidents.some((incident) => incident.rootCauseKey === "runtime.duplicate_public_outcome");
-  const relevantTasks = billingContinuingInBrowser ? [] : billing ? billingTasks : tasks;
+  // X billing is a connector concern, not a conversational interruption. The
+  // delivery receipt is the durable place to inspect it; only unrelated
+  // paused work should occupy the Chat surface.
+  const relevantTasks = billingContinuingInBrowser || billing ? tasks.filter((task) => !billingTasks.includes(task)) : tasks;
   const summary = billingContinuingInBrowser
     ? "Public work is continuing through the authorized browser."
     : billing ? "X previously reported a billing or spending-limit block. Check again to see whether access has recovered." : incidents[0]?.safeSummary ?? tasks[0]?.lastOutcome?.message ?? health?.summary;
   const onlyBilling = isXCreditsError(health?.summary) || (incidents.length > 0 && incidents.every((incident) => xBillingIncident(incident) || isXCreditsError(incident.safeSummary)));
-  const visible = billingContinuingInBrowser ? false : tasks.length > 0 || health?.status === "needs_you" && !onlyBilling;
+  const visible = relevantTasks.length > 0 || health?.status === "needs_you" && !onlyBilling;
   // Dismissal follows the paused responsibility, not the latest diagnostic
   // text or retry count. Those fields can change while a reply is in flight,
   // which used to make a dismissed card reappear immediately.

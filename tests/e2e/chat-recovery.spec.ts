@@ -4,7 +4,7 @@ test.beforeEach(async ({ page, request }) => {
   expect((await request.post("/api/state", { data: { type: "reset" } })).ok()).toBeTruthy();
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Recovery Agent");
-  await page.getByRole("button", { name: /Create Agent \+ Presence|Meet my Agent/ }).click();
+  await page.getByRole("button", { name: /Create Agent \+ Presence|Create Agent + Presence/ }).click();
   await page.goto("/chat");
 });
 

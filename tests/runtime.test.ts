@@ -853,6 +853,21 @@ describe("OpenPresence runtime boundaries", () => {
     expect(guidance).toContain("never switch to third person to comment on yourself");
   });
 
+  it("does not invent strategy learning or interrupt Chat from delivery counts alone", () => {
+    let state = applyOperation(createAgent(input), { type: "setPresence", patch: { connectionMode: "sandbox", execution: { post: "auto" } } });
+    state = startPlaygroundSession(state, state.presence!.id);
+    const sessionId = state.playgroundSessions[0]!.id;
+    for (const text of ["A grounded explanation of durable agent state.", "A separate example of inspecting a decision's evidence.", "A third concrete example of permission boundaries."]) {
+      state = formSandboxIntent(state, { sessionId, affordance: "post", text });
+      state = deliverSandboxExecution(state, state.executions[0]!.id);
+    }
+    expect(state.outcomes.filter((outcome) => outcome.sessionId === sessionId && outcome.status === "succeeded")).toHaveLength(3);
+    expect(state.publicationMetricSnapshots).toHaveLength(0);
+    expect(state.operatorConversations?.flatMap((conversation) => conversation.messages).filter((message) => message.agentInitiated)).toHaveLength(0);
+    expect(state.events.some((event) => event.title === "Strategy learning update")).toBe(false);
+    expect(JSON.stringify(state.playgroundSessions)).not.toContain("changed the Agent's next strategy allocation");
+  });
+
   it("counts only verified Sandbox Mirror publications toward an Assignment", () => {
     let state = createAgent(input);
     state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
@@ -1032,6 +1047,8 @@ describe("OpenPresence runtime boundaries", () => {
     expect(isExplicitXPostRequest("Introduce yourself to the world. You just woke up for the first time. Make your first tweet")).toBe(true);
     expect(isExplicitXPostRequest("Actually make the tweet")).toBe(true);
     expect(isExplicitXPostRequest("Publish a post on X about what you learned today")).toBe(true);
+    expect(isExplicitXPostRequest("Can you post")).toBe(true);
+    expect(isExplicitXPostRequest("Could you please publish something")).toBe(true);
     expect(isExplicitXPostRequest("Draft three tweet options for me to review")).toBe(false);
     expect(isExplicitXPostRequest("What makes a good tweet?")).toBe(false);
     expect(isExplicitXPostRequest("How do I make a post on X?")).toBe(false);

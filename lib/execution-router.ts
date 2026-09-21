@@ -52,7 +52,7 @@ export function routeExecutionIntent(input: {
   const capability = manifest.items.find((item) => item.capability === affordance || item.capability === normalizedAffordance);
 
   const nativeWriteUnavailable = state.nativeConnections.some((connection) => connection.presenceId === presenceId && connection.channelId === "x" && xNativeWriteUnavailable(connection));
-  const browserLearned = (presence.browserAccess?.learnedFallbacks ?? []).some((item) => !isXCreditsError(item.reason) && (item.action === affordance || item.action === normalizedAffordance));
+  const browserLearned = (presence.browserAccess?.learnedFallbacks ?? []).some((item) => item.action === affordance || item.action === normalizedAffordance);
   const browserBridge = state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.name.startsWith("OpenPresence Chrome · ") && bridgeExecutionStatus(bridge) === "connected");
 
   const bridgeHealth = getDependencyHealth("user_attached_bridge", presenceId);

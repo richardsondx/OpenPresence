@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
+import { writeFile } from "node:fs/promises";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -53,7 +54,9 @@ const scenarioSteps = [
       "--handle",
       "@maya_eval",
       "--action",
-      "post",
+      "reply",
+      "--parent",
+      "x.post:sandbox-object_16tdio1",
       "--content",
       "The best agent teams spend less time adding automation and more time proving which decisions actually changed the outcome.",
     ],
@@ -294,13 +297,14 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
         patch: {
           execution: { post: "auto", reply: "auto", quote: "auto", repost: "auto", like: "auto", follow: "auto" },
           selfDirectedAttention: { enabled: true, intensity: "curious", mediaUnderstanding: "when_needed" },
+          publishingInitiative: { ...record(presence.publishingInitiative), mode: "pace", target: { count: 1, period: "day" }, timezone: "UTC" },
         },
       },
     });
     expect(configuredResponse.ok()).toBe(true);
     const baseline = record(await configuredResponse.json());
     const baselineAssignments = records(baseline.assignments);
-    expect(baselineAssignments, "The trajectory must begin with no user-created Assignment.").toHaveLength(0);
+    expect(baselineAssignments.filter((assignment) => text(assignment.createdBy) !== "agent" && text(assignment.origin) !== "publishing_initiative"), "The trajectory must begin with no user-created Assignment.").toHaveLength(0);
     expect(record(baseline.presence).connectionMode).toBe("sandbox");
     expect(record(baseline.presence).environment).toBe("sandbox");
 
@@ -319,9 +323,11 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     expect(records(planned.publishingPlans).some((plan) => text(plan.status) === "active"), "The Agent-owned plan was not active before the breaking event.").toBe(true);
 
     const trajectory: TrajectoryStep[] = [];
+    const metricMirrorIds = new Set<string>();
+    const metricDecisionIds = new Set<string>();
     let previous = await readSnapshot(request, sessionId!);
     let current = previous;
-    for (const step of scenarioSteps) {
+    for (const [stepIndex, step] of scenarioSteps.entries()) {
       const command = [...step.args, "--session", sessionId!];
       const fromVirtualNow = text(previous.session.virtualNow);
       const cli = await runCli(baseUrl, command);
@@ -364,6 +370,43 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
         expect(records(revisedAssignment?.planHistory).length).toBeGreaterThan(1);
         expect(text(revisedPlan?.summary)).toContain("Never use that visual style again.");
       }
+      // Feed the public metric operation with measured outcomes for Agent-authored
+      // Sandbox publications. These are world stimuli attached to persisted
+      // Mirror objects, rather than delivery counts or fabricated learning.
+      const newAgentPublications = current.mirrorObjects.filter((object) =>
+        text(object.sessionId) === sessionId
+        && text(object.actorPresenceId) === presenceId
+        && text(object.environment) === "sandbox"
+        && ["post", "reply", "x.post", "x.reply"].includes(text(object.objectType) ?? "")
+        && text(object.originExecutionId)
+        && current.executions.some((execution) => text(execution.id) === text(object.originExecutionId) && text(execution.status) === "succeeded" && text(execution.environment) === "sandbox" && text(execution.socialIntentId))
+        && !metricMirrorIds.has(text(object.id)!),
+      );
+      for (const publication of newAgentPublications) {
+        const mirrorObjectId = text(publication.id)!;
+        const originExecution = current.executions.find((execution) => text(execution.id) === text(publication.originExecutionId));
+        const metric = await request.post("/api/state", {
+          data: {
+            type: "recordPublicationMetricSnapshot",
+            presenceId,
+            mirrorObjectId,
+            publicationAgeSeconds: 3_600,
+            metrics: {
+              impressions: 120 + stepIndex * 35,
+              likes: 2 + (stepIndex % 3) * 3,
+              replies: stepIndex % 2,
+              reposts: stepIndex % 3 === 0 ? 1 : 0,
+              quotes: 0,
+            },
+            source: "sandbox",
+            observationStatus: "observed",
+          },
+        });
+        expect(metric.ok(), `The public metric stimulus was not accepted for ${mirrorObjectId}.`).toBe(true);
+        metricMirrorIds.add(mirrorObjectId);
+        if (text(originExecution?.socialIntentId)) metricDecisionIds.add(text(originExecution?.socialIntentId)!);
+      }
+      if (newAgentPublications.length) current = await readSnapshot(request, sessionId!);
       const work = newRecords(previous.assignments, current.assignments).filter((item) => text(item.createdBy) === "agent" || text(item.origin) === "publishing_initiative");
       const intents = newRecords(previous.intents, current.intents);
       const executions = newRecords(previous.executions, current.executions);
@@ -405,7 +448,24 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     const sessionIntentIds = new Set(sessionIntents.map((intent) => text(intent.id)));
     const sessionExecutionIds = new Set(current.executions.map((execution) => text(execution.id)));
     const causalTrace = records(current.temporalSnapshot.trajectory);
+    const traceArtifactPath = test.info().outputPath("mandatory-seven-day-causal-trace.json");
+    await writeFile(traceArtifactPath, JSON.stringify({ sessionId, seed, trace: causalTrace }, null, 2));
+    await test.info().attach("mandatory-seven-day-causal-trace", { path: traceArtifactPath, contentType: "application/json" });
     const traceKinds = new Set(causalTrace.map((entry) => text(entry.kind)));
+    const traceIds = new Set<string>();
+    const traceEventIds = new Set<string>();
+    const firstSeenAt = new Map<string, number>();
+    for (const [index, entry] of causalTrace.entries()) {
+      if (typeof entry.id === "string") traceIds.add(entry.id);
+      if (typeof entry.eventId === "string") traceEventIds.add(entry.eventId);
+      const data = record(entry.data);
+      for (const key of ["id", "mirrorObjectId", "sourceEventId", "intentId", "executionId", "outcomeId", "planId", "assignmentId", "publicationMetricId", "learningUpdateId"]) {
+        if (typeof data[key] === "string") traceIds.add(data[key] as string);
+      }
+      const externalRef = record(data.externalRef);
+      if (typeof externalRef.id === "string") traceIds.add(externalRef.id);
+      for (const id of [...traceIds, ...traceEventIds]) if (!firstSeenAt.has(id)) firstSeenAt.set(id, index);
+    }
     const causalGraph = {
       observations: current.mirrorObjects.length,
       decisions: sessionIntents.length,
@@ -422,12 +482,33 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
     expect(causalGraph.decisions).toBeGreaterThan(0);
     expect(causalGraph.executions).toBeGreaterThan(0);
     expect(causalGraph.verifiedResults).toBeGreaterThan(0);
+    expect(metricMirrorIds.size, "The trajectory did not provide any measured public metric stimulus.").toBeGreaterThan(0);
+    expect(metricDecisionIds.size, "The metric stimuli did not cover two distinct succeeded Agent-authored publication decisions.").toBeGreaterThanOrEqual(2);
     for (const kind of ["observation", "decision", "intent", "execution", "permission_decision", "plan_mutation", "result", "outcome", "learning", "replan"]) {
       expect(traceKinds.has(kind), `The persisted causal trace is missing ${kind}.`).toBe(true);
     }
     // A self-directed wake may legitimately be the root of a causal cone, so
     // its decision/intent records have no world parent. Every downstream
     // transition must still point back to an existing cause.
+    const transitionKinds = new Set(["event_fired", "event_stale", "event_cancelled", "observation", "decision", "intent", "permission_decision", "execution", "result", "outcome", "measurement", "learning", "replan", "retry_scheduled", "retry_attempted", "retry_failed", "retry_succeeded", "retry_exhausted", "outcome_cancelled"]);
+    const parentTypes = new Set(["mirror_object", "sandbox_event", "social_intent", "execution", "outcome", "permission_decision", "temporal_event", "learning_update", "plan_mutation", "assignment", "publication_metric", "publishing_plan"]);
+    const strictCausalFailures: string[] = [];
+    for (const [index, entry] of causalTrace.entries()) {
+      const kind = text(entry.kind) ?? "unknown";
+      if (!transitionKinds.has(kind)) continue;
+      const data = record(entry.data);
+      const causal = record(data.causal);
+      const parents = Array.isArray(causal.parentIds) ? causal.parentIds.filter((item): item is string => typeof item === "string") : [];
+      const types = record(causal.parentTypes);
+      if (!Object.keys(causal).length) strictCausalFailures.push(`${kind}:${String(entry.id)} missing causal block`);
+      if (!["observation", "event_fired", "decision", "intent", "plan_mutation"].includes(kind) && parents.length === 0) strictCausalFailures.push(`${kind}:${String(entry.id)} has no causal parent`);
+      for (const parent of parents) {
+        if (!traceIds.has(parent) && !traceEventIds.has(parent)) strictCausalFailures.push(`${kind}:${String(entry.id)} references missing parent ${parent}`);
+        if (typeof types[parent] !== "string" || !parentTypes.has(types[parent] as string)) strictCausalFailures.push(`${kind}:${String(entry.id)} has untyped parent ${parent}`);
+        if ((firstSeenAt.get(parent) ?? Infinity) > index) strictCausalFailures.push(`${kind}:${String(entry.id)} references a future cause ${parent}`);
+      }
+    }
+    expect(strictCausalFailures, `Strict causal reconstruction failures: ${JSON.stringify(strictCausalFailures)}`).toEqual([]);
     const missingCausalParents = causalTrace.filter((entry) => ["execution", "permission_decision", "result", "outcome", "learning", "replan"].includes(text(entry.kind) ?? "")).filter((entry) => {
       const data = record(entry.data);
       const causal = record(data.causal);
@@ -472,8 +553,8 @@ test.describe("Mandatory seven-day no-babysitting trajectory", () => {
       virtualDurationMinutes: elapsedMinutes,
       requiredVirtualDurationMinutes: dayMinutes,
       baseline: { goal: text(record(created.agent).description), userAssignmentCount: baselineAssignments.length, presence: { connectionMode: text(record(baseline.presence).connectionMode), environment: text(record(baseline.presence).environment) } },
-      totals: { agentAssignments: agentAssignments.length, autonomousIntents: autonomousIntents.length, autonomousExecutions: autonomousExecutions.length, outcomes: current.outcomes.length, measurements: measurementCount, blockers: blockers.length, autonomousWakeCount, activePlans: activePlans.length, supersededPlans: supersededPlans.length, causalGraph },
-      assertions: { sevenDaysAdvanced: (elapsedMinutes ?? 0) >= dayMinutes, dailyAutonomousWakes: autonomousWakeCount >= 7, noUserAssignment: baselineAssignments.length === 0, seededLaunch: text(startSession.seed) === seed, relevantMediaObserved: current.events.some((event) => /evaluation-chart|media/i.test(`${text(event.title) ?? ""} ${text(event.detail) ?? ""}`)), irrelevantMediaObserved: current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("unrelated product photo")), breakingEventObserved: current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("withdrawn")), selfGeneratedWork: agentAssignments.length > 0 || autonomousIntents.length > 0, followThrough: autonomousExecutions.length > 0, measurement: measurementCount > 0, explicitBlocker: blockers.length > 0, unexplainedIdleDays },
+      totals: { agentAssignments: agentAssignments.length, autonomousIntents: autonomousIntents.length, autonomousExecutions: autonomousExecutions.length, outcomes: current.outcomes.length, measurements: measurementCount, metricStimuli: metricMirrorIds.size, blockers: blockers.length, autonomousWakeCount, activePlans: activePlans.length, supersededPlans: supersededPlans.length, causalGraph },
+      assertions: { sevenDaysAdvanced: (elapsedMinutes ?? 0) >= dayMinutes, dailyAutonomousWakes: autonomousWakeCount >= 7, noUserAssignment: baselineAssignments.length === 0, seededLaunch: text(startSession.seed) === seed, relevantMediaObserved: current.events.some((event) => /evaluation-chart|media/i.test(`${text(event.title) ?? ""} ${text(event.detail) ?? ""}`)), irrelevantMediaObserved: current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("unrelated product photo")), breakingEventObserved: current.mirrorObjects.some((object) => text(record(object.content).text)?.includes("withdrawn")), selfGeneratedWork: agentAssignments.length > 0 || autonomousIntents.length > 0, followThrough: autonomousExecutions.length > 0, measurement: measurementCount > 0, publicMetricStimulus: metricMirrorIds.size > 0, explicitBlocker: blockers.length > 0, unexplainedIdleDays },
       dailyTrajectory,
       trajectory,
       timeline: timelineCli.json?.timeline ?? [],

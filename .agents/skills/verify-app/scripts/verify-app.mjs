@@ -9,6 +9,8 @@ import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
+import { runJevTriage } from "./jev-adapter.mjs";
+import { createProofPack } from "./proof-pack.mjs";
 
 const execFileAsync = promisify(execFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -32,6 +34,7 @@ const routes = {
   playground: "/playground",
   analytics: "/analytics",
   knowledge: "/knowledge",
+  artifacts: "/artifacts",
   assets: "/assets",
   growth: "/growth",
   schedule: "/schedule",
@@ -70,7 +73,7 @@ Browser inspection and control:
   run <flow.json>                  Run open/type/click/wait/assert steps in one browser context
   wait-for --text <t>             Wait for an observable condition
   wait-settle                      Wait for the app's current page to settle
-  assert --text <t>               Assert a visible product state
+  assert --text <t>               Assert a visible product state (or --value on a control)
 
 Observability and state:
   state [--projection <name>]     Read the server's current persisted projection
@@ -85,6 +88,8 @@ Fixtures and maintenance:
   reset-session                    Reset isolated test state through /api/state
   seed-state --scenario <file>    Run an existing sandbox scenario through the product CLI
   maintenance                     Check feature-map links and harness prerequisites
+  proof-pack --contract <file>    Build a candidate-bound closure packet (optional --evidence/--reuse-from/--out)
+  jev-triage --evidence <file>    Triage deterministic evidence with JEV after collection
 
 Common options:
   --url <url>                    Attach to an explicitly selected app URL
@@ -93,6 +98,7 @@ Common options:
   --timeout <ms>                 Override an observable wait timeout
   --dry-run                      Show a destructive operation without changing state
   --confirm                      Confirm cleanup of this harness-owned runtime
+  --compact                      Write full JSON to evidence and print a small summary
   --json                         Explicitly request JSON (the default)
 `;
 
@@ -139,6 +145,8 @@ function config(options = {}) {
     port,
     url,
     attached: Boolean(requestedUrl),
+    realModel: process.env.OPENPRESENCE_VERIFY_REAL_MODEL === "1",
+    schedulerEnabled: process.env.OPENPRESENCE_VERIFY_SCHEDULER === "1",
     runtimeDir,
     dbPath: path.join(runtimeDir, "openpresence.sqlite"),
     nextDistDir: path.join(runtimeDir, "next-dist"),
@@ -216,9 +224,9 @@ function startEnvironment(runtime) {
     OPENPRESENCE_NEXT_DIST_DIR: runtime.nextDistDir,
     OPENPRESENCE_TEST_MODE: "1",
     OPENPRESENCE_ALLOW_DATABASE_INIT: "1",
-    OPENPRESENCE_AI_MOCK: "1",
+    OPENPRESENCE_AI_MOCK: runtime.realModel ? "0" : "1",
     OPENPRESENCE_X_API_MOCK: "1",
-    OPENPRESENCE_DISABLE_SCHEDULER: "1",
+    OPENPRESENCE_DISABLE_SCHEDULER: runtime.schedulerEnabled ? "0" : "1",
     OPENPRESENCE_DEFAULT_AGENT_NAME: "Jenny",
   };
 }
@@ -233,6 +241,9 @@ async function start(runtime) {
   await ensureRuntime(runtime);
   const existing = await readPid(runtime);
   if (existing && processAlive(existing.pid)) {
+    if (Boolean(existing.realModel) !== runtime.realModel || Boolean(existing.schedulerEnabled) !== runtime.schedulerEnabled) {
+      throw new Error("The running harness has different model/scheduler settings. Restart it with the requested settings before collecting evidence.");
+    }
     const status = await appStatus(runtime);
     if (status.reachable) return { ok: true, command: "start", reused: true, runtime, status };
     throw new Error(`Harness PID ${existing.pid} is alive but ${runtime.url} is not healthy. Inspect ${runtime.serverLog} before continuing.`);
@@ -251,7 +262,7 @@ async function start(runtime) {
   });
   child.unref();
   fs.closeSync(logFd);
-  await writeJson(runtime.pidPath, { pid: child.pid, startedAt: new Date().toISOString(), url: runtime.url, dbPath: runtime.dbPath, identity: runtime.identity });
+  await writeJson(runtime.pidPath, { pid: child.pid, startedAt: new Date().toISOString(), url: runtime.url, dbPath: runtime.dbPath, identity: runtime.identity, realModel: runtime.realModel, schedulerEnabled: runtime.schedulerEnabled });
   try {
     const status = await waitForApp(runtime);
     return { ok: true, command: "start", reused: false, runtime, status };
@@ -438,13 +449,14 @@ async function browserRun(runtime, options, flowFile) {
     const results = [];
     for (const [index, step] of flow.entries()) {
       if (!step || typeof step !== "object" || typeof step.command !== "string") throw new Error(`Flow step ${index + 1} must contain a command.`);
+      const stepStartedAt = Date.now();
       const stepOptions = { ...options, ...step };
       const command = step.command;
       if (command === "open") {
         const route = destination(step.destination ?? step.route);
         await page.goto(route.startsWith("http") ? route : `${runtime.url}${route}`, { waitUntil: "domcontentloaded", timeout: numberOption(stepOptions, "timeout", 30_000) });
         await waitForSettle(page, stepOptions);
-        results.push({ step: index + 1, command, route: await saveRoute(runtime, page.url()) });
+        results.push({ step: index + 1, command, route: await saveRoute(runtime, page.url()), durationMs: Date.now() - stepStartedAt });
       } else if (["click", "aria-click", "semantic-click", "type", "press", "select", "submit", "upload"].includes(command)) {
         const locatorOptions = command === "type" ? { ...stepOptions, text: undefined } : stepOptions;
         const locator = getLocator(page, locatorOptions, "button");
@@ -460,13 +472,13 @@ async function browserRun(runtime, options, flowFile) {
         else if (command === "upload") await locator.setInputFiles(path.resolve(String(step.path)));
         if (mutationResponse) await mutationResponse;
         await waitForSettle(page, stepOptions);
-        results.push({ step: index + 1, command, url: page.url() });
+        results.push({ step: index + 1, command, url: page.url(), durationMs: Date.now() - stepStartedAt });
       } else if (command === "wait-for") {
         const timeout = numberOption(stepOptions, "timeout", 30_000);
         if (step.url) await page.waitForURL((url) => url.toString().includes(String(step.url)), { timeout });
         else if (step.text) await page.getByText(String(step.text), { exact: step.exact === true }).waitFor({ state: step.hidden ? "hidden" : "visible", timeout });
         else await getLocator(page, stepOptions).waitFor({ state: step.hidden ? "hidden" : "visible", timeout });
-        results.push({ step: index + 1, command, url: page.url() });
+        results.push({ step: index + 1, command, url: page.url(), durationMs: Date.now() - stepStartedAt });
       } else if (command === "assert") {
         if (step.url && !page.url().includes(String(step.url))) throw new Error(`Flow step ${index + 1}: URL does not contain '${step.url}'.`);
         const body = await page.locator("body").innerText();
@@ -478,13 +490,17 @@ async function browserRun(runtime, options, flowFile) {
           const expectedCount = step.count === undefined ? 1 : Number(step.count);
           if (count !== expectedCount) throw new Error(`Flow step ${index + 1}: expected ${expectedCount} locator match(es), found ${count}.`);
           if (step.visible !== false && count > 0 && !(await locator.first().isVisible())) throw new Error(`Flow step ${index + 1}: locator is not visible.`);
+          if (step.value !== undefined) {
+            const actual = await locator.first().inputValue();
+            if (actual !== String(step.value)) throw new Error(`Flow step ${index + 1}: control value '${actual}' does not equal '${step.value}'.`);
+          }
         }
-        results.push({ step: index + 1, command, url: page.url() });
+        results.push({ step: index + 1, command, url: page.url(), durationMs: Date.now() - stepStartedAt });
       } else if (command === "screenshot") {
         const requested = step.path ? path.resolve(String(step.path)) : path.join(runtime.evidenceDir, `flow-${index + 1}.png`);
         await fsp.mkdir(path.dirname(requested), { recursive: true });
         await page.screenshot({ path: requested, fullPage: step["full-page"] === true });
-        results.push({ step: index + 1, command, path: requested, url: page.url() });
+        results.push({ step: index + 1, command, path: requested, url: page.url(), durationMs: Date.now() - stepStartedAt });
       } else {
         throw new Error(`Flow step ${index + 1} has unsupported command '${command}'.`);
       }
@@ -523,6 +539,10 @@ async function browserAssert(runtime, options) {
       const expectedCount = options.count === undefined ? 1 : Number(options.count);
       if (count !== expectedCount) throw new Error(`Locator assertion failed: expected ${expectedCount} match(es), found ${count}.`);
       if (options.visible !== false && count > 0 && !(await locator.first().isVisible())) throw new Error("Locator assertion failed: first match is not visible.");
+      if (options.value !== undefined && !options.attribute) {
+        const actual = await locator.first().inputValue();
+        if (actual !== String(options.value)) throw new Error(`Value assertion failed: control value '${actual}' does not equal '${options.value}'.`);
+      }
       if (options.attribute) {
         const actual = await locator.first().getAttribute(String(options.attribute));
         if (actual !== String(options.value ?? "")) throw new Error(`Attribute assertion failed: ${options.attribute}='${actual}', expected '${options.value}'.`);
@@ -606,6 +626,25 @@ async function maintenance(runtime) {
   return result;
 }
 
+async function jevTriage(runtime, options) {
+  const evidencePath = options.evidence;
+  if (!evidencePath) throw new Error("jev-triage requires --evidence <file>.");
+  const resolved = path.resolve(String(evidencePath));
+  const evidence = JSON.parse(await fsp.readFile(resolved, "utf8"));
+  const result = await runJevTriage(evidence, {
+    mode: options["jev-mode"] ?? options.mode,
+    model: options.model ?? "jev-latest",
+    runtimeDir: runtime.runtimeDir,
+    persistPath: path.join(runtime.evidenceDir, "jev-decisions.ndjson")
+  });
+  return { ok: true, command: "jev-triage", evidencePath: resolved, decisionPath: path.join(runtime.evidenceDir, "jev-decisions.ndjson"), ...result };
+}
+
+async function proofPack(runtime, options) {
+  if (!options.contract) throw new Error("proof-pack requires --contract <file>.");
+  return { ok: true, command: "proof-pack", ...(await createProofPack(repoRoot, options)) };
+}
+
 async function cleanup(runtime, options) {
   const exists = fs.existsSync(runtime.runtimeDir);
   const forbidden = new Set([path.parse(runtime.runtimeDir).root, repoRoot, os.homedir(), os.tmpdir()]);
@@ -617,7 +656,20 @@ async function cleanup(runtime, options) {
   return { ...result, dryRun: false, removed: true };
 }
 
-function output(value) {
+async function output(value, runtime, options, command) {
+  if (options.compact === true) {
+    await ensureRuntime(runtime);
+    const file = path.join(runtime.evidenceDir, `${command}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
+    await writeJson(file, value);
+    const summary = { ok: value?.ok ?? true, command, artifactPath: file };
+    for (const key of ["reused", "stopped", "route", "workspaceRevision", "activeAgentId", "activePresenceId", "identity"]) {
+      if (value?.[key] !== undefined) summary[key] = value[key];
+    }
+    if (value?.status && typeof value.status === "object") summary.status = { reachable: value.status.reachable, health: value.status.health?.status ?? value.status.health?.state ?? null };
+    else if (value?.status !== undefined) summary.status = value.status;
+    process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+    return;
+  }
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
@@ -659,8 +711,11 @@ async function main() {
   else if (command === "reset-session") result = await resetSession(runtime);
   else if (command === "seed-state") result = await seedState(runtime, options);
   else if (command === "maintenance") result = await maintenance(runtime);
+  else if (command === "proof-pack") result = await proofPack(runtime, options);
+  else if (command === "jev-triage") result = await jevTriage(runtime, options);
   else throw new Error(`Unknown command '${command}'. Run verify-app help.`);
-  output(result);
+  await output(result, runtime, options, command);
+  if (command === "proof-pack" && result.status !== "PASS") process.exitCode = 2;
 }
 
 main().catch((error) => {

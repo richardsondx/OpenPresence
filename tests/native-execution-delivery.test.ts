@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as x from "../lib/x";
 import * as db from "../lib/db";
 import { deliverNativeExecutions } from "../lib/native-execution-delivery";
-import { createAgent, formXActionIntent, formXReplyIntent } from "../lib/runtime";
+import { clearNativeBrowserContinuityHold, createAgent, formXActionIntent, formXReplyIntent } from "../lib/runtime";
 import type { NativeChannelConnection } from "../lib/types";
 
 afterEach(() => {
@@ -65,6 +65,7 @@ describe("Autonomous native execution delivery", () => {
     const credentials = { apiKey: "key", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" };
     vi.spyOn(x, "readNativeXCredentials").mockReturnValue(credentials);
     vi.spyOn(x, "likeXPost").mockResolvedValue({ type: "x.like", id: "like_delivery_test" });
+    vi.spyOn(db, "readStateSnapshotForContext").mockReturnValue(state);
     process.env.OPENPRESENCE_TEST_MODE = "0";
 
     const delivered = await deliverNativeExecutions(state, new Set([queued.id, "legacy-duplicate"]));
@@ -92,12 +93,50 @@ describe("Autonomous native execution delivery", () => {
 
     vi.spyOn(x, "readNativeXCredentials").mockReturnValue({ apiKey: "key", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" });
     const like = vi.spyOn(x, "likeXPost").mockResolvedValue({ type: "x.like", id: "should-not-exist" });
+    vi.spyOn(db, "readStateSnapshotForContext").mockReturnValue(state);
     process.env.OPENPRESENCE_TEST_MODE = "0";
 
     const delivered = await deliverNativeExecutions(state, new Set([execution.id]));
 
     expect(delivered.executions.find((item) => item.id === execution.id)).toMatchObject({ status: "queued", retryAt: execution.retryAt });
     expect(like).not.toHaveBeenCalled();
+  });
+
+  it("reroutes the first Native billing failure to a connected browser", async () => {
+    const targetId = `post_first-credit-failure_${Date.now()}_${Math.random()}`;
+    let state = createAgent({ name: "Browser Continuity", description: "Test", audience: "Testers", mode: "agent", handle: "@browser_continuity", accent: "#777777" });
+    const presence = { ...state.presence!, id: "presence_browser_continuity", status: "live" as const, channel: "x" as const, environment: "live" as const, execution: { ...state.presence!.execution, like: "auto" as const } };
+    const connection: NativeChannelConnection = { id: "native-browser-continuity", presenceId: presence.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "browser-account", username: "browser_continuity", name: "Browser Continuity" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    state.presence = presence;
+    state.presences = [presence];
+    state.nativeConnections = [connection];
+    state.bridges = [{ id: "browser-continuity", presenceId: presence.id, channelId: "x", name: "OpenPresence Chrome", kind: "bridge", state: "online", adapterStatus: "connected", lastHeartbeatAt: new Date().toISOString(), accountIdentity: { username: "browser_continuity", status: "verified", observedAt: new Date().toISOString() }, capabilities: { inbound: true, reconcile: true, affordances: ["like"], formats: ["x.like"], metrics: [] }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as never];
+    state.mirrorObjects = [{ id: "browser-target", bridgeId: connection.id, presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: targetId }, objectType: "post", language: "en", content: { text: "A target worth acknowledging", language: "en" }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", archived: false, environment: "live" } as never];
+    state = formXActionIntent(state, { affordance: "x.like", target: { type: "x.post", id: targetId } });
+    const execution = state.executions[0]!;
+
+    vi.spyOn(x, "readNativeXCredentials").mockReturnValue({ apiKey: "key", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" });
+    const like = vi.spyOn(x, "likeXPost").mockRejectedValue(new Error("X has no API credits remaining for this app."));
+    vi.spyOn(db, "readStateSnapshotForContext").mockReturnValue(state);
+    process.env.OPENPRESENCE_TEST_MODE = "0";
+
+    const delivered = await deliverNativeExecutions(state, new Set([execution.id]));
+    const rerouted = delivered.executions.find((item) => item.id === execution.id)!;
+
+    expect(like).toHaveBeenCalledTimes(1);
+    expect(rerouted).toMatchObject({ connector: "bridge", bridgeId: "browser-continuity", status: "queued" });
+    expect(rerouted.failure).toBeUndefined();
+
+    const followUpTarget = `post_continuity_hold_${Date.now()}_${Math.random()}`;
+    delivered.mirrorObjects.unshift({ id: "browser-follow-up-target", bridgeId: "browser-continuity", presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: followUpTarget }, objectType: "post", language: "en", content: { text: "Another target", language: "en" }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", archived: false, environment: "live" } as never);
+    const heldFollowUp = formXActionIntent(delivered, { affordance: "x.like", target: { type: "x.post", id: followUpTarget } });
+    expect(heldFollowUp.executions[0]).toMatchObject({ connector: "bridge", bridgeId: "browser-continuity" });
+
+    const rearmed = clearNativeBrowserContinuityHold(heldFollowUp, presence.id);
+    const rearmedTarget = `post_rearmed_${Date.now()}_${Math.random()}`;
+    rearmed.mirrorObjects.unshift({ id: "browser-rearmed-target", bridgeId: "native-browser-continuity", presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: rearmedTarget }, objectType: "post", language: "en", content: { text: "A target after an explicit check", language: "en" }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", archived: false, environment: "live" } as never);
+    const afterCheck = formXActionIntent(rearmed, { affordance: "x.like", target: { type: "x.post", id: rearmedTarget } });
+    expect(afterCheck.executions[0]).toMatchObject({ connector: "native", bridgeId: undefined });
   });
 
   it("allows only one Native write when concurrent stale workers generated different replies to one target", async () => {
@@ -128,6 +167,7 @@ describe("Autonomous native execution delivery", () => {
 
     vi.spyOn(x, "readNativeXCredentials").mockReturnValue({ apiKey: "key", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" });
     vi.spyOn(x, "publishSealedXPost").mockResolvedValue({ type: "x.reply", id: "only-one-public-reply" });
+    vi.spyOn(db, "readStateSnapshotForContext").mockReturnValue(state);
     const clone = () => JSON.parse(JSON.stringify(state));
     const [firstResult, secondResult] = await Promise.all([
       deliverNativeExecutions(clone(), new Set([first!.id])),
@@ -175,6 +215,7 @@ describe("Autonomous native execution delivery", () => {
     state.executions = [stale as never];
     vi.spyOn(x, "readNativeXCredentials").mockReturnValue({ apiKey: "key", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" });
     const publish = vi.spyOn(x, "publishSealedXPost").mockResolvedValue({ type: "x.reply", id: "should-not-exist" });
+    vi.spyOn(db, "readStateSnapshotForContext").mockReturnValue(state);
 
     const delivered = await deliverNativeExecutions(state, new Set([stale.id]));
 
@@ -199,6 +240,7 @@ describe("Autonomous native execution delivery", () => {
     state.presences = [paused];
     vi.spyOn(x, "readNativeXCredentials").mockReturnValue({ apiKey: "key", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" });
     const like = vi.spyOn(x, "likeXPost").mockResolvedValue({ type: "x.like", id: targetId });
+    vi.spyOn(db, "readStateSnapshotForContext").mockReturnValue(state);
     process.env.OPENPRESENCE_TEST_MODE = "0";
 
     const delivered = await deliverNativeExecutions(state, new Set([execution.id]));

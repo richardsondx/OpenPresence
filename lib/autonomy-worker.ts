@@ -676,6 +676,7 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
     // knows exactly.
     let finalChoices: Array<{ label: string; content: string }> | undefined;
     let finalReaction: typeof operatorChatReactions[number] | undefined;
+    let presentedAttachments: import("./types").PresenceChatAttachment[] | undefined;
     let completionCandidate: string | undefined;
     let completionReviewed = false;
     let finalReply = completed?.content ?? operatorUsageReply(next, operatorMessage.content, usageEvents);
@@ -856,7 +857,13 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
     if (wasCancelled()) return readStateSnapshotForContext({ presenceId: run.presenceId });
     if (!finalReply) throw new Error("This attempt reached its work limit before producing a complete answer. Recorded work is saved; retry the response to continue.");
     if (!completed) {
-      next = recordOperatorConversationMessage(next, { presenceId: run.presenceId, threadId: conversation.threadId ?? conversation.id, content: formatReplyText(finalReply), choices: finalChoices, reaction: finalReaction, role: "presence", replyToMessageId: operatorMessage.id });
+      presentedAttachments = receipts.flatMap((item) => {
+        try {
+          const receipt = JSON.parse(item.content) as { result?: { attachment?: import("./types").PresenceChatAttachment } };
+          return receipt.result?.attachment ? [receipt.result.attachment] : [];
+        } catch { return []; }
+      });
+      next = recordOperatorConversationMessage(next, { presenceId: run.presenceId, threadId: conversation.threadId ?? conversation.id, content: formatReplyText(finalReply), choices: finalChoices, reaction: finalReaction, attachments: presentedAttachments.length ? presentedAttachments : undefined, role: "presence", replyToMessageId: operatorMessage.id });
       const nudge = operatorMessage.nudgeId ? next.operatorNudges?.find((item) => item.id === operatorMessage.nudgeId) : undefined;
       if (nudge && !nudge.assignmentId) { nudge.status = "resolved"; nudge.resultSummary = finalReply; nudge.resolvedAt = new Date().toISOString(); }
       await writeStateWithRetry(base, mergeAutonomyState(base, next, readStateSnapshotForContext({ presenceId: run.presenceId })));
@@ -899,7 +906,7 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
       threadId: conversation.threadId ?? conversation.id,
       content: isAiRateLimitError(error)
         ? "Your message is saved. The model provider is still at capacity, so I paused automatic retries to avoid adding more load. Try again after it recovers, or choose a connected local model in Brain → Provider access."
-        : fallback ? `I’ll keep an eye on @${fallback.replace(/^@/, "")}. I hit a temporary problem while finishing that request. Your message is saved, so nothing was lost. Please retry the response.` : userFacingFailure,
+        : fallback ? `I’ll keep an eye on @${fallback.replace(/^@/, "")}. I couldn’t complete that turn. Your message is saved, and any work already recorded remains visible. Retry response to continue.` : userFacingFailure,
       role: "system",
       replyToMessageId: operatorMessage.id,
     });

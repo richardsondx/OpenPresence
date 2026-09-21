@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { claimExecutions, closeChromeVerification, createBridgeWithKey, failExecution, ingestEvents, reconcileBridge, recordVerifiedBridgeReaction, reportBridgeIdentity, verifyChromeExecution } from "../lib/bridge";
-import { applyOperation, createAgent, formXReplyIntent, recordNativeMirror } from "../lib/runtime";
+import { acknowledgeExecution, claimExecutions, closeChromeVerification, createBridgeWithKey, failExecution, ingestEvents, reconcileBridge, recordVerifiedBridgeReaction, reportBridgeIdentity, verifyChromeExecution } from "../lib/bridge";
+import { applyOperation, createAgent, formChatPostIntent, formXReplyIntent, recordNativeMirror } from "../lib/runtime";
 import { appendMirrorEvents, readState, readStateForBridge, readStateVersion, WorkspaceConflictError, writeState } from "../lib/db";
 import type { Execution, MirrorEvent } from "../lib/types";
 
@@ -73,6 +73,100 @@ describe("Bridge browser retry lifecycle", () => {
     expect(repeated.identity).toMatchObject({ status: "verified", username: "example_agent" });
     expect(readStateVersion()).toBe(beforeVersion);
     expect(readState().workspaceRevision).toBe(beforeRevision);
+  });
+
+  it("recovers an older Native billing failure when the verified browser becomes ready", () => {
+    const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    state.presence!.environment = "live";
+    state.presences = state.presences.map((presence) => presence.id === state.presence!.id ? { ...presence, environment: "live" } : presence);
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["like"], formats: ["x.like"], metrics: [] } } });
+    const intentId = "intent-recover-native-billing";
+    const executionId = "execution-recover-native-billing";
+    const now = new Date().toISOString();
+    const current = bridgeResult.state;
+    current.socialIntents.unshift({ id: intentId, agentId: current.agent!.id, presenceId: current.presence!.id, affordance: "x.like", target: { type: "x.post", id: "recover-target" }, priority: 50, validity: { expiresAt: new Date(Date.now() - 1_000).toISOString() }, state: "expired", formedAt: now, updatedAt: now, environment: "live" } as never);
+    current.executions.unshift({ id: executionId, socialIntentId: intentId, presenceId: current.presence!.id, affordance: "x.like", mode: "auto", status: "failed", attempts: 1, connector: "native", target: { type: "x.post", id: "recover-target" }, idempotencyKey: executionId, failure: { message: "X API billing request rejected (HTTP 402): credits depleted." }, createdAt: now, updatedAt: now, environment: "live" } as never);
+    current.actions.unshift({ id: "action-recover-native-billing", intent: "like", target: "recover-target", summary: "Like the target", status: "failed", reason: "Native X billing failed", createdAt: now, executionId } as never);
+    writeState(current);
+
+    const bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge!.id)!;
+    const result = reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "example_agent" });
+    const recovered = result.state.executions.find((item) => item.id === executionId)!;
+    const recoveredIntent = result.state.socialIntents.find((item) => item.id === intentId)!;
+
+    expect(recovered).toMatchObject({ connector: "bridge", bridgeId: bridge.id, status: "queued" });
+    expect(recovered.failure).toBeUndefined();
+    expect(recoveredIntent.state).toBe("active");
+    expect(new Date(recoveredIntent.validity.expiresAt!).getTime()).toBeGreaterThan(Date.now());
+    expect(result.state.actions.find((item) => item.executionId === executionId)?.status).toBe("queued");
+    expect(result.state.events.some((event) => event.title === "Recovered public work through Chrome")).toBe(true);
+  });
+
+  it("resumes the same blocked Assignment when the verified browser route recovers", () => {
+    let state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    state.presence!.environment = "live";
+    state.presences = state.presences.map((presence) => presence.id === state.presence!.id ? { ...presence, environment: "live" } : presence);
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["post"], formats: ["x.post"], metrics: [] } } });
+    Object.assign(bridgeResult.state.bridges[0]!, { adapterStatus: "connected", lastHeartbeatAt: new Date().toISOString(), lastSeenAt: new Date().toISOString() });
+    state = applyOperation(bridgeResult.state, { type: "createAssignment", presenceId: state.presence!.id, environment: "live", instruction: "Publish one useful post." });
+    const assignment = state.assignments[0]!;
+    assignment.status = "needs_operator";
+    assignment.lastOutcome = { class: "assignment_blocked", message: "X API billing is blocking this action. Restore API credits or connect an authorized browser route.", at: new Date().toISOString() };
+    writeState(state);
+
+    const bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge!.id)!;
+    const result = reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "example_agent" });
+    const resumed = result.state.assignments.find((item) => item.id === assignment.id)!;
+
+    expect(resumed.status).toBe("active");
+    expect(resumed.lastOutcome?.message).toContain("original Assignment is resuming");
+    expect(resumed.work?.blockedReason).toBeUndefined();
+    expect(result.state.events.some((event) => event.title === "Resumed blocked work through Chrome")).toBe(true);
+  });
+
+  it("retains one causal execution through native quota failure, wrong-account hold, browser resume, and verified outcome", () => {
+    let state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    const presenceId = state.presence!.id;
+    state.presence!.environment = "live";
+    state.presence!.connectionMode = "bridge";
+    state.presences = state.presences.map((presence) => presence.id === presenceId ? { ...presence, environment: "live", connectionMode: "bridge" } : presence);
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["like"], formats: ["x.like"], metrics: [] } } });
+    Object.assign(bridgeResult.state.bridges[0]!, { adapterStatus: "connected", lastHeartbeatAt: new Date().toISOString(), lastSeenAt: new Date().toISOString() });
+    const now = new Date().toISOString();
+    const intentId = "causal-intent";
+    const executionId = "causal-execution";
+    state = bridgeResult.state;
+    state.nativeConnections = [{ id: "causal-native", presenceId, channelId: "x", kind: "x", status: "needs-attention", access: "read-write", account: { id: "genny-account", username: "example_agent", name: "Genny" }, deliveryError: "X API billing request rejected (HTTP 402): credits depleted.", createdAt: now, updatedAt: now }];
+    state.socialIntents.unshift({ id: intentId, agentId: state.agent!.id, presenceId, affordance: "x.like", target: { type: "x.post", id: "causal-target" }, priority: 50, validity: { expiresAt: new Date(Date.now() - 1_000).toISOString() }, state: "expired", formedAt: now, updatedAt: now, environment: "live" } as never);
+    state.mirrorObjects.unshift({ id: "causal-target-mirror", bridgeId: bridgeResult.bridge!.id, presenceId, channelId: "x", externalRef: { type: "x.post", id: "causal-target" }, objectType: "post", author: { displayName: "Target", handle: "target" }, content: { text: "A target worth acknowledging." }, observedAt: now, visibility: "public", shareability: "presence-only", environment: "live" } as never);
+    state.executions.unshift({ id: executionId, socialIntentId: intentId, presenceId, affordance: "x.like", mode: "auto", status: "failed", attempts: 1, connector: "native", target: { type: "x.post", id: "causal-target" }, idempotencyKey: executionId, failure: { code: "X_API_CREDITS_EXHAUSTED", message: "X API billing request rejected (HTTP 402): credits depleted.", retryable: false }, createdAt: now, updatedAt: now, environment: "live" } as never);
+    writeState(state);
+
+    const trace: string[] = ["native_attempt_failed_quota"];
+    let bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge!.id)!;
+    reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "example_agent" });
+    trace.push("browser_route_selected");
+    bridge = readState().bridges.find((item) => item.id === bridge.id)!;
+    reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "another-account" });
+    const wrongAccountClaim = claimExecutions(readState().bridges.find((item) => item.id === bridge.id)!, { executorId: "chrome-test", limit: 1 });
+    trace.push("wrong_account_held");
+    expect(wrongAccountClaim.executions).toHaveLength(0);
+    expect(readState().executions.find((item) => item.id === executionId)?.status).toBe("queued");
+
+    bridge = readState().bridges.find((item) => item.id === bridge.id)!;
+    reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "example_agent" });
+    trace.push("expected_account_resumed");
+    bridge = readState().bridges.find((item) => item.id === bridge.id)!;
+    const claimed = claimExecutions(bridge, { executorId: "chrome-test", limit: 1 });
+    expect(claimed.executions.map((item) => item.id)).toEqual([executionId]);
+    trace.push("browser_write_claimed");
+    const acknowledged = acknowledgeExecution(bridge, executionId, { executorId: "chrome-test", externalRef: { type: "x.like", id: "causal-like" } });
+    trace.push("external_outcome_verified");
+
+    expect(trace).toEqual(["native_attempt_failed_quota", "browser_route_selected", "wrong_account_held", "expected_account_resumed", "browser_write_claimed", "external_outcome_verified"]);
+    expect(acknowledged.execution).toMatchObject({ id: executionId, connector: "bridge", status: "succeeded", externalRef: { type: "x.like", id: "causal-like" } });
+    expect(readState().executions.filter((item) => item.id === executionId)).toHaveLength(1);
+    expect(readState().nativeConnections.find((item) => item.id === "causal-native")).toMatchObject({ status: "needs-attention", deliveryError: expect.stringContaining("credits") });
   });
 
   it("keeps duplicate Bridge observations on the indexed health path", () => {
@@ -601,6 +695,41 @@ describe("Bridge browser retry lifecycle", () => {
     expect(result.execution.status).toBe("verification-pending");
     expect(result.execution.failure?.code).toBe("X_API_VERIFICATION_PENDING");
     expect(result.execution.externalRef).toBeUndefined();
+  });
+
+  it("verifies a text-only original post from strict browser proof when X API verification is unavailable", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "0");
+    let state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    state.presence!.environment = "live";
+    state.presence!.connectionMode = "bridge";
+    state.presences = state.presences.map((presence) => presence.id === state.presence!.id ? { ...presence, environment: "live", connectionMode: "bridge" } : presence);
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["post"], formats: ["x.post"], metrics: [] } } });
+    state = applyOperation(bridgeResult.state, { type: "setPresence", patch: { execution: { post: "auto" } } });
+    state = formChatPostIntent(state, "A browser-verified text-only canary.", undefined, "agent", [], undefined, undefined, state.presence!);
+    writeState(state);
+    let bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge!.id)!;
+    reportBridgeIdentity(bridge, { executorId: "chrome-dom-post", username: "example_agent" });
+    bridge = readState().bridges.find((item) => item.id === bridge.id)!;
+    const claimed = claimExecutions(bridge, { executorId: "chrome-dom-post", limit: 1 });
+    expect(claimed.executions).toHaveLength(1);
+    const execution = claimed.executions[0]!;
+    const result = await verifyChromeExecution(readState().bridges.find((item) => item.id === bridge.id)!, execution.id, {
+      executorId: "chrome-dom-post",
+      candidateExternalRef: { type: "x.post", id: "2100964409350692998" },
+      domProof: {
+        permalink: "https://x.com/example_agent/status/2100964409350692998",
+        externalRef: { type: "x.post", id: "2100964409350692998" },
+        authorHandle: "example_agent",
+        text: "A browser-verified text-only canary.",
+        mediaCount: 0,
+        assetIds: [],
+      },
+    });
+    expect(result.verified).toBe(true);
+    expect(result.execution).toMatchObject({ status: "succeeded", externalRef: { type: "x.post", id: "2100964409350692998" } });
+    expect(readState().outcomes.some((outcome) => outcome.executionId === execution.id && outcome.status === "succeeded")).toBe(true);
   });
 
   it("rejects DOM readback that clears the composer without a matching public permalink or relationship", async () => {

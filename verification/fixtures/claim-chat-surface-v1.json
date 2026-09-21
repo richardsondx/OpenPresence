@@ -1,0 +1,7 @@
+{
+  "fixtureVersion": "claim-chat-surface-v1",
+  "capability": "chat-surface-projection",
+  "state": "fresh isolated test-mode workspace",
+  "allowedExecutors": ["verify-app", "playwright"],
+  "externalWorldProof": false
+}

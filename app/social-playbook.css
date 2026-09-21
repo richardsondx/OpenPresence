@@ -4,9 +4,12 @@
 .social-playbook-heading p, .social-playbook-empty { color: var(--muted, #78716b); line-height: 1.5; }
 .social-playbook-list { display: grid; gap: 10px; margin-top: 16px; }
 .social-template-card { min-width: 0; border: 1px solid var(--border, #e6dfd8); border-radius: 12px; }
-.social-template-card summary { display: flex; gap: 12px; justify-content: space-between; padding: 16px; cursor: pointer; }
-.social-template-card summary strong { min-width: 0; overflow-wrap: anywhere; }
-.social-template-status { font-size: 12px; color: var(--muted, #78716b); flex-shrink: 0; }
+.social-template-card summary { display: flex; align-items: flex-start; gap: 10px; justify-content: flex-start; padding: 12px 14px; cursor: pointer; list-style: none; color: var(--ink, #252321); font-size: 12px; font-weight: 400; line-height: 1.4; }
+.social-template-card summary::-webkit-details-marker { display: none; }
+.social-template-card summary::before { content: "▸"; flex: 0 0 auto; margin-top: 1px; color: var(--muted, #78716b); font-size: 13px; line-height: 1.2; }
+.social-template-card[open] > summary::before { content: "▾"; }
+.social-template-card summary strong { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 12px; font-weight: 650; line-height: 1.4; }
+.social-template-status { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--border, #e6dfd8); border-radius: 999px; color: var(--muted, #78716b); font: 9px/1.2 var(--font-mono, monospace); white-space: nowrap; }
 .social-template-status.is-supported { color: #357849; }
 .social-template-detail { padding: 0 16px 16px; overflow-wrap: anywhere; }
 .social-template-layout, .social-template-guide { padding: 14px 0; }

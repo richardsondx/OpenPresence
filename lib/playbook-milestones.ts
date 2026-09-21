@@ -21,8 +21,11 @@ export function recordPlaybookMilestones(state: OpenPresenceState, presenceId: s
     role: "presence",
     content: `## Playbook update\n\n${lines.join("\n")}\n\nThe sources and results are saved in Artifacts → Templates.`,
     timestamp,
-    milestone: "verified",
-    agentInitiated: { kind: "breakthrough", dedupeKey: messageId },
+    // A newly saved low-confidence approach is a strategy change to test,
+    // not a verified breakthrough. Only evidence-backed support earns the
+    // stronger milestone and proactive classification.
+    milestone: changed.some(item => item.status === "supported") ? "verified" : "decision",
+    agentInitiated: { kind: changed.some(item => item.status === "supported") ? "breakthrough" : "strategy_change", dedupeKey: messageId },
   });
   conversation.updatedAt = timestamp;
   return state;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, audienceDeltas, capabilityProviderLabel, collapseAudienceSnapshots, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline, recordPublicationMetricSnapshots, recordVerifiedFollow } from "@/lib/runtime";
+import { applyOperation, audienceDeltas, capabilityProviderLabel, clearNativeBrowserContinuityHold, collapseAudienceSnapshots, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline, recordPublicationMetricSnapshots, recordVerifiedFollow } from "@/lib/runtime";
 import { createAgent } from "@/lib/runtime";
 import type { MirrorObject, OpenPresenceState } from "@/lib/types";
 import { nextSelfDirectedAttentionAt, recurringAttentionOperation, selectBridgeDiscoveryCandidates, selectGrowthDiscoverySource } from "@/lib/growth-scheduler";
@@ -143,7 +143,7 @@ describe("continuous growth responsibility", () => {
     expect(next.files.find((file) => file.kind === "GROWTH")?.content).toContain("Reply-led discovery");
     expect(next.growthFileVersions).toHaveLength(2);
     expect(next.growthFileVersions[0]).toMatchObject({ version: 2, previousVersion: 1, reviewId: next.growthReviews[0]?.id, reviewSource: "model" });
-    expect(next.operatorConversations?.flatMap((conversation) => conversation.messages).some((message) => message.agentInitiated?.kind === "breakthrough")).toBe(true);
+    expect(next.operatorConversations?.flatMap((conversation) => conversation.messages).some((message) => message.agentInitiated?.kind === "strategy_change" && message.milestone === "decision")).toBe(true);
     expect(Object.fromEntries(next.files.filter((file) => ["SOUL", "MISSION", "TASTE", "BRAIN"].includes(file.kind)).map((file) => [file.kind, file.content]))).toEqual(beforeIdentity);
   });
 
@@ -278,13 +278,15 @@ describe("continuous growth responsibility", () => {
     expect(manifest.items.find((item) => item.capability === "quote")).toMatchObject({ availability: "available", provider: "Browser Bridge", requiresBrowser: true, canExecute: true });
   });
 
-  it("returns to native after a temporary credit failure instead of requiring a browser forever", () => {
+  it("keeps the browser hold until an explicit connection check re-arms Native X", () => {
     const state = fixture();
     const now = new Date().toISOString();
     const presence = { ...state.presence!, browserAccess: { enabled: true, learnedFallbacks: [{ action: "x.quote", reason: "X API credits are exhausted; the authorized Chrome Bridge is the continuity route.", learnedAt: now }] } };
     const native = { id: "native-x", presenceId: presence.id, channelId: "x" as const, kind: "x" as const, status: "connected" as const, access: "read-write" as const, account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: now, updatedAt: now };
-    const manifest = derivePresenceCapabilityManifest({ ...state, presence, presences: [presence], bridges: [], nativeConnections: [native] }, presence.id);
-    expect(manifest.items.find((item) => item.capability === "quote")).toMatchObject({ availability: "available", provider: "Native X", requiresBrowser: false, canExecute: true });
+    const heldState = { ...state, presence, presences: [presence], bridges: [], nativeConnections: [native] };
+    expect(derivePresenceCapabilityManifest(heldState, presence.id).items.find((item) => item.capability === "quote")).toMatchObject({ availability: "unavailable", canExecute: false });
+    const rearmed = clearNativeBrowserContinuityHold(heldState, presence.id);
+    expect(derivePresenceCapabilityManifest(rearmed, presence.id).items.find((item) => item.capability === "quote")).toMatchObject({ availability: "available", provider: "Native X", requiresBrowser: false, canExecute: true });
   });
 
   it("withholds learned quote fallback from cognition until browser identity is verified", () => {

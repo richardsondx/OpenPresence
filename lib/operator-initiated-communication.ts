@@ -214,9 +214,10 @@ export function resolvePeriodicRecap(candidates: AgentInitiatedCommunicationCand
 export function recordAgentInitiatedUpdate(source: OpenPresenceState, presenceId: string, candidate: AgentInitiatedCommunicationCandidate) {
   const decision = resolveAgentInitiatedCommunication(candidate);
   if (decision.disposition !== "proactive_update" || !decision.kind || !decision.summary) return { state: source, decision, recorded: false as const };
+  const presence = source.presences.find((item) => item.id === presenceId)
+    ?? (source.presence?.id === presenceId ? source.presence : undefined);
+  if (!presence) return { state: source, decision, recorded: false as const };
   const state = structuredClone(source) as OpenPresenceState;
-  const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
-  if (!presence) return { state, decision, recorded: false as const };
   state.operatorConversations ??= [];
   let conversation = state.operatorConversations.find((item) => item.presenceId === presenceId
     && item.status !== "archived"

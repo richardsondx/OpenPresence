@@ -724,6 +724,21 @@ export async function generateAgentReply(state: OpenPresenceState, content: stri
       if (options.operatorToolHistory?.some((item) => /record_preference/.test(item.result))) {
         return "Got it. I’ll keep screenshots out unless their contents have been inspected and grounded.";
       }
+      const assignedWork = options.operatorToolHistory?.flatMap((item) => {
+        try {
+          const receipt = JSON.parse(item.result) as { tool?: unknown; assignmentId?: unknown } | null;
+          if (receipt?.tool !== "assignment" || typeof receipt.assignmentId !== "string") return [];
+          const assignment = state.assignments.find((candidate) => candidate.id === receipt.assignmentId
+            && candidate.presenceId === (options.presence?.id ?? state.presence?.id)
+            && candidate.createdBy === "agent"
+            && ["active", "planning", "working", "accepted"].includes(candidate.status));
+          return assignment ? [assignment] : [];
+        } catch { return []; }
+      }).at(-1);
+      if (assignedWork) {
+        const ongoing = assignedWork.activation?.type === "continuous" ? "ongoing " : "";
+        return `I saved this as an Agent-owned ${ongoing}responsibility. I’ll keep the work evidence-led, respect the Presence’s existing permissions, and bring back a clear update when there is something worth acting on.`;
+      }
       if (/\b(?:don't|do not|never)\b[^.?!]{0,120}\bscreenshots?\b/i.test(lower)) {
         return JSON.stringify({ kind: "record_preference", note: "Do not use screenshots unless their contents have been inspected and grounded.", reasons: ["format"], scopeHint: "presence" });
       }
@@ -1576,15 +1591,19 @@ function mockSocialDecision(state: OpenPresenceState, instruction: string, actio
       };
     }
     const candidates = assignmentMockCandidates(state, instruction);
+    // Honor the publication history supplied to cognition across Assignments
+    // and replay branches. Starting a new responsibility does not make an
+    // already published fixture fresh. Exhaustion still reaches the normal
+    // repetition guard; this does not bypass production candidate validation.
+    const candidateOffset = progress + rejectedCandidates;
+    const orderedCandidates = candidates.map((_, index) => candidates[(candidateOffset + index) % candidates.length]!);
+    const freshCandidate = orderedCandidates.find((candidate) => !instruction.includes(candidate));
     const requestedKinds = [...new Set((["image", "chart", "gif", "link", "video"] as const).filter((kind) => new RegExp(`\\b${kind}\\b`, "i").test(normalized)))];
     const assetKind = requestedKinds.length ? requestedKinds[progress % requestedKinds.length] : undefined;
     const libraryAssetId = mockLibraryAssetId(instruction);
     return {
       action: "post",
-      // A new Assignment can share the same Sandbox session as an earlier
-      // one. Offset mock candidates after a rejection so the runtime can
-      // make progress instead of proposing the same first candidate forever.
-      text: candidates[(progress + rejectedCandidates) % candidates.length]!,
+      text: freshCandidate ?? orderedCandidates[0]!,
       rationale: "The deterministic Sandbox fixture produced a distinct Assignment candidate grounded in the Agent context.",
       assets: libraryAssetId
         ? [{ kind: "image", assetId: libraryAssetId, name: "Existing eligible Asset-library image" }]
@@ -1749,7 +1768,7 @@ export async function generateAgentSocialDecision(state: OpenPresenceState, inst
     // than the runtime it is meant to certify.
     const strategyActs = mockActs.map((act) => {
       if (act.action === "no_op" || act.strategyId || act.noStrategyReason) return act;
-      const pattern = strategyContext?.retrievalRun.consideredPatterns.find((candidate) => candidate.supportedActs.includes(act.action as SocialStrategyPattern["supportedActs"][number]));
+      const pattern = strategyContext?.retrievalRun.consideredPatterns.find((candidate) => candidate.supportedActs.includes((act.action === "post" ? "original_post" : act.action) as SocialStrategyPattern["supportedActs"][number]));
       return pattern
         ? { ...act, strategyId: pattern.id, mechanismId: pattern.mechanism }
         : { ...act, noStrategyReason: "No supplied strategy pattern matched this act." };

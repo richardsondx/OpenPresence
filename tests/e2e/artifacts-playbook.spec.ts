@@ -15,6 +15,11 @@ test("templates persist separately from analytics and can draft ideas without sc
   await expect(page.getByText("Template saved.", { exact: false })).toBeVisible();
   await page.reload();
   const card = page.locator(".social-template-card").filter({ hasText: "Builder introduction" });
+  const summary = card.locator("summary");
+  await expect(summary).toHaveCSS("font-size", "12px");
+  await expect(summary.locator("strong")).toHaveCSS("font-size", "12px");
+  await expect(summary.locator(".social-template-status")).toHaveCSS("font-size", "9px");
+  await expect(summary.locator(".social-template-status")).toHaveCSS("white-space", "nowrap");
   await card.locator("summary").click();
   await expect(card).toContainText("Ready to test");
   await expect(card).toContainText("0 verified posts");

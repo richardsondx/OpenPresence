@@ -224,6 +224,31 @@ describe("Agent social decision parsing", () => {
     expect(JSON.parse(raw)).toEqual({ kind: "record_preference", note: "Do not use screenshots unless their contents have been inspected and grounded.", reasons: ["format"], scopeHint: "presence" });
   });
 
+  it("acknowledges an existing scoped assignment receipt in mock operator Chat", async () => {
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    let state = createAgent({ name: "Jenny", description: "Help founders think clearly.", mode: "agent", handle: "@jenny_assignment", accent: "#D68754" });
+    state = applyOperation(state, { type: "createAssignment", presenceId: state.presence!.id, environment: "sandbox", createdBy: "agent", instruction: "Keep this account useful as an ongoing responsibility." });
+    const assignment = state.assignments[0]!;
+    assignment.status = "active";
+    assignment.activation = { type: "continuous" };
+    const raw = await generateAgentReply(state, "I want you to own this account for builders.", undefined, {
+      operatorConversation: true,
+      presence: state.presence!,
+      operatorToolHistory: [{ request: "{\"kind\":\"assignment\"}", result: JSON.stringify({ tool: "assignment", assignmentId: assignment.id, status: "active" }) }],
+    });
+    expect(raw).toContain("Agent-owned ongoing responsibility");
+    expect(raw).not.toContain("not automatically a posting task");
+    for (const assignmentId of ["missing-assignment", assignment.id]) {
+      if (assignmentId === assignment.id) assignment.presenceId = "foreign-presence";
+      const unrelated = await generateAgentReply(state, "I want you to own this account for builders.", undefined, {
+        operatorConversation: true, presence: state.presence!,
+        operatorToolHistory: [{ request: "{}", result: JSON.stringify({ tool: "assignment", assignmentId, status: "active" }) }],
+      });
+      expect(unrelated).not.toContain("I saved this as");
+    }
+
+  });
+
   it("never enables deterministic AI output in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("OPENPRESENCE_TEST_MODE", "1");

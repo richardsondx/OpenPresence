@@ -33,6 +33,7 @@ describe("Chat runtime tools", () => {
   it("actually probes X despite stale credit errors, without waking or publishing", async () => {
     vi.stubEnv("OPENPRESENCE_X_API_MOCK", "0");
     const initial = connected();
+    initial.state.nativeConnections[0].deliveryError = "X API credits are exhausted.";
     saveNativeXCredentials("chat-native-test", { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_token", accessTokenSecret: "test_token_secret" });
     const state = applyOperation(initial.state, { type: "setPresence", patch: { status: "paused" } });
     const fetchMock = vi.fn(async (url: string | URL) => new Response(JSON.stringify({ data: String(url).includes("/users/me") ? { id: "account1", username: "tool_test", name: "Tool Test" } : [] }), { status: 200 }));
@@ -42,7 +43,7 @@ describe("Chat runtime tools", () => {
     expect(result.result).toMatchObject({ status: "passed", publicationTested: false });
     expect(result.state.presence?.status).toBe("paused");
     expect(result.state.executions).toEqual(state.executions);
-    expect(result.state.nativeConnections[0].deliveryError).toBe("CreditsDepleted: old failure");
+    expect(result.state.nativeConnections[0].deliveryError).toBeUndefined();
     expect(JSON.stringify(result.result)).not.toContain("test-token");
   });
   it("returns the fresh provider failure instead of claiming a successful check", async () => {
@@ -168,6 +169,34 @@ describe("Chat runtime tools", () => {
     });
     expect(asset?.storage?.exactHash).toBeTruthy();
     expect(result.newAssetIds).toContain(asset?.id);
+  });
+
+  it("presents an existing scoped artifact without publishing or copying raw bytes into Chat", async () => {
+    const initial = fixture();
+    const presenceId = initial.presence!.id;
+    const timestamp = new Date().toISOString();
+    initial.assets.push({
+      id: "artifact-to-present",
+      agentId: initial.agent!.id,
+      presenceId,
+      accessScope: { mode: "selected_presences", presenceIds: [presenceId] },
+      type: "image",
+      dataUrl: "data:image/png;base64,AAAA",
+      mimeType: "image/png",
+      status: "ready",
+      perception: { observation: "A small generated test image.", uncertainty: ["low"] },
+      rights: { status: "unknown" },
+      retention: "preserved",
+      reusePermission: "ready_to_use",
+      provenance: { origin: "operator_upload", importedAt: timestamp },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    } as never);
+
+    const result = await executeChatRuntimeTool(initial, presenceId, { kind: "present_asset", assetId: "artifact-to-present" }, "present-run");
+    expect(result.result).toMatchObject({ status: "presented", assetId: "artifact-to-present", attachment: { existingAssetId: "artifact-to-present", kind: "image" } });
+    expect(JSON.stringify(result.result)).not.toContain("data:image/png");
+    expect(result.state.executions).toHaveLength(0);
   });
 
   it("lets an explicit operator post use attached media before background metadata review finishes", async () => {
