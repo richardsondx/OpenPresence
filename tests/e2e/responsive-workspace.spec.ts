@@ -36,8 +36,8 @@ test("daily destinations preserve Agent scope and Tasks remain a supervisory pro
   await expect(page.getByRole("button", { name: "Back to Chat", exact: true })).toBeVisible();
   await expect(page.getByLabel("Edit Assignment instruction")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Save changes", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: /No responsibilities on/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Show all days", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Nothing here yet" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Talk to Jenny", exact: true })).toBeVisible();
 });
 
 test("chat remains usable with media picker, durable messages, and reload", async ({ page }) => {

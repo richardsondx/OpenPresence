@@ -56,6 +56,17 @@ export function browserWorkspaceProjection(state: OpenPresenceState): OpenPresen
   projection.conversationEpisodes = boundedRecent(state.conversationEpisodes, 150) as never;
   projection.recoveryAttempts = boundedRecent(state.recoveryAttempts, 150) as never;
   projection.recoveryIncidents = boundedRecent(state.recoveryIncidents, 150) as never;
+  const retainedOperationIds = new Set(projection.executions.map((execution) => execution.operationId ?? execution.id));
+  projection.operationRecords = boundedRecent(
+    state.operationRecords,
+    240,
+    (record) => retainedOperationIds.has(record.operationId) || ["AWAITING_APPROVAL", "AUTHORIZED", "QUEUED", "DISPATCHING", "EXTERNAL_STATE_UNKNOWN", "MEASUREMENT_PENDING", "MANUAL_REVIEW"].includes(record.status),
+  ) as never;
+  projection.trajectoryEvents = boundedRecent(
+    state.trajectoryEvents,
+    1_200,
+    (event) => Boolean(event.operationId && retainedOperationIds.has(event.operationId)) || event.eventType === "no_op.recorded",
+  ) as never;
 
   // These collections are durable history, not configuration. A full browser
   // navigation used to carry every old decision, intent, action, publication,

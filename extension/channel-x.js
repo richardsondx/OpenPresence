@@ -635,6 +635,16 @@
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "OPENPRESENCE_READ") {
+      expectedHandle = message.expectedHandle || expectedHandle;
+      void waitFor(() => verifyAccount().ok && visiblePosts().length ? visiblePosts() : undefined, 8000).then((posts) => {
+        const account = verifyAccount();
+        sendResponse({ username: account.username, error: account.ok ? undefined : account.message,
+          posts: (posts || []).slice(0, 30).map((post) => ({ id: post.id, text: post.text, authorUsername: post.handle, authorName: post.displayName, language: post.language })) });
+      });
+      return true;
+    }
+
     if (message?.type === "OPENPRESENCE_EXTENSION_STATUS") {
       presenceName = message.status?.presenceName || presenceName;
       setConnectionState(message.status?.state);
@@ -707,5 +717,7 @@
   // target/composer transition.
   window.setInterval(syncTabTitle, 1_000);
   window.setInterval(scan, observationScanIntervalMs);
+  // Wake the read queue promptly; MV3 alarms have a 30-second minimum.
+  window.setInterval(() => { if (!activeExecutionId) void sendMessage({ type: "OPENPRESENCE_READ_POLL" }); }, 3000);
   window.setTimeout(scan, 2_000);
 })();

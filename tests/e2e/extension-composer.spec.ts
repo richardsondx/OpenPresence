@@ -613,3 +613,20 @@ test("the Chrome adapter rechecks the signed-in account immediately before submi
   expect(result).toMatchObject({ result: { code: "ACCOUNT_MISMATCH", retryable: false }, submitClicked: false });
   await expect(page.locator('[data-testid="tweetTextarea_0"]')).toHaveText("This must stay unsent after the account changes.");
 });
+
+test("the X read adapter returns observed text and polls without waiting for the heartbeat", async ({ page }) => {
+  await page.goto("/");
+  await page.setContent(`<a data-testid="AppTabBar_Profile_Link" href="https://x.com/reader">Profile</a><article><div data-testid="User-Name"><a href="https://x.com/builder">Builder</a></div><a href="https://x.com/builder/status/12345"><time>Today</time></a><div data-testid="tweetText" lang="en">An observed public post</div></article>`);
+  await page.evaluate(() => {
+    const target = window as unknown as { chrome: unknown; readListener?: (message: unknown, sender: unknown, respond: (value: unknown) => void) => void; sent: unknown[] };
+    target.sent = [];
+    target.chrome = { runtime: { id: "read-test", sendMessage: async (message: unknown) => { target.sent.push(message); return { ok: true }; }, onMessage: { addListener: (listener: typeof target.readListener) => { target.readListener = listener; } } } };
+  });
+  await page.addScriptTag({ path: "extension/channel-x.js" });
+  const result = await page.evaluate(() => new Promise((resolve) => {
+    const target = window as unknown as { readListener: (message: unknown, sender: unknown, respond: (value: unknown) => void) => void };
+    target.readListener({ type: "OPENPRESENCE_READ", expectedHandle: "reader" }, {}, resolve);
+  }));
+  expect(result).toMatchObject({ username: "reader", posts: [{ id: "12345", text: "An observed public post", authorUsername: "builder" }] });
+  await expect.poll(() => page.evaluate(() => (window as unknown as { sent: { type: string }[] }).sent.some((message) => message.type === "OPENPRESENCE_READ_POLL")), { timeout: 5000 }).toBe(true);
+});

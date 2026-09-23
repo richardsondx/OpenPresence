@@ -32,7 +32,7 @@ verify-app assert --text "What do you think about our growth right now?"
 verify-app state --projection chat
 ```
 
-For an operator boundary, use `getByTestId("operator-chat-needs-you")` inside `.operator-chat-history`. Expand `Task details`, choose `Check again` to send a durable recovery request without changing the current draft, or `Not now` to collapse the reminder across reload. `Show paused work` restores it. A changed issue resurfaces; a resolved issue disappears. Persisted blocked tasks take precedence over an advisory healthy status. Duplicate-public-outcome quarantine retains the evidence-based `Review decision` flow. For Teach, use `open teach`, `type --label "Message your Presence"`, and inspect proposals/change sets after the visible response. For paused behavior, send an ordinary question with `Send`, verify the reply, then confirm the Presence remains paused and no execution was created.
+For recovery history, use `getByTestId("operator-chat-recovery-event")` inside `.operator-chat-history`. Entries retain their chronological location after resolution and reload. `Check again` sends a durable recovery request without changing the current draft. Recoverable system failures retry automatically; only actionable operator boundaries expose the check control. For Teach, use `open teach`, `type --label "Message your Presence"`, and inspect proposals/change sets after the visible response. For paused behavior, send an ordinary question with `Send`, verify the reply, then confirm the Presence remains paused and no execution was created.
 
 ## Proof
 
@@ -83,12 +83,12 @@ milestone/update claims need a separate measured, causally supported trajectory.
 - Old account-inspection messages render a readable summary with `Saved evidence` collapsed. New reports are persisted as plain-language findings.
 - Proof: inspect both default and expanded states, then reload; operator-authored JSON must remain unchanged. Regression tests: `tests/chat-activity-presentation.test.ts`.
 
-## Conversational recovery (2026-09-13)
+## Conversational recovery (2026-09-22)
 
-- A reminder is a projection of persisted health and tasks, not a new incident store. Dismissal is scoped to Agent/Presence and browser; it never resolves, cancels, or authorizes work.
-- X-credit-only background observation issues remain absent from unrelated private Chat. A blocked public task shows the actual billing issue, task details, and a plain external X Developer Console link; billing never routes to OpenPresence settings.
-- Check again uses the same durable outbox as typed conversation, preserves drafts and attachments, and asks the Agent to inspect and recover existing work within its original permissions. An authenticated read is not proof of publishing access or completion.
-- Proof: `tests/e2e/chat-attention.spec.ts` covers the visible reminder, dismissal/reload, recovery request, changed/resolved state, responsive layout, and billing destination. Backend recovery tests must separately prove actual status transitions.
+- Recovery incidents, failed Assignment attempts, and browser-route progress appear as dated bubbles in the main Chat transcript. They project existing persisted evidence; resolving an incident changes its status without deleting its history.
+- Check again uses the durable outbox and preserves the composer draft. Temporary system failures continue with backoff without asking the operator to repair the system.
+- X API credits are optional when enabled, connected browser hands support the required action. Authenticated browser reads preserve observed text/account provenance and never count as a public outcome.
+- Proof: `tests/e2e/chat-recovery-history.spec.ts` exercises incident → transcript → resolved → reload on desktop/mobile. Supply the explicit harness database in `OPENPRESENCE_E2E_DB_PATH`; fixtures canonicalize its filesystem path. The older `chat-attention.spec.ts` dismissal contract is superseded. Backend retry and delivery transitions require separate evidence.
 
 ## Responsive Agent details and media
 

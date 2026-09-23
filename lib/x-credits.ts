@@ -23,7 +23,7 @@ export function xCreditsExhausted(connection?: Pick<NativeChannelConnection, "he
 export function xNativeWriteUnavailable(connection?: Pick<NativeChannelConnection, "healthMessage" | "deliveryError"> & { observation?: { error?: string } } | null) {
   if (!connection) return false;
   const message = `${connection.healthMessage ?? ""} ${connection.deliveryError ?? ""} ${connection.observation?.error ?? ""}`;
-  return X_CREDITS_PATTERN.test(message) || X_NATIVE_CREDENTIAL_PATTERN.test(message);
+  return X_CREDITS_PATTERN.test(message) || X_NATIVE_CREDENTIAL_PATTERN.test(message) || /check your app permissions|client is not permitted|not enrolled|unsupported authentication/i.test(message);
 }
 
 export function xCreditsBillingUrl(accountId?: string) {

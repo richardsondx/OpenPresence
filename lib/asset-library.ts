@@ -20,6 +20,10 @@ export const DEFAULT_ASSET_REUSE_COOLDOWN_MONTHS = 6;
 const MAX_ASSET_REUSE_COOLDOWN_MONTHS = 120;
 
 function timestamp() { return new Date().toISOString(); }
+function validTimestamp(value: unknown, fallback: string) {
+  if (typeof value !== "string" || Number.isNaN(Date.parse(value))) return fallback;
+  return value;
+}
 function recordId(prefix: string) {
   const uuid = typeof globalThis.crypto?.randomUUID === "function"
     ? globalThis.crypto.randomUUID()
@@ -80,6 +84,10 @@ export function normalizeAssetLibraryState(state: OpenPresenceState) {
     updatedAt: source.updatedAt ?? timestamp(),
   }));
   state.assets = (state.assets ?? []).map((asset) => {
+    const createdAt = validTimestamp(asset.createdAt, timestamp());
+    const updatedAt = validTimestamp(asset.updatedAt, createdAt);
+    const thirdPartyDiscovery = isThirdPartyDiscovery(asset);
+    const expiresAt = validTimestamp(asset.expiresAt, thirdPartyDiscovery ? new Date(Date.parse(updatedAt) + 72 * 60 * 60 * 1000).toISOString() : "");
     const latestSocialPerception = (state.perceptions ?? [])
       .filter((perception) => perception.assetId === asset.id)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
@@ -94,7 +102,9 @@ export function normalizeAssetLibraryState(state: OpenPresenceState) {
     accessScope: asset.accessScope ?? assetAccessScope(asset),
     sourceOccurrences: asset.sourceOccurrences ?? [],
     retention: asset.retention ?? (isThirdPartyDiscovery(asset) ? "ephemeral" : "preserved"),
-    expiresAt: asset.expiresAt ?? (isThirdPartyDiscovery(asset) ? new Date(Date.parse(asset.updatedAt) + 72 * 60 * 60 * 1000).toISOString() : undefined),
+    createdAt,
+    updatedAt,
+    expiresAt: expiresAt || undefined,
     reusePermission: asset.reusePermission ?? (isThirdPartyDiscovery(asset) ? "reference_only" : "ready_to_use"),
     perception: asset.perception
       ?? (latestSocialPerception?.result ? { observation: latestSocialPerception.result.observation, likelyMeaning: latestSocialPerception.result.interpretation, visibleText: latestSocialPerception.result.visibleText ? [latestSocialPerception.result.visibleText] : undefined, uncertainty: [latestSocialPerception.result.uncertainty] } : undefined)

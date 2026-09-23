@@ -51,8 +51,8 @@ The current shell exposes the Agent portfolio and the active connected channel t
 | `/growth` | Growth | Selected Presence | Growth responsibility, evidence, strategy, and review rhythm |
 | `/analytics` | Analytics shell | Selected Presence / Agent-wide Usage tab | Growth and Usage tabs; currently duplicates Growth entry content |
 | `/usage` | Usage | Agent-wide, Presence-filterable | Provider/request ledger; not provider billing or a social outcome |
-| `/schedule` | Schedule / Assignments | Selected Presence | List/Week, one-time or weekly Assignments, exact start times, completion contracts |
-| `/work` | Tasks alias | Selected Presence | Same List/Calendar and direct assignment editor as `/schedule` |
+| `/schedule` | Tasks | Selected Presence | All-open task list, attention, completed disclosure, Calendar, scoped guidance |
+| `/work` | Tasks alias | Selected Presence | Same task list, Calendar, and conversational details as `/schedule` |
 | `/calendar` | Schedule alias | Selected Presence | Legacy route; resolves to the canonical Schedule view |
 | `/agent` | Agent settings | Selected Agent + connected Presence | One settings home with Identity & Brain and Presence & Autonomy sections |
 | `/knowledge` | Knowledge | Selected Agent | Documents, versions, retrieval/access audit |
@@ -75,7 +75,7 @@ current `app/client-page.tsx` source still includes it in the rendered destinati
 array; the responsive regression therefore exercises six buttons until that UI drift
 is repaired.
 
-Tasks uses `/schedule` and the existing assignment editor with List/Calendar modes.
+Tasks uses `/schedule` with a quiet task list and secondary Calendar mode.
 `/work` and `/calendar` resolve to this same surface. Task details open directly as a
 side inspector or mobile sheet. Artifacts uses `/artifacts` and remains Agent-owned;
 `/assets` is retained as a legacy Media deep-link alias.

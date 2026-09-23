@@ -1090,3 +1090,13 @@ attribution. See the adjacent `review.md` and `independent.json` for raw-record 
 The packet binds execution candidate `1575b534c2781c1c978c908252272d37c61dae175effb3e2286ce8636c7c2cff`.
 This ledger-only documentation update follows that frozen packet and does not
 relabel either run with a newer candidate hash.
+
+## 2026-09-21 Tasks / Calendar presentation ablation
+
+The operator explicitly requested a substantially simpler Tasks page and a Calendar containing only a simplified calendar. Tasks now shows all open non-continuous work as title/update rows, grouped by attention and progress, with completed work collapsed. Day/type filters, duplicate badges/counters and the running banner were removed; timing/readiness evidence is disclosed within details. Calendar now has dated weeks and mobile day selection; undated work remains in List, and plan windows are labelled Opportunity events.
+
+Bounded desktop/mobile evidence preserves AUT-004, AUT-005, UX-001, UX-005 and SIM-001's affected UI paths: deep-link/reload, unscheduled visibility, dated timing, explicit recurrence, incomplete/completed distinction, actual guidance persistence, and Calendar navigation. No runtime state model, authority or completion transition changed. Evidence and limitations: `qa-learnings/tasks-simplification-2026-09-21/README.md`. Existing capability statuses are unchanged; this is UI ablation evidence, not fresh live-delivery or autonomy certification. Repository-wide typecheck remains affected by unrelated in-progress test errors recorded in that packet.
+
+### Recovery continuity evidence — 2026-09-22
+
+AUT-009 and UX-004 retain their existing capability status; this change does not establish complete live autonomy. Bounded evidence covers temporary failure backoff, native rejection → browser routing, authenticated browser observation, account mismatch rejection, and recovery history surviving resolution/reload on desktop/mobile. Implementation spans `assignment-recovery.ts`, `incident-engine.ts`, `browser-channel-read.ts`, the bridge read endpoint/extension, and Chat projections. Evidence and remaining gates: `qa-learnings/agent-resilience-2026-09-22/README.md`. The next meaningful gate is a real signed-in X session demonstrating fresh observation → agent decision → verified authorized outcome after a native outage; prolonged real-provider recovery remains unproven.

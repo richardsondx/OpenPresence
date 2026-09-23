@@ -24,7 +24,7 @@ export interface SandboxWorldSnapshot {
 }
 
 const SESSION_COLLECTIONS = [
-  "events", "socialDecisions", "socialStrategyRetrievalRuns", "autobiographicalEvents",
+  "events", "trajectoryEvents", "operationRecords", "socialDecisions", "socialStrategyRetrievalRuns", "autobiographicalEvents",
   "autobiographicalReflections", "resourceUsageEvents", "socialIntents", "executions",
   "outcomes", "attentionTests", "capabilityTrials", "publications", "assetUsages",
   "assignments", "assignmentRuns", "assignmentContributions",

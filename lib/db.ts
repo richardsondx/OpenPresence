@@ -1404,7 +1404,8 @@ export function readStateReadToken(projection?: "chat") {
   const row: ReadTokenRow | undefined = projection === "chat"
     ? sqlite.prepare(`SELECT
         (SELECT updated_at FROM app_state WHERE id = 1) AS workspace,
-        (SELECT MAX(updated_at) FROM operational_runs_idx) AS run`).get() as { workspace?: string | null; run?: string | null } | undefined
+        (SELECT MAX(updated_at) FROM operational_runs_idx) AS run,
+        (SELECT MAX(updated_at) FROM recovery_incidents_live) AS incident`).get() as ReadTokenRow | undefined
     : sqlite.prepare(`SELECT
         (SELECT updated_at FROM app_state WHERE id = 1) AS workspace,
         (SELECT MAX(updated_at) FROM bridge_health) AS health,
@@ -1423,7 +1424,7 @@ export function readStateReadToken(projection?: "chat") {
         } | undefined;
   const value = (part?: string | null) => part ?? "empty";
   return projection === "chat"
-    ? `${value(row?.workspace)}:${value(row?.run)}`
+    ? `${value(row?.workspace)}:${value(row?.run)}:${value(row?.incident)}`
     : `${value(row?.workspace)}:${value(row?.health)}:${value(row?.identity)}:${value(row?.incident)}:${value(row?.run)}:${value(row?.wake)}:${value(row?.dependency)}`;
 }
 
@@ -1779,10 +1780,9 @@ export function readStateViewForContext(context: StateContext, options: StateVie
   if (context.presenceId && scoped.presences.some((presence) => presence.id === context.presenceId) && scoped.activePresenceId !== context.presenceId) {
     scoped = { ...scoped, activePresenceId: context.presenceId, presence: scoped.presences.find((presence) => presence.id === context.presenceId) ?? null };
   }
-  return projectAssignmentPreflights({
-    ...hydratedHotState,
-    ...scoped,
-  });
+  // Operational tables advance independently of the workspace snapshot.
+  // Overlaying scoped last used to resurrect an older incident after reload.
+  return projectAssignmentPreflights(hydrateOperationalState(hydrateBridgeHealth(scoped)));
 }
 
 /**

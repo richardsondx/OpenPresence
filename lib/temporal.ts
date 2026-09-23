@@ -611,6 +611,15 @@ export function reconcileOrphanedWaitingRuns(source: OpenPresenceState, now = ne
   let closed = 0;
   for (const run of listOperationalRuns(undefined, ["waiting"])) {
     if (presenceId && run.presenceId !== presenceId) continue;
+    if (run.stage === "browser.read" && run.deadlineAt && Date.parse(run.deadlineAt) <= now.getTime()) {
+      run.state = "failed";
+      run.lastErrorCode = "The browser read deadline elapsed. No public action was attempted.";
+      run.lastProgressAt = now.toISOString();
+      delete run.leaseOwner;
+      upsertOperationalRun(run);
+      closed += 1;
+      continue;
+    }
     if (!["attention", "verification"].includes(run.kind)) continue;
     const progressAt = new Date(run.lastProgressAt ?? run.startedAt ?? run.createdAt).getTime();
     if (!Number.isFinite(progressAt) || progressAt > staleBefore) continue;

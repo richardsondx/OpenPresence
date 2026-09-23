@@ -116,6 +116,7 @@
     "/tmp/openpresence-chat-recovery-20260912/next-dist/types/**/*.ts",
     "/tmp/openpresence-flow-test/next-dist/types/**/*.ts",
     "/tmp/openpresence-jev-probe.TkhGQ0/next-dist/types/**/*.ts",
+    "/tmp/openpresence-learn002-closure/next-dist/types/**/*.ts",
     "/tmp/openpresence-matched-deterministic-benchmark/baseline/cold-1/next-dist/types/**/*.ts",
     "/tmp/openpresence-matched-deterministic-benchmark/baseline/cold-2/next-dist/types/**/*.ts",
     "/tmp/openpresence-matched-deterministic-benchmark/baseline/cold-3/next-dist/types/**/*.ts",
@@ -155,7 +156,7 @@
     "/var/folders/yv/1mjm9zl16kj8gykks67kp7j40000gn/T/openpresence-verification-slice-2026-09-18T16-02-36-606Z/worker-a/next-dist/types/**/*.ts",
     "/var/folders/yv/1mjm9zl16kj8gykks67kp7j40000gn/T/openpresence-verify-00e51d1719/next-dist/types/**/*.ts",
     "next-env.d.ts",
-    "/tmp/openpresence-learn002-closure/next-dist/types/**/*.ts"
+    ".next-3237/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

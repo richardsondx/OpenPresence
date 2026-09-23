@@ -5,6 +5,11 @@ import type { AssignmentRun, OpenPresenceState } from "./types";
 import { defaultOperationalStagePolicies } from "./responsibility-continuity";
 import { isXCreditsError } from "./x-credits";
 
+/** Dependency outages do not require operator guidance. Keep slow automatic probes. */
+export function isTemporaryAssignmentFailure(error: string): boolean {
+  return /did not respond within|timed? ?out|timeout|empty response|temporar(?:y|ily)|overloaded|service unavailable|fetch failed|ECONNRESET|ETIMEDOUT|stopped reporting progress|work cycle stalled|ended without a delivery, deferral, or explicit completion result/i.test(error);
+}
+
 export const assignmentWorkerStaleAfterMs = 15 * 60 * 1000;
 const openAssignmentRunStatuses = new Set(["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"]);
 
@@ -288,7 +293,7 @@ export function recoverStaleAssignmentRuns(
         sessionId: run.sessionId,
       });
     } else {
-      // Recovery budget exhausted or cannot retry -> fail run and block assignment with clear reason
+      // Settle the dead worker; temporary pre-write failures resume with backoff.
       const message = "The Assignment worker stopped reporting progress and exhausted its recovery attempts.";
       run.status = "failed";
       run.currentStage = "blocked";
@@ -308,6 +313,7 @@ export function recoverStaleAssignmentRuns(
         };
         assignment.lastOutcome = { class: "incomplete", message, at: timestamp };
         assignment.updatedAt = timestamp;
+        deferRecoverableAssignmentFailure(next, run.id, nowMs);
       }
     }
   }
@@ -336,10 +342,18 @@ export function deferRecoverableAssignmentFailure(state: OpenPresenceState, runI
   if (state.executions.some((execution) => execution.assignmentId === assignment.id
     && (execution.runId === runId || execution.createdAt >= startedAt)
     && !isAutonomousPreWriteDeliveryFailure(execution))) return false;
+  if (assignmentWindowState(assignment, nowMs) === "ended") {
+    assignment.status = "expired_incomplete";
+    assignment.nextDueAt = undefined;
+    assignment.lastOutcome = { class: "incomplete", message: `The task’s time window ended before recovery. Last error: ${error}`, at: new Date(nowMs).toISOString() };
+    assignment.updatedAt = new Date(nowMs).toISOString();
+    return false;
+  }
+  const temporary = isTemporaryAssignmentFailure(error);
   const failures = (assignment.systemFailures ?? 0) + 1;
   assignment.systemFailures = failures;
   const budget = Math.min(4, assignment.work?.maxAttempts || 4);
-  if (failures >= budget || (run.maxAttempts > 0 && run.attempts >= run.maxAttempts)) {
+  if (!temporary && (failures >= budget || (run.maxAttempts > 0 && run.attempts >= run.maxAttempts))) {
     const at = new Date(nowMs).toISOString();
     const message = `The Assignment worker could not complete this attempt after ${failures} bounded recovery failure${failures === 1 ? "" : "s"}. No verified public outcome was recorded. Last error: ${error || "unknown worker failure"}`;
     assignment.status = "blocked";
@@ -361,8 +375,8 @@ export function deferRecoverableAssignmentFailure(state: OpenPresenceState, runI
   run.leaseExpiresAt = undefined;
   run.updatedAt = at;
   assignment.status = "active";
-  assignment.nextDueAt = new Date(nowMs + Math.min(15 * 60_000, 60_000 * 2 ** (failures - 1))).toISOString();
-  assignment.work = { ...(assignment.work ?? { attempts: run.attempts, maxAttempts: budget, storiesResearched: 0 }), phase: "candidate_review", blockedReason: undefined };
+  assignment.nextDueAt = new Date(nowMs + Math.min(60 * 60_000, 60_000 * 2 ** Math.min(failures - 1, 6))).toISOString();
+  assignment.work = { ...(assignment.work ?? { attempts: run.attempts, maxAttempts: budget, storiesResearched: 0 }), phase: "candidate_review", attempts: temporary ? Math.max(0, Math.min(run.attempts - 1, budget - 1)) : run.attempts, blockedReason: undefined };
   assignment.lastOutcome = { class: "evaluation_failed", message: `Work will retry automatically after a temporary failure: ${error}`, at };
   assignment.updatedAt = at;
   return true;
@@ -375,15 +389,15 @@ export function resumeRecoverableAssignmentFailures(state: OpenPresenceState, no
     if (assignment.environment !== "live" || !["blocked", "needs_operator", "active"].includes(assignment.status)) continue;
     const run = (state.assignmentRuns ?? []).filter((item) => item.assignmentId === assignment.id)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-    if (!run || !["failed", "blocked", "deferred"].includes(run.status) || !/^(?:Openai returned an empty response\.|The live Assignment ended without a delivery, deferral, or explicit completion result\.|The Assignment worker stopped reporting progress and exhausted its recovery attempts\.)$/.test(run.lastError ?? "")) continue;
+    if (!run || !["failed", "blocked"].includes(run.status) || !isTemporaryAssignmentFailure(run.lastError ?? "")) continue;
     // These old relative-day requests are already outside their durable local
     // calendar window. Preserve their failed history without replaying stale posts.
     const ended = assignmentWindowState(assignment, nowMs) === "ended";
-    if (ended && ["blocked", "needs_operator"].includes(assignment.status)) continue;
     if (ended) {
       const at = new Date(nowMs).toISOString();
+      const previousFailure = run.lastError ?? assignment.lastOutcome?.message ?? "The Assignment did not finish before its time window ended.";
       assignment.status = "expired_incomplete";
-      assignment.lastOutcome = { class: "incomplete", message: `The requested day elapsed before completion. The previous failure is retained in work history: ${run.lastError}`, at };
+      assignment.lastOutcome = { class: "incomplete", message: `The requested day elapsed before completion. The previous failure is retained in work history: ${previousFailure}`, at };
       assignment.work = { ...(assignment.work ?? { attempts: run.attempts, maxAttempts: run.maxAttempts, storiesResearched: 0 }), phase: "blocked", blockedReason: assignment.lastOutcome.message };
       assignment.nextDueAt = undefined;
       assignment.updatedAt = at;

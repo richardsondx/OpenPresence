@@ -14,6 +14,7 @@ import type {
   Presence,
   SocialStrategyRetrievalRun,
 } from "./types";
+import { appendTrajectoryEvent } from "./trajectory";
 
 const confidenceValue: Record<GrowthHypothesis["confidence"], number> = { low: 0.25, medium: 0.5, high: 0.8 };
 const LEARNING_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
@@ -147,6 +148,34 @@ export function recordLearningCounterfactualInPlace(state: OpenPresenceState, pr
   const counterfactual: LearningCounterfactualRecord = { id: `learning-counterfactual:${run.id}`, agentId: state.agent.id, presenceId: presence.id, checkpointId: checkpoint.id, situationId: situation.id, result, createdAt: capturedAt, ...(sandboxSessionId ? { sandboxSessionId } : {}) };
   state.learningCheckpoints = [checkpointRecord, ...(state.learningCheckpoints ?? [])].slice(0, 100);
   state.learningCounterfactuals = [counterfactual, ...(state.learningCounterfactuals ?? [])].slice(0, 250);
+  if (sandboxSessionId) {
+    appendTrajectoryEvent(state, {
+      streamId: `sandbox:${sandboxSessionId}`,
+      eventType: "learning.causal_experiment",
+      actor: "verifier",
+      presenceId: presence.id,
+      sessionId: sandboxSessionId,
+      sandboxSessionId,
+      occurredAt: capturedAt,
+      inputHashes: {
+        checkpoint: result.checkpoint.hash,
+        retainedDecision: result.projections.present.decisionHash,
+        removedDecision: result.projections.removed.decisionHash,
+      },
+      payload: {
+        checkpointId: result.checkpoint.id,
+        situationId: result.situationId,
+        retainedLearningHash: result.projections.present.learningHash,
+        removedLearningHash: result.projections.removed.learningHash,
+        retainedDecision: result.projections.present.decisionKey,
+        removedDecision: result.projections.removed.decisionKey,
+        decisionsDiffer: result.comparisons.presentVsRemoved.decisionsDiffer,
+        claim: result.learningClaim.status,
+        soleIntervention: "retained_learning_artifact",
+        externalExecutionDisabled: true,
+      },
+    });
+  }
   return result;
 }
 

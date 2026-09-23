@@ -148,3 +148,19 @@ People uses compact rows with one useful context line. Watching keeps watch plan
 - **Reasoning:** This is a local disclosure component with a distinct scan job. Owning its typography makes the hierarchy stable across routes and preserves the useful status without adding vertical bulk.
 - **Evidence:** User screenshot and live Chrome reproduction; before the fix, computed summary typography was 16px/normal with 16px/700 title text and no explicit marker treatment.
 - **Reopen when:** The compact row hides a meaningful distinction, or real template titles require a different responsive status treatment.
+
+## 2026-09-21 — Tasks leads with the work, not its schedule
+
+- **DESIGN CHANGE / User job:** See what the Agent is handling and give direction when needed.
+- **Evidence / current friction:** The operator explicitly found the page overwhelming and supplied Muse's title-and-update list as a reference. The old default exposed two headings, counters, eleven day/type controls, schedule columns, origin/recurrence badges, progress metadata, and a publishing-plan section. The weekday default also hid unscheduled open work.
+- **Root problem / decision:** Scheduling mechanics dominated the supervisory job. Replace them with all-open title/update rows grouped by attention and progress. Collapse completed work and upcoming opportunities. Details lead with the actual update and conversational guidance; timing/readiness/evidence sit under one disclosure.
+- **Before → after:** Choose day/type and decode cards → read the work immediately and open only what matters. No task-entry or manual completion workflow is introduced.
+- **Tenet:** Remove before redesigning; simple first, complexity on demand.
+- **Tradeoff:** Day/type filtering is removed. Calendar still provides timing; unfinished attempts are more visible, and complete lists may be longer. Continuous goals remain in Growth.
+- **Protected behavior:** AUT-004, AUT-005, UX-001, UX-005, SIM-001 retain runtime state, plan projection, deep links, conversational intervention, cancellation, and verified completion boundaries.
+- **Confidence:** High for simplification, based on explicit user feedback and focused desktop/mobile browser proof in `qa-learnings/tasks-simplification-2026-09-21/`.
+- **Reopen when:** Large real task inventories make priority hard to scan, or the disclosure hides a necessary decision.
+
+### Calendar clarification (same change)
+
+The user explicitly requested that Calendar contain only a simplified calendar. Replace the old compact/full-hours modes and unscheduled list with one dated week, previous/next/Today, and a mobile day selection. Timed tasks and deadline-only work retain dates; plan windows are labelled Opportunity. Undated work remains visible in List. This supersedes the earlier recommendation to retain a “No fixed start time” panel inside Calendar.

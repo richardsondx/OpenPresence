@@ -50,21 +50,34 @@ describe("Assignment failure recovery boundaries", () => {
     state.executions.push({ id: "safe-pre-write", assignmentId: assignment.id, runId: run.id, status: "failed", externalRef: undefined, createdAt: run.createdAt, failure: { code: "BRIDGE_NOT_CHECKED_IN", message: "The Bridge did not check in.", retryable: true } } as never);
     expect(deferRecoverableAssignmentFailure(state, run.id, Date.parse(run.createdAt))).toBe(true);
   });
-  it("does not retry billing errors or exhausted recovery budgets", () => {
+  it("does not retry billing errors but keeps temporary outages automatic", () => {
     const { state, run } = fixture();
     run.lastError = "Your monthly spend cap has been reached.";
     expect(deferRecoverableAssignmentFailure(state, run.id)).toBe(false);
     run.lastError = "Openai returned an empty response."; run.attempts = 4;
-    expect(deferRecoverableAssignmentFailure(state, run.id)).toBe(false);
+    expect(deferRecoverableAssignmentFailure(state, run.id)).toBe(true);
   });
   it("blocks the Assignment instead of leaving it runnable after recovery exhaustion", () => {
     const { state, assignment, run } = fixture();
     assignment.systemFailures = 3;
-    run.lastError = "The live Assignment ended without a delivery, deferral, or explicit completion result.";
+    run.lastError = "Unrecognized deterministic worker failure.";
     expect(deferRecoverableAssignmentFailure(state, run.id, Date.parse(run.createdAt))).toBe(false);
     expect(assignment.status).toBe("blocked");
     expect(assignment.lastOutcome?.class).toBe("evaluation_failed");
     expect(assignment.nextDueAt).toBeUndefined();
+  });
+  it("retains a durable slow retry after repeated model timeouts without exhausting candidate work", () => {
+    const { state, assignment, run } = fixture();
+    run.lastError = "Openai did not respond within 60 seconds.";
+    run.attempts = 4;
+    assignment.systemFailures = 20;
+    const now = Date.parse(run.createdAt);
+    expect(deferRecoverableAssignmentFailure(state, run.id, now)).toBe(true);
+    expect(assignment.status).toBe("active");
+    expect(Date.parse(assignment.nextDueAt!) - now).toBe(3600000);
+    expect(assignment.work!.attempts).toBeLessThan(assignment.work!.maxAttempts);
+    expect(resumeRecoverableAssignmentFailures(state, now + 1000)).toEqual([]);
+    expect(normalizeState(state).assignments[0].status).toBe("active");
   });
   it("does not replay even a failed execution from the worker", () => {
     const { state, assignment, run } = fixture();
@@ -97,12 +110,13 @@ describe("Assignment failure recovery boundaries", () => {
     expect(assignment.progress.verified).toBe(0);
     expect(assignment.nextDueAt).toBeUndefined();
   });
-  it("does not rewrite an operator-blocked historical request as a timing expiry", () => {
+  it("moves an operator-blocked historical request into ended history without losing its failure", () => {
     const { state, assignment } = fixture();
     assignment.instruction = "Publish six posts today";
     assignment.createdAt = "2026-09-11T19:00:00Z";
-    expect(resumeRecoverableAssignmentFailures(state, Date.parse("2026-09-13T14:00:00Z"))).toEqual([]);
-    expect(assignment.status).toBe("blocked");
+    expect(resumeRecoverableAssignmentFailures(state, Date.parse("2026-09-13T14:00:00Z"))).toEqual([assignment.id]);
+    expect(assignment.status).toBe("expired_incomplete");
+    expect(assignment.lastOutcome?.message).toContain("Openai returned an empty response.");
   });
   it("returns eligible historical model failures to the scheduler once", () => {
     const { state, assignment } = fixture();

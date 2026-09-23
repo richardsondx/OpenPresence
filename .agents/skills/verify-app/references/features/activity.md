@@ -26,7 +26,7 @@ verify-app screenshot --path /tmp/activity-evidence.png
 verify-app state --projection activity
 ```
 
-For a sandbox decision, seed or use Playground first, then return to Activity and inspect the visible event plus `socialIntents`, `executions`, `outcomes`, and `mirrorObjects` in the projection. Use `errors` and `network-summary` when the surface appears stale.
+For a sandbox decision, seed or use Playground first, then return to Activity and inspect the visible event plus `socialIntents`, `executions`, `operationRecords`, `trajectoryEvents`, `outcomes`, and `mirrorObjects` in the projection. Operation detail should preserve the stable operation ID, lifecycle state, verification rung, and remote receipt without presenting Sandbox as live delivery. Use `errors` and `network-summary` when the surface appears stale.
 
 ## Proof
 

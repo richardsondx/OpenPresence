@@ -1,4 +1,4 @@
-import { isXCreditsError, xNativeWriteUnavailable } from "./x-credits";
+import { xNativeWriteUnavailable } from "./x-credits";
 import { getDependencyHealth, readStateForContext } from "./db";
 import { derivePresenceCapabilityManifest } from "./runtime";
 import { bridgeExecutionStatus } from "./bridge-contract";
@@ -34,7 +34,7 @@ export function routeExecutionIntent(input: {
 
   // 1. Check Native X Health and Rate Limits
   const nativeHealth = getDependencyHealth("native_x", presenceId);
-  const nativeIsRateLimited = ["waiting", "circuit_open"].includes(nativeHealth?.state ?? "") && nativeHealth?.circuitUntil && new Date(nativeHealth.circuitUntil) > now;
+  const nativeIsRateLimited = nativeHealth?.state === "waiting" && nativeHealth?.circuitUntil && new Date(nativeHealth.circuitUntil) > now;
 
   if (nativeIsRateLimited) {
     return {
@@ -53,11 +53,11 @@ export function routeExecutionIntent(input: {
 
   const nativeWriteUnavailable = state.nativeConnections.some((connection) => connection.presenceId === presenceId && connection.channelId === "x" && xNativeWriteUnavailable(connection));
   const browserLearned = (presence.browserAccess?.learnedFallbacks ?? []).some((item) => item.action === affordance || item.action === normalizedAffordance);
-  const browserBridge = state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.name.startsWith("OpenPresence Chrome · ") && bridgeExecutionStatus(bridge) === "connected");
+  const browserBridge = presence.browserAccess?.enabled !== false && state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.name.startsWith("OpenPresence Chrome") && bridgeExecutionStatus(bridge) === "connected" && bridge.capabilities.affordances.some((action) => action === affordance || action === normalizedAffordance));
 
   const bridgeHealth = getDependencyHealth("user_attached_bridge", presenceId);
   const bridgeHealthy = !bridgeHealth || bridgeHealth.state === "healthy";
-  if ((nativeWriteUnavailable || browserLearned) && browserBridge && bridgeHealthy) {
+  if ((nativeWriteUnavailable || browserLearned || nativeHealth && nativeHealth.state !== "healthy") && browserBridge && bridgeHealthy) {
     return {
       route: "user_attached_bridge",
       reason: nativeWriteUnavailable

@@ -623,7 +623,7 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     expect(migration.incidents[0].affectedRunIds).toContain("exec_legacy_2");
   });
 
-  it("Invariant: Recovery attempt ladder increments atomically and exhausts to needs_operator", () => {
+  it("Invariant: Recovery attempt ladder increments atomically and switches to slow automatic probes", () => {
     const uniquePresence = `presence_exhaust_${Date.now()}`;
     const failure = recordOperationalFailure({
       dependency: "native_x",
@@ -653,8 +653,9 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     expect(att3.attemptNumber).toBe(3);
     inc = listRecoveryIncidents(uniquePresence).find((i) => i.id === incidentId);
     expect(inc?.recoveryAttempts).toBe(3);
-    expect(inc?.state).toBe("needs_operator");
-    expect(inc?.operatorActionRequired).toBe(true);
+    expect(inc?.state).toBe("recovering");
+    expect(inc?.operatorActionRequired).toBe(false);
+    expect(Date.parse(inc!.nextAttemptAt!)).toBeGreaterThan(Date.now());
   });
 
   it("Invariant: Root causes are scoped by dependency and resolve by dependencyId upon verified success", () => {

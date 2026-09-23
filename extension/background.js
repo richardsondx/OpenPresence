@@ -328,7 +328,7 @@ async function reportMetrics(session, metrics) {
 }
 
 async function requestMetrics(session) {
-  if (session.activeExecutionId) return;
+  if (session.activeExecutionId || browserReadRuns.has(session.presence.id)) return;
   try {
     await chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_REQUEST_METRICS" });
   } catch (error) {
@@ -534,6 +534,7 @@ async function heartbeat(session) {
     session.lastHeartbeatError = undefined;
     await persistSessions();
     await requestIdentity(session);
+    void readChannel(session).catch(() => {});
     return true;
   } catch (error) {
     session.lastHeartbeatOk = false;
@@ -544,7 +545,45 @@ async function heartbeat(session) {
   }
 }
 
+const browserReadRuns = new Map();
+async function readChannel(session) {
+  if (session.activeExecutionId || claimRuns.has(session.presence.id) || browserReadRuns.has(session.presence.id)) return;
+  const work = (async () => {
+    const response = await bridgeRequest(session, "/api/bridge/v1/reads", { method: "POST", body: "{}" });
+    const read = response.read;
+    if (!read) return;
+    let previousUrl;
+    try {
+      const target = new URL(read.url);
+      if (target.origin !== "https://x.com" || !["/home", "/search"].includes(target.pathname)) throw new Error("Unsupported browser read URL.");
+      previousUrl = (await chrome.tabs.get(session.tabId)).url;
+      await chrome.tabs.update(session.tabId, { url: read.url });
+      let result;
+      const deadline = Date.now() + 18000;
+      while (Date.now() < deadline) {
+        const tab = await chrome.tabs.get(session.tabId);
+        const loaded = tab.url ? new URL(tab.url) : undefined;
+        if (tab.status === "complete" && loaded?.origin === target.origin && loaded.pathname === target.pathname && loaded.searchParams.get("q") === target.searchParams.get("q")) {
+          try { result = await chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_READ", expectedHandle: read.expectedHandle }); if (result) break; } catch { /* X is still mounting. */ }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      await bridgeRequest(session, "/api/bridge/v1/reads", { method: "POST", body: JSON.stringify({ id: read.id, ...(result || { error: "The browser read timed out." }) }) });
+    } catch (error) {
+      await bridgeRequest(session, "/api/bridge/v1/reads", { method: "POST", body: JSON.stringify({ id: read.id, error: error.message }) }).catch(() => {});
+    } finally {
+      if (previousUrl?.startsWith("https://x.com/")) {
+        await chrome.tabs.update(session.tabId, { url: previousUrl }).catch(() => {});
+        await waitForTabComplete(session.tabId, 8000).catch(() => {});
+      }
+    }
+  })();
+  browserReadRuns.set(session.presence.id, work);
+  try { await work; } finally { browserReadRuns.delete(session.presence.id); }
+}
+
 async function claim(session) {
+  if (browserReadRuns.has(session.presence.id)) return;
   const existing = claimRuns.get(session.presence.id);
   // A navigation fires tabs.onUpdated more than once while X moves through
   // the target post and reply composer. Keep the Bridge queue serialized for
@@ -896,6 +935,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await persistSessions();
         await sendSessionContextToTab(session, sender.tab.id);
       }
+      if (message?.type === "OPENPRESENCE_READ_POLL" && sender.tab?.id === session.tabId) void readChannel(session).catch(() => {});
       if (message?.type === "OPENPRESENCE_OBSERVATION") await ingest(session, message.observation);
       if (message?.type === "OPENPRESENCE_ACCOUNT_IDENTITY") await reportIdentity(session, message.username, message.claimAfterVerification !== false);
       if (message?.type === "OPENPRESENCE_METRICS") {

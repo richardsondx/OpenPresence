@@ -4,6 +4,7 @@ import { appendMirrorEvents, authenticateBridgeKey, cancelScheduledWake, deleteB
 import { readMirrorEventSourceIds } from "./db";
 import type { Asset, Bridge, Execution, LiveEvent, MirrorObject, OpenPresenceState, Outcome } from "./types";
 import { bridgeAdapterStatus, bridgeIdentityReady } from "./bridge-contract";
+import { recordExecutionTransition } from "./trajectory";
 
 // Chrome refreshes the signed-in identity on its own cadence. Keep the
 // verified identity valid across a model-generation + browser-delivery turn;
@@ -661,6 +662,7 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
     execution.attempts += 1;
     execution.lease = { executorId: input.executorId, claimedAt: new Date(now).toISOString(), expiresAt };
     execution.updatedAt = timestamp();
+    recordExecutionTransition(state, execution, { eventType: "execution.attempted", actor: "worker", status: "DISPATCHING", payload: { executorId: input.executorId, attemptNo: execution.attempts } });
     updatePublicActionDelivery(execution.id, "handed_off");
   }
   if (claimed.length || candidates.length || expiredQueuedWork || expiredClaimedWork) {
@@ -772,7 +774,11 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
   }
   execution.status = "succeeded"; execution.externalRef = input.externalRef; execution.executedAt = input.observedAt ?? timestamp(); execution.updatedAt = timestamp(); execution.lease = undefined;
   updatePublicActionDelivery(execution.id, "verified", input.externalRef);
-  const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, attentionEpisodeId: execution.attentionEpisodeId, status: "succeeded", observedAt: timestamp(), metrics: {}, evidence: [input.externalRef] }; state.outcomes.unshift(outcome); state = settlePromotionBurstProgress(state, execution.assignmentId ?? "", execution.presenceId); recordVerifiedCapabilityTrial(state, execution, outcome);
+  const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, attentionEpisodeId: execution.attentionEpisodeId, status: "succeeded", observedAt: timestamp(), metrics: {}, evidence: [input.externalRef] }; state.outcomes.unshift(outcome);
+  recordExecutionTransition(state, execution, { eventType: "provider.result_received", actor: "connector", status: "PROVIDER_ACCEPTED_UNVERIFIED", verification: { rung: "provider", oracle: "bridge executor response", status: "passed", observedAt: outcome.observedAt, remoteObjectId: input.externalRef.id, evidenceRefs: [input.externalRef] }, payload: { externalRef: input.externalRef } });
+  recordExecutionTransition(state, execution, { eventType: "remote.verification_recorded", actor: "verifier", status: "EXTERNAL_VERIFIED", evidenceRefs: [input.externalRef], verification: { rung: "remote_object", oracle: options.apiVerified ? "provider read-back" : "bridge executor acknowledgement", status: "passed", observedAt: outcome.observedAt, remoteObjectId: input.externalRef.id, evidenceRefs: [input.externalRef] }, payload: { externalRef: input.externalRef } });
+  recordExecutionTransition(state, execution, { eventType: "measurement.scheduled", actor: "worker", status: "MEASUREMENT_PENDING", payload: { reason: "The verified external action is awaiting an outcome measurement window." } });
+  state = settlePromotionBurstProgress(state, execution.assignmentId ?? "", execution.presenceId); recordVerifiedCapabilityTrial(state, execution, outcome);
   recordVerifiedBridgeAttention(state, bridge, execution, input.externalRef);
   recordVerifiedLiveAssetUsage(state, bridge, execution);
   const action = state.actions.find((item) => item.executionId === execution.id);
@@ -815,6 +821,9 @@ export function recordVerifiedBridgeReaction(source: OpenPresenceState, executio
   updatePublicActionDelivery(execution.id, "verified", externalRef);
   const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, attentionEpisodeId: execution.attentionEpisodeId, status: "succeeded", observedAt: verifiedAt, metrics: {}, evidence: [externalRef], environment: execution.environment, sessionId: execution.sessionId, conversationEpisodeId: execution.conversationEpisodeId };
   state.outcomes.unshift(outcome);
+  recordExecutionTransition(state, execution, { eventType: "provider.result_received", actor: "connector", status: "PROVIDER_ACCEPTED_UNVERIFIED", evidenceRefs: [externalRef], verification: { rung: "provider", oracle: "X API response", status: "passed", observedAt: verifiedAt, remoteObjectId: externalRef.id, evidenceRefs: [externalRef] }, payload: { externalRef } });
+  recordExecutionTransition(state, execution, { eventType: "remote.verification_recorded", actor: "verifier", status: "EXTERNAL_VERIFIED", evidenceRefs: [externalRef], verification: { rung: "remote_object", oracle: "X API read-back", status: "passed", observedAt: verifiedAt, remoteObjectId: externalRef.id, evidenceRefs: [externalRef] }, payload: { externalRef } });
+  recordExecutionTransition(state, execution, { eventType: "measurement.scheduled", actor: "worker", status: "MEASUREMENT_PENDING", payload: { reason: "The verified external action is awaiting an outcome measurement window." } });
   state = settlePromotionBurstProgress(state, execution.assignmentId ?? "", execution.presenceId);
   const mirror = state.mirrorObjects.find((item) => item.externalRef.type === externalRef.type && item.externalRef.id === externalRef.id && item.presenceId === execution.presenceId);
   if (mirror) {
@@ -858,6 +867,7 @@ export function failExecution(bridge: Bridge, executionId: string, input: z.infe
     execution.lease = undefined;
     execution.status = "cancelled";
     execution.updatedAt = timestamp();
+    recordExecutionTransition(state, execution, { eventType: "provider.result_received", actor: "connector", status: "CANCELLED", payload: { code: input.code, message: input.message } });
     // Keep the durable slot instead of releasing it: the browser observed a
     // prior public outcome, so a later retry would be unsafe even without its
     // external id. The slot remains the quarantine barrier for this target.
@@ -886,6 +896,13 @@ export function failExecution(bridge: Bridge, executionId: string, input: z.infe
   }
   if (identityBlocked) execution.deliveryHold = { reason: "bridge_identity", at: timestamp() };
   execution.status = retrying ? "queued" : !provenPreWriteFailure && input.retryable ? "verification-pending" : "failed"; execution.updatedAt = timestamp(); state.events.unshift(bridgeEvent(state, blockedByPerson ? "Contact unavailable" : identityBlocked ? "Delivery waiting for the expected account" : execution.status === "verification-pending" ? "Delivery outcome requires verification" : "Bridge execution failed", blockedByPerson ? "X reports that this person blocked the Presence. Future interaction candidates will be suppressed." : identityBlocked ? `${input.message} OpenPresence held the unsent action and will resume it automatically when the expected account is verified.` : execution.status === "verification-pending" ? `${input.message} OpenPresence will not retry because the public write may already exist.` : input.message, blockedByPerson || identityBlocked || input.retryable ? "warning" : "neutral", execution.id));
+  const providerRejected = /^(PROVIDER_REJECTED|PROVIDER_|X_API_)/i.test(input.code ?? "");
+  recordExecutionTransition(state, execution, {
+    eventType: execution.status === "verification-pending" ? "provider.result_received" : "execution.failed",
+    actor: "connector",
+    status: execution.status === "verification-pending" ? "EXTERNAL_STATE_UNKNOWN" : execution.status === "queued" ? "DEFERRED" : blockedByPerson ? "POLICY_DENIED" : providerRejected ? "PROVIDER_REJECTED" : "EXECUTION_FAILED",
+    payload: { code: input.code, message: input.message, retryable: input.retryable },
+  });
   if (blockedByPerson) state = recordPersonBlockedFromExecution(state, execution.id, input.message, "browser_delivery");
   const settledExecution = state.executions.find((item) => item.id === execution.id) ?? execution;
   const currentBridge = state.bridges.find((item) => item.id === bridge.id) ?? bridge;
@@ -1206,7 +1223,7 @@ export function closeChromeVerification(bridge: Bridge, executionId: string, inp
   return { state, execution };
 }
 
-export function reportOutcome(bridge: Bridge, input: z.infer<typeof outcomeInput>) { const state = readStateForBridge(bridge.id); const execution = state.executions.find((item) => item.id === input.executionId && item.bridgeId === bridge.id); if (!execution) throw new Error("Execution not found"); const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, attentionEpisodeId: execution.attentionEpisodeId, status: input.status, observedAt: timestamp(), metrics: input.metrics, evidence: input.evidence }; state.outcomes.unshift(outcome); touchBridge(state, bridge); writeState(state); return { state, outcome }; }
+export function reportOutcome(bridge: Bridge, input: z.infer<typeof outcomeInput>) { const state = readStateForBridge(bridge.id); const execution = state.executions.find((item) => item.id === input.executionId && item.bridgeId === bridge.id); if (!execution) throw new Error("Execution not found"); const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, attentionEpisodeId: execution.attentionEpisodeId, status: input.status, observedAt: timestamp(), metrics: input.metrics, evidence: input.evidence }; state.outcomes.unshift(outcome); recordExecutionTransition(state, execution, { eventType: "measurement.recorded", actor: "verifier", status: input.status === "succeeded" ? "OUTCOME_MEASURED" : input.status === "unknown" ? "EXTERNAL_STATE_UNKNOWN" : "VERIFICATION_FAILED", evidenceRefs: input.evidence, verification: { rung: "outcome", oracle: "bridge-reported world metrics", status: input.status === "succeeded" ? "passed" : input.status === "unknown" ? "unknown" : "failed", observedAt: outcome.observedAt, evidenceRefs: input.evidence }, payload: { metrics: input.metrics, outcomeStatus: input.status } }); touchBridge(state, bridge); writeState(state); return { state, outcome }; }
 
 export function reportMetrics(bridge: Bridge, input: z.infer<typeof metricsInput>) {
   let state = readStateForBridge(bridge.id);

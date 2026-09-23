@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appendAssetOccurrence, assetHistory, assetIsEligibleForPresence, assetPostingUnavailableUntil, assetSourceErrorMessage, assetUsageSummary, authorizeAssetSelection, deriveAssetReadiness, ingestLibraryImages, liveAssetReuseReason, readEligibleAsset, searchEligibleAssets } from "../lib/asset-library";
+import { appendAssetOccurrence, assetHistory, assetIsEligibleForPresence, assetPostingUnavailableUntil, assetSourceErrorMessage, assetUsageSummary, authorizeAssetSelection, deriveAssetReadiness, ingestLibraryImages, liveAssetReuseReason, normalizeAssetLibraryState, readEligibleAsset, searchEligibleAssets } from "../lib/asset-library";
 import { applyOperation, createAgent, normalizeState } from "../lib/runtime";
 import type { Asset } from "../lib/types";
 
@@ -119,6 +119,15 @@ describe("Agent-scoped Asset Library", () => {
     expect(normalized.assetCollections).toEqual([]);
     expect(normalized.assetProcessingJobs).toEqual([]);
     expect(normalized.assets[0]!.accessScope).toEqual({ mode: "all_agent_presences" });
+  });
+
+  it("repairs malformed asset timestamps without crashing the workspace read boundary", () => {
+    const state = stateWithAssets();
+    state.assets[0] = { ...state.assets[0]!, createdAt: "not-a-date", updatedAt: "also-not-a-date", expiresAt: "invalid-expiry", provenance: { ...state.assets[0]!.provenance, origin: "x-bridge" } };
+    expect(() => normalizeAssetLibraryState(state)).not.toThrow();
+    expect(Number.isNaN(Date.parse(state.assets[0]!.createdAt))).toBe(false);
+    expect(Number.isNaN(Date.parse(state.assets[0]!.updatedAt))).toBe(false);
+    expect(state.assets[0]!.expiresAt).toBeTruthy();
   });
 
   it("uses the server-injected byte writer when importing a selected folder asset", async () => {

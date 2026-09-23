@@ -1,3 +1,5 @@
+import { readyBrowserForRead, readChannelThroughBrowser, recordBrowserReadMirrors } from "./browser-channel-read";
+import { xNativeWriteUnavailable } from "./x-credits";
 import { randomUUID } from "node:crypto";
 import {
   cloneState,
@@ -235,18 +237,27 @@ export async function runLiveExplorationWorker(source: OpenPresenceState, explor
   const invocationId = options.invocationId ?? `exploration:${randomUUID()}`;
   const currentSession = next.explorationSessions.find((item) => item.id === session?.id);
   if (currentSession) currentSession.searchQuery = query;
-  if (connection && credentials && query) {
+  if (query && (connection && credentials || candidates.length === 0 && readyBrowserForRead(next, presence.id))) {
     if (!requestAttentionCapacity(next, presence.id, "self_directed_discovery", "channel_read").allowed) {
       return finishExplorationSessionInPlace(next, session.id, { status: "degraded", candidatesSeen: candidates.length, candidatesHydrated: 0, findings: [], failureReason: "Self-directed channel-read capacity is exhausted; exploration will resume when the attention budget allows it." });
     }
     try {
       next = recordResourceUsageEventInPlace(next, { presenceId: presence.id, invocationId, runId: options.runId, originKind: "exploration", originId: exploration.id, attentionSource: "exploration", category: "channel_read", provider: "x", usage: { requests: 1 }, attentionEpisodeId: options.attentionEpisodeId });
-      const posts = await searchRecentXPosts(credentials, query, 25);
-      next = recordNativeMirrorsInPlace(next, posts.map((post) => ({ connectionId: connection.id, presenceId: presence.id, post })), { attentionEpisodeId: options.attentionEpisodeId, attentionRunId: options.runId, attentionInvocationId: invocationId });
+      let browserRead = false;
+      let posts;
+      try {
+        if (!connection || !credentials || xNativeWriteUnavailable(connection)) throw new Error("Native X is unavailable.");
+        posts = await searchRecentXPosts(credentials, query, 25);
+      } catch (error) {
+        if (!readyBrowserForRead(next, presence.id) || /rate.limit|429/i.test(error instanceof Error ? error.message : String(error))) throw error;
+        browserRead = true;
+        posts = await readChannelThroughBrowser(next, presence.id, query);
+      }
+      next = browserRead ? recordBrowserReadMirrors(next, presence.id, posts) : recordNativeMirrorsInPlace(next, posts.map((post) => ({ connectionId: connection!.id, presenceId: presence.id, post })), { attentionEpisodeId: options.attentionEpisodeId, attentionRunId: options.runId, attentionInvocationId: invocationId });
       const imported = new Set(posts.map((post) => post.id));
       candidates = next.mirrorObjects.filter((item) => item.presenceId === presence.id && item.visibility === "public" && item.objectType === "post" && imported.has(item.externalRef.id) && isCognitionEligibleMirrorObject(item, presence.language));
       const running = next.explorationSessions.find((item) => item.id === session?.id);
-      if (running) { running.discoverySource = "native"; running.artifactIds = candidates.map((item) => item.id); }
+      if (running) { running.discoverySource = browserRead ? "mirror" : "native"; running.artifactIds = candidates.map((item) => item.id); }
     } catch (error) {
       return finishExplorationSessionInPlace(next, session.id, { status: "degraded", candidatesSeen: candidates.length, candidatesHydrated: 0, findings: [], failureReason: error instanceof Error ? error.message : "The connected discovery source could not be checked." });
     }

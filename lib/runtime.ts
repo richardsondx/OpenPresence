@@ -33,6 +33,7 @@ import { recordAgentInitiatedUpdate } from "./operator-initiated-communication";
 import { SandboxTemporalKernel } from "./sandbox-temporal";
 import type { TemporalCausalParentType, TemporalEvent } from "./sandbox-temporal";
 import { assertSandboxWorldSnapshot, captureSandboxWorld, restoreSandboxWorld, sandboxWorldDigest, type SandboxWorldSnapshot } from "./sandbox-replay";
+import { appendTrajectoryEvent, rebuildOperationRecordsFromTrajectory, recordExecutionTransition, recordNoOpTrajectory } from "./trajectory";
 
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -64,6 +65,45 @@ function sandboxReplayId(existingIds: string[], seed: string | undefined, kind: 
 const channelName = (channel: ChannelId) => channel === "x" ? "X" : channel === "linkedin" ? "LinkedIn" : channel === "substack" ? "Substack" : channel;
 const providerName = (provider: import("./types").ModelProvider) => provider === "openai" ? "OpenAI" : provider === "openrouter" ? "OpenRouter" : provider === "ollama" ? "Ollama" : provider === "anthropic" ? "Anthropic" : provider === "gemini" ? "Gemini" : provider === "custom" ? "Custom" : provider;
 const localDateKey = (value: Date) => `${value.getFullYear()}-${value.getMonth() + 1}-${value.getDate()}`;
+
+function recordFormedExecutionLifecycle(state: OpenPresenceState, execution: Execution, actor: "agent" | "operator" = execution.source === "operator" ? "operator" : "agent") {
+  const proposed = recordExecutionTransition(state, execution, {
+    eventType: "social_intent.proposed",
+    actor,
+    status: "INTENT_PROPOSED",
+    verification: { rung: "intent", oracle: "durable intent append", status: "passed", observedAt: execution.createdAt },
+    payload: { source: execution.source ?? "agent" },
+  });
+  const policy = recordExecutionTransition(state, execution, {
+    eventType: "policy.checked",
+    actor: "worker",
+    status: "POLICY_CHECKED",
+    parentEventId: proposed.event.id,
+    causedByEventId: proposed.event.id,
+    payload: { executionStatus: execution.status },
+  });
+  const permissionStatus = execution.status === "blocked"
+    ? "POLICY_DENIED"
+    : execution.status === "awaiting-connector"
+      ? "TOOL_UNAVAILABLE"
+      : execution.status === "awaiting-review" || execution.status === "awaiting-manual"
+        ? "AWAITING_APPROVAL"
+        : execution.status === "approved"
+          ? "AUTHORIZED"
+          : execution.status === "queued"
+            ? "QUEUED"
+            : execution.status === "succeeded"
+              ? execution.externalRef ? "EXTERNAL_VERIFIED" : "PROVIDER_ACCEPTED_UNVERIFIED"
+              : "INTENT_PROPOSED";
+  recordExecutionTransition(state, execution, {
+    eventType: "permission.decided",
+    actor: "worker",
+    status: permissionStatus,
+    parentEventId: policy.event.id,
+    causedByEventId: policy.event.id,
+    payload: { executionStatus: execution.status },
+  });
+}
 
 // Normalization is a process-local read/transition boundary, not durable
 // state. Keep the marker short-lived so time-sensitive repairs (expiry,
@@ -214,7 +254,7 @@ const fileContent = (kind: FileKind, input: CreateAgentInput, presence?: Presenc
 };
 
 export function initialState(): OpenPresenceState {
-  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], operatorThreads: [], operatorConversations: [], operatorNudges: [], agentRequests: [], capabilityChangeEvents: [], events: [], socialDecisions: [], socialStrategyRetrievalRuns: [], growthHypotheses: [], growthEvidenceRecords: [], legacyChannelStrategyGuidance: legacyChannelStrategyGuidance(builtinChannelDefinitions()), autobiographicalEvents: [], autobiographicalReflections: [], resourceUsageEvents: [], attentionEpisodes: [], calendar: [], assignments: [], growthReviews: [], growthRevisions: [], growthEvidenceSnapshots: [], growthFileVersions: [], learningCheckpoints: [], learningCounterfactuals: [], audienceSnapshots: [], publicationMetricSnapshots: [], watches: [], watchSignals: [], relationshipPolicies: [], relationshipStudies: [], relationshipInsightSets: [], presenceRequestPolicies: [], delegationGrants: [], publicRequests: [], explorations: [], discoveryPlans: [], explorationSessions: [], explorationFindings: [], actions: [], publishingPlans: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], assetProviderConnections: [], toolBindings: [], changeSets: [], standingIntents: [], operatorDirectives: [], socialIntents: [], executions: [], outcomes: [], attentionTests: [], capabilityTrials: [], publications: [], assetUsages: [], sourceEvidence: [], claimGrounding: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], assetResearchSessions: [], assetCollections: [], assetCollectionMemberships: [], assetMetadataEdits: [], assetProcessingJobs: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], conversationEpisodes: [], assignmentContributions: [], people: [], personIdentities: [], relationships: [], relationshipFacts: [], relationshipOpenLoops: [], recommendationRecords: [], introductionRecords: [], sandboxEnvironments: [], playgroundSessions: [], sandboxCheckpoints: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], knowledgeDocuments: [], knowledgeVersions: [], knowledgeSegments: [], presenceKnowledgeAccess: [], mindFileKnowledgeBindings: [], knowledgeRetrievalRuns: [], knowledgeCitations: [], knowledgeCollections: [], knowledgeItems: [], presenceKnowledgeBindings: [], conversationStyles: [], operationalRuns: [], scheduledWakes: [], dependencyHealth: [], recoveryIncidents: [], recoveryAttempts: [], browserBodies: [], editorialOpportunities: [], editorialFeedbackEvents: [], editorialReferences: [], sourceAssets: [], mediaPerceptions: [], verificationRecords: [], rightsAssessments: [], editorialDecisions: [], publicationPackages: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
+  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], operatorThreads: [], operatorConversations: [], operatorNudges: [], agentRequests: [], capabilityChangeEvents: [], events: [], trajectoryEvents: [], operationRecords: [], socialDecisions: [], socialStrategyRetrievalRuns: [], growthHypotheses: [], growthEvidenceRecords: [], legacyChannelStrategyGuidance: legacyChannelStrategyGuidance(builtinChannelDefinitions()), autobiographicalEvents: [], autobiographicalReflections: [], resourceUsageEvents: [], attentionEpisodes: [], calendar: [], assignments: [], growthReviews: [], growthRevisions: [], growthEvidenceSnapshots: [], growthFileVersions: [], learningCheckpoints: [], learningCounterfactuals: [], audienceSnapshots: [], publicationMetricSnapshots: [], watches: [], watchSignals: [], relationshipPolicies: [], relationshipStudies: [], relationshipInsightSets: [], presenceRequestPolicies: [], delegationGrants: [], publicRequests: [], explorations: [], discoveryPlans: [], explorationSessions: [], explorationFindings: [], actions: [], publishingPlans: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], assetProviderConnections: [], toolBindings: [], changeSets: [], standingIntents: [], operatorDirectives: [], socialIntents: [], executions: [], outcomes: [], attentionTests: [], capabilityTrials: [], publications: [], assetUsages: [], sourceEvidence: [], claimGrounding: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], assetResearchSessions: [], assetCollections: [], assetCollectionMemberships: [], assetMetadataEdits: [], assetProcessingJobs: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], conversationEpisodes: [], assignmentContributions: [], people: [], personIdentities: [], relationships: [], relationshipFacts: [], relationshipOpenLoops: [], recommendationRecords: [], introductionRecords: [], sandboxEnvironments: [], playgroundSessions: [], sandboxCheckpoints: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], knowledgeDocuments: [], knowledgeVersions: [], knowledgeSegments: [], presenceKnowledgeAccess: [], mindFileKnowledgeBindings: [], knowledgeRetrievalRuns: [], knowledgeCitations: [], knowledgeCollections: [], knowledgeItems: [], presenceKnowledgeBindings: [], conversationStyles: [], operationalRuns: [], scheduledWakes: [], dependencyHealth: [], recoveryIncidents: [], recoveryAttempts: [], browserBodies: [], editorialOpportunities: [], editorialFeedbackEvents: [], editorialReferences: [], sourceAssets: [], mediaPerceptions: [], verificationRecords: [], rightsAssessments: [], editorialDecisions: [], publicationPackages: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
 }
 
 export const SELF_DIRECTED_ATTENTION_PRESETS: Record<
@@ -343,7 +383,7 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
   const browserRouteRequired = (action: string) => browserFallbackWasLearned(presence, `${presence.channel}.${action}`)
     || (action === "reply" && Boolean(targetObject && !mirrorObjectIsOwnOrMentionsPresence(targetObject, presence.handle, native?.account?.id)));
   const nativeAction = (action: string) => Boolean(nativeWritable && !nativeGlobalDeliveryBlocked && nativeActionSupported(action) && !browserRouteRequired(action));
-  const nativeReadable = Boolean(native && nativeConnectionCanObserve(native, presence.handle));
+  const nativeReadable = Boolean(native && !xNativeWriteUnavailable(native) && nativeConnectionCanObserve(native, presence.handle));
   const bridgeAction = (action: string) => Boolean(bridgeConnected && bridge?.capabilities.affordances.some((item) => item === action || item === `${presence.channel}.${action}`));
   const bridgeMetric = (metric: string) => Boolean(bridgeConnected && bridge?.capabilities.metrics.some((item) => item === metric || item.includes(metric)));
   const actionItem = (action: string, supported = channelIds.has(action)): PresenceCapability => {
@@ -513,6 +553,39 @@ function recordPublicationMetricSnapshotInPlace(state: OpenPresenceState, operat
       observationStatus: snapshot.observationStatus, metrics: operation.metrics,
       causal: { parentIds: [mirror.id] },
     }, snapshot.observedAt);
+    const originExecution = mirror.originExecutionId ? state.executions.find((execution) => execution.id === mirror.originExecutionId) : undefined;
+    if (originExecution) {
+      recordExecutionTransition(state, originExecution, {
+        eventType: "measurement.recorded",
+        actor: "verifier",
+        status: snapshot.observationStatus === "observed" ? "OUTCOME_MEASURED" : "MEASUREMENT_PENDING",
+        evidenceRefs: [{ type: "mirror_object", id: mirror.id }],
+        verification: {
+          rung: "outcome",
+          oracle: "publication metric observation",
+          status: snapshot.observationStatus === "observed" ? "passed" : "unknown",
+          observedAt: snapshot.observedAt,
+          evidenceRefs: [{ type: "mirror_object", id: mirror.id }],
+          metricWindow: {
+            startsAt: new Date(Date.parse(snapshot.observedAt) - snapshot.publicationAgeSeconds * 1_000).toISOString(),
+            endsAt: snapshot.observedAt,
+          },
+        },
+        payload: { publicationMetricId: snapshot.id, mirrorObjectId: mirror.id, observationStatus: snapshot.observationStatus, metrics: operation.metrics },
+      });
+    } else {
+      appendTrajectoryEvent(state, {
+        streamId: `sandbox:${mirror.sessionId}`,
+        eventType: "measurement.recorded",
+        presenceId: presence.id,
+        sessionId: mirror.sessionId,
+        sandboxSessionId: mirror.sessionId,
+        actor: "verifier",
+        occurredAt: snapshot.observedAt,
+        evidenceRefs: [{ type: "mirror_object", id: mirror.id }],
+        payload: { publicationMetricId: snapshot.id, mirrorObjectId: mirror.id, observationStatus: snapshot.observationStatus, metrics: operation.metrics },
+      });
+    }
     ensureGrowthEvidenceRecords(state, presence.id, snapshot.observedAt, [mirror.id]);
     materializeSandboxOutcomeLearning(state, presence.id, mirror.sessionId, snapshot.observedAt);
     reconcileSandboxPerformanceLearning(state, presence.id, mirror.sessionId, snapshot.observedAt);
@@ -627,6 +700,7 @@ export function cancelExecutionForBlockedTarget(source: OpenPresenceState, execu
   execution.lease = undefined;
   execution.permit = undefined;
   execution.updatedAt = timestamp;
+  recordExecutionTransition(state, execution, { eventType: "permission.decided", actor: "worker", status: "POLICY_DENIED", payload: { reason: detail } });
   const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
   if (intent?.state === "active") { intent.state = "withdrawn"; intent.updatedAt = timestamp; }
   const action = state.actions.find((item) => item.executionId === execution.id);
@@ -2009,9 +2083,9 @@ export function nativeDeliveryFailureIsConnectionScoped(message: string) {
  * permission failure must not force follower or publication evidence through
  * the browser Bridge when the API can still read it.
  */
-export function nativeConnectionCanObserve(connection: Pick<OpenPresenceState["nativeConnections"][number], "access" | "status" | "observation" | "account">, expectedHandle?: string) {
+export function nativeConnectionCanObserve(connection: Pick<OpenPresenceState["nativeConnections"][number], "access" | "status" | "observation" | "account"> & Partial<Pick<OpenPresenceState["nativeConnections"][number], "healthMessage" | "deliveryError">>, expectedHandle?: string) {
   const identityMatches = !expectedHandle || Boolean(connection.account?.username && connection.account.username.replace(/^@/, "").trim().toLowerCase() === expectedHandle.replace(/^@/, "").trim().toLowerCase());
-  return (connection.access === "read" || connection.access === "read-write")
+  return !xNativeWriteUnavailable(connection) && (connection.access === "read" || connection.access === "read-write")
     && identityMatches
     && (connection.status === "connected" || connection.observation?.status === "up-to-date");
 }
@@ -4056,6 +4130,7 @@ export function formSandboxIntent(source: OpenPresenceState, input: { sessionId:
     state.socialIntents.unshift(intent);
     state.actions.unshift({ id: id("act"), intent: "no_op", target: input.target?.id, summary: expressionText.trim() || `Selected ${input.affordance}`, status: "skipped", reason: `${input.affordance} is off in the Presence execution envelope.`, createdAt: timestamp, socialIntentId: intent.id, sessionId: session.id });
     state.events.unshift({ ...event("decision", "Affordance is off", `${presence.name} considered ${input.affordance}, but the operator's execution envelope leaves it off. No execution was created.`, "quiet", { presenceId: presence.id, intentId: intent.id, sourceObjectId: targetObject?.id }), sessionId: session.id });
+    recordNoOpTrajectory(state, { presenceId: presence.id, sessionId: session.id, reason: `${input.affordance} is off in the Presence execution envelope.` });
     return state;
   }
   const leakageReason = identityLeakageReason(state, presence, expressionText);
@@ -4076,6 +4151,7 @@ export function formSandboxIntent(source: OpenPresenceState, input: { sessionId:
   const status = languageReason || duplicateReason || publicExpressionLeakageReasonValue || assignmentLeakageReason || mentionGroundingReason || sourceEchoReason ? "blocked" as const : reviewReason ? "awaiting-review" as const : executionMode === "auto" ? "queued" as const : executionMode === "review" ? "awaiting-review" as const : "awaiting-manual" as const;
   const execution: Execution = { id: id("execution"), socialIntentId: intent.id, presenceId: presence.id, affordance: input.affordance, mode: executionMode, status, attempts: 0, bridgeId: `sandbox:${session.environmentId}`, connector: "simulated", idempotencyKey: `sandbox:${session.id}:${intent.id}`, target: input.target, publication, reviewReason, createdAt: timestamp, updatedAt: timestamp, assignmentId: input.assignmentId, conversationEpisodeId, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, invocationId: input.invocationId, source: input.source ?? (input.operatorDirectiveId ? "operator" : "agent"), operatorDirectiveId: input.operatorDirectiveId, attentionTestId: input.attentionTestId } as Execution & { invocationId?: string };
   state.publications.unshift(publication); state.socialIntents.unshift(intent); state.executions.unshift(execution);
+  recordFormedExecutionLifecycle(state, execution);
   if (languageReason) execution.failure = { code: "LANGUAGE_POLICY_VIOLATION", message: "Delivery blocked by Never use: " + languageResult.violations.map((item) => item.literal).join(", ") + ".", retryable: false };
   if (duplicateReason) execution.failure = { code: "DUPLICATE_ASSET_CANDIDATE", message: duplicateReason, retryable: false };
   if (publicExpressionLeakageReasonValue) execution.failure = { code: "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionLeakageReasonValue, retryable: false };
@@ -4155,6 +4231,12 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
     state.events.unshift({ ...event("execution", "Language policy blocked delivery", execution.failure.message, "warning", { presenceId: presence.id, executionId: execution.id, intentId: execution.socialIntentId }), sessionId: session.id });
     return state;
   }
+  recordExecutionTransition(state, execution, {
+    eventType: "execution.attempted",
+    actor: "worker",
+    status: "DISPATCHING",
+    payload: { connector: execution.connector, environment: execution.environment },
+  });
   const objectId = id("sandbox-post");
   const externalRef = { type: `${session.channelId}.${execution.affordance}`, id: objectId };
   const assetRefs = (publication?.assetIds ?? []).map((assetId, index) => {
@@ -4191,6 +4273,29 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
   execution.status = "succeeded"; execution.attempts += 1; execution.externalRef = externalRef; execution.executedAt = now(); execution.updatedAt = now();
   const outcome: Outcome = { id: id("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: presence.id, status: "succeeded", observedAt: now(), metrics: {}, evidence: [externalRef], environment: "sandbox", sessionId: session.id, conversationEpisodeId: execution.conversationEpisodeId };
   state.outcomes.unshift(outcome);
+  recordExecutionTransition(state, execution, { eventType: "provider.result_received", actor: "connector", status: "PROVIDER_ACCEPTED_UNVERIFIED", verification: { rung: "provider", oracle: "sandbox connector response", status: "passed", observedAt: object.observedAt, remoteObjectId: externalRef.id, evidenceRefs: [externalRef] }, payload: { externalRef } });
+  recordExecutionTransition(state, execution, {
+    eventType: "remote.verification_recorded",
+    actor: "verifier",
+    status: "EXTERNAL_VERIFIED",
+    evidenceRefs: [externalRef],
+    verification: { rung: "remote_object", oracle: "sandbox mirror read-back", status: "passed", observedAt: object.observedAt, remoteObjectId: object.id, evidenceRefs: [externalRef] },
+    payload: { externalRef, mirrorObjectId: object.id },
+  });
+  recordExecutionTransition(state, execution, {
+    eventType: "mirror.observed",
+    actor: "verifier",
+    status: "EXTERNAL_VERIFIED",
+    evidenceRefs: [{ type: "mirror_object", id: object.id }],
+    verification: { rung: "mirror", oracle: "sandbox social mirror", status: "passed", observedAt: object.observedAt, remoteObjectId: object.id, evidenceRefs: [{ type: "mirror_object", id: object.id }] },
+    payload: { mirrorObjectId: object.id, visibility: object.visibility },
+  });
+  recordExecutionTransition(state, execution, {
+    eventType: "measurement.scheduled",
+    actor: "worker",
+    status: "MEASUREMENT_PENDING",
+    payload: { mirrorObjectId: object.id, reason: "A verified world object is awaiting an outcome measurement window." },
+  });
   const causalDecision = state.socialDecisions.find((decision) => decision.socialIntentId === execution.socialIntentId && decision.presenceId === presence.id && decision.sessionId === session.id);
   const learningEvidenceId = `growth-evidence:sandbox-outcome:${outcome.id}`;
   if (causalDecision && !state.growthEvidenceRecords?.some((record) => record.id === learningEvidenceId)) {
@@ -4861,7 +4966,9 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
     return { ...definition, affordances: [...builtin.affordances.filter((item) => !definition.affordances.some((current) => current.id === item.id)), ...definition.affordances], supportedAssetKinds: [...new Set([...(builtin.supportedAssetKinds ?? []), ...(definition.supportedAssetKinds ?? [])])] };
   });
   const migratedLegacyGuidance = legacyChannelStrategyGuidance(channelDefinitions);
-  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], operatorThreads: normalizedOperatorThreads, operatorConversations: normalizedOperatorConversations, operatorNudges: state.operatorNudges ?? [], agentRequests: (state.agentRequests ?? []).filter((request) => request.kind !== "capability"), capabilityChangeEvents: state.capabilityChangeEvents ?? [], calendar, assignments: [] as Assignment[], assignmentRuns: state.assignmentRuns ?? [], growthReviews: state.growthReviews ?? [], growthRevisions: state.growthRevisions ?? [], growthEvidenceSnapshots: state.growthEvidenceSnapshots ?? [], growthFileVersions: state.growthFileVersions ?? [], learningCheckpoints: state.learningCheckpoints ?? [], learningCounterfactuals: state.learningCounterfactuals ?? [], growthHypotheses: state.growthHypotheses ?? [], growthEvidenceRecords: state.growthEvidenceRecords ?? [], socialStrategyRetrievalRuns: state.socialStrategyRetrievalRuns ?? [], legacyChannelStrategyGuidance: state.legacyChannelStrategyGuidance?.length ? state.legacyChannelStrategyGuidance : migratedLegacyGuidance, audienceSnapshots: state.audienceSnapshots ?? [], publicationMetricSnapshots: state.publicationMetricSnapshots ?? [], watches, watchSignals: state.watchSignals ?? [], relationshipPolicies: state.relationshipPolicies ?? [], relationshipStudies: state.relationshipStudies ?? [], relationshipInsightSets: state.relationshipInsightSets ?? [], presenceRequestPolicies: state.presenceRequestPolicies ?? [], delegationGrants: state.delegationGrants ?? [], publicRequests: state.publicRequests ?? [], explorations: state.explorations ?? [], discoveryPlans: state.discoveryPlans ?? [], explorationSessions: state.explorationSessions ?? [], explorationFindings: state.explorationFindings ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: toolBindings.map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], operatorDirectives: state.operatorDirectives ?? [], socialDecisions: state.socialDecisions ?? [], autobiographicalEvents: state.autobiographicalEvents ?? [], autobiographicalReflections: state.autobiographicalReflections ?? [], resourceUsageEvents: state.resourceUsageEvents ?? [], attentionEpisodes: state.attentionEpisodes ?? [], socialIntents: state.socialIntents ?? [], assetCollections: state.assetCollections ?? [], assetCollectionMemberships: state.assetCollectionMemberships ?? [], assetMetadataEdits: state.assetMetadataEdits ?? [], assetProcessingJobs: state.assetProcessingJobs ?? [], executions: (state.executions ?? []).map((execution) => {
+  const trajectoryEvents = state.trajectoryEvents ?? [];
+  const operationRecords = state.operationRecords?.length ? state.operationRecords : rebuildOperationRecordsFromTrajectory(trajectoryEvents);
+  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], operatorThreads: normalizedOperatorThreads, operatorConversations: normalizedOperatorConversations, operatorNudges: state.operatorNudges ?? [], agentRequests: (state.agentRequests ?? []).filter((request) => request.kind !== "capability"), capabilityChangeEvents: state.capabilityChangeEvents ?? [], trajectoryEvents, operationRecords, calendar, assignments: [] as Assignment[], assignmentRuns: state.assignmentRuns ?? [], growthReviews: state.growthReviews ?? [], growthRevisions: state.growthRevisions ?? [], growthEvidenceSnapshots: state.growthEvidenceSnapshots ?? [], growthFileVersions: state.growthFileVersions ?? [], learningCheckpoints: state.learningCheckpoints ?? [], learningCounterfactuals: state.learningCounterfactuals ?? [], growthHypotheses: state.growthHypotheses ?? [], growthEvidenceRecords: state.growthEvidenceRecords ?? [], socialStrategyRetrievalRuns: state.socialStrategyRetrievalRuns ?? [], legacyChannelStrategyGuidance: state.legacyChannelStrategyGuidance?.length ? state.legacyChannelStrategyGuidance : migratedLegacyGuidance, audienceSnapshots: state.audienceSnapshots ?? [], publicationMetricSnapshots: state.publicationMetricSnapshots ?? [], watches, watchSignals: state.watchSignals ?? [], relationshipPolicies: state.relationshipPolicies ?? [], relationshipStudies: state.relationshipStudies ?? [], relationshipInsightSets: state.relationshipInsightSets ?? [], presenceRequestPolicies: state.presenceRequestPolicies ?? [], delegationGrants: state.delegationGrants ?? [], publicRequests: state.publicRequests ?? [], explorations: state.explorations ?? [], discoveryPlans: state.discoveryPlans ?? [], explorationSessions: state.explorationSessions ?? [], explorationFindings: state.explorationFindings ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: toolBindings.map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], operatorDirectives: state.operatorDirectives ?? [], socialDecisions: state.socialDecisions ?? [], autobiographicalEvents: state.autobiographicalEvents ?? [], autobiographicalReflections: state.autobiographicalReflections ?? [], resourceUsageEvents: state.resourceUsageEvents ?? [], attentionEpisodes: state.attentionEpisodes ?? [], socialIntents: state.socialIntents ?? [], assetCollections: state.assetCollections ?? [], assetCollectionMemberships: state.assetCollectionMemberships ?? [], assetMetadataEdits: state.assetMetadataEdits ?? [], assetProcessingJobs: state.assetProcessingJobs ?? [], executions: (state.executions ?? []).map((execution) => {
     const repaired = repairLegacyXVerificationStatus(execution);
     if (repaired !== execution) return repaired;
     if (execution.failure && isTerminalDuplicateExecution(execution)) {
@@ -7272,7 +7379,7 @@ export function rerouteExecutionToBrowser(source: OpenPresenceState, executionId
       "execution",
       "Browser fallback learned",
       bridge
-        ? `Native ${presence?.channel ?? "channel"} access rejected this action (${message}). The connected browser will deliver it, and this action now remembers that route.`
+        ? `Native ${presence?.channel ?? "channel"} access rejected this action (${message}). I’m trying the connected browser now. I’ll verify the result before marking this action complete.`
         : `Native ${presence?.channel ?? "channel"} access rejected this action (${message}). The action remembers that it needs the browser when one is available.`,
       bridge ? "positive" : "warning",
       { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }
@@ -7366,6 +7473,7 @@ function makePublication(state: OpenPresenceState, text: string, format: string,
 
 function runAttentionCycle(state: OpenPresenceState, presence: Presence) {
   state.actions.unshift({ id: id("act"), intent: "no_op", target: `${presence.channel}_stream`, summary: "Stayed quiet on 36 observed opportunities", status: "skipped", reason: "Nothing met the relevance, usefulness, and taste threshold today.", createdAt: now() });
+  recordNoOpTrajectory(state, { presenceId: presence.id, reason: "Nothing met the relevance, usefulness, and taste threshold today." });
   state.events.unshift(event("decision", "Silence was the right action", "36 conversations observed · 2 worth saving · 0 worth forcing.", "quiet", { presenceId: presence.id }));
   state.events.unshift(event("system", "Pulse completed", "Observed the selected channel, considered what was worth doing, and stopped without forcing an action.", "positive", { presenceId: presence.id }));
   state.events.splice(7);
@@ -7397,6 +7505,7 @@ function addSocialEvaluation(state: OpenPresenceState, standing: StandingIntent,
     const status = simulated ? (mode === "auto" ? "succeeded" : mode === "review" ? "awaiting-review" : "awaiting-manual") : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
     const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance, mode: mode as Exclude<import("./types").ExecutionMode, "off">, status, attempts: simulated && mode === "auto" ? 1 : 0, bridgeId: bridge?.id, connector, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance, text: slot.instruction }), publication, createdAt: formedAt, updatedAt: formedAt, executedAt: simulated && mode === "auto" ? formedAt : undefined, environment };
     state.executions.unshift(execution);
+    recordFormedExecutionLifecycle(state, execution);
     if (simulated && mode === "auto") {
       const outcome: Outcome = { id: id("outcome"), socialIntentId: socialIntent.id, executionId: execution.id, presenceId: presence.id, status: "succeeded", observedAt: formedAt, metrics: { qualifiedFollows: 3 }, evidence: [], environment: presence.environment ?? "live" };
       state.outcomes.unshift(outcome); state.metrics.qualifiedFollows += 3; execution.status = "succeeded"; execution.updatedAt = now();
@@ -7458,6 +7567,7 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
   if (mode === "off") {
     state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: "skipped", reason: "Posts are off in the Presence execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id });
     state.events.unshift(event("decision", "Post intention held", "Jenny formed a social intention, but Posts are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id, decisionId: socialDecision?.id }));
+    recordNoOpTrajectory(state, { presenceId: presence.id, sessionId: sandboxSessionId, reason: "Posts are off in the Presence execution envelope." });
     return state;
   }
   // Respect the Presence's selected live route. A healthy native connection
@@ -7475,6 +7585,7 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
   execution.source = sourceKind;
   if (publicExpressionReason) execution.failure = { code: autobiographicalSafetyReason ? "AUTOBIOGRAPHICAL_PRIVACY_BOUNDARY" : liveAssetRepeatReason ? "DUPLICATE_LIVE_ASSET" : "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionReason, retryable: false };
   state.executions.unshift(execution);
+  recordFormedExecutionLifecycle(state, execution, sourceKind === "operator" ? "operator" : "agent");
   const reason = standingIntentId ? "Jenny evaluated a Calendar standing intention and handed the resulting Social Intent to the Presence execution envelope." : "The operator asked Jenny to introduce this Presence through the native X connector.";
   state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: publicExpressionReason ? "failed" : mode === "review" ? "review" : "queued", reason: publicExpressionReason ?? reason, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
   state.events.unshift(event("decision", liveAssetRepeatReason ? "Live media blocked" : publicExpressionReason ? "Public text boundary blocked" : leakageReason ? "Identity disclosure needs review" : standingIntentId ? "A Calendar post intention was formed" : "A post intention was formed", publicExpressionReason ?? leakageReason ?? (connector ? (standingIntentId ? `${presence.name} judged the standing intention worthwhile and handed it to the native X connector.` : `${presence.name} formed an X post from the conversation and handed it to the Presence execution envelope.`) : `${presence.name} formed an X post, but no write-enabled X connector is available.`), publicExpressionReason || leakageReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id }));
@@ -7503,6 +7614,7 @@ export function formStandingPostIntent(source: OpenPresenceState, text: string, 
   if (mode === "off") {
     state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: "skipped", reason: "Posts are off in the Presence execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id });
     state.events.unshift(event("decision", "Calendar intention held", "Jenny formed a social intention, but Posts are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id }));
+    recordNoOpTrajectory(state, { presenceId: presence.id, reason: "Posts are off in the Presence execution envelope." });
     return state;
   }
   const nativeX = presence.channel === "x" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && !xNativeWriteUnavailable(connection) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? "")))) : undefined;
@@ -7512,6 +7624,7 @@ export function formStandingPostIntent(source: OpenPresenceState, text: string, 
   const status = simulated ? (mode === "auto" ? "succeeded" : mode === "review" ? "awaiting-review" : "awaiting-manual") : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
   const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance, mode, status, attempts: simulated && mode === "auto" ? 1 : 0, bridgeId: bridge?.id, connector, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance, text }), publication, createdAt: formedAt, updatedAt: formedAt, executedAt: simulated && mode === "auto" ? formedAt : undefined, environment };
   state.executions.unshift(execution);
+  recordFormedExecutionLifecycle(state, execution);
   if (simulated && mode === "auto") {
     const outcome: Outcome = { id: id("outcome"), socialIntentId: socialIntent.id, executionId: execution.id, presenceId: presence.id, status: "succeeded", observedAt: formedAt, metrics: {}, evidence: [], environment: presence.environment ?? "live" };
     state.outcomes.unshift(outcome);
@@ -7639,6 +7752,7 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   if (mode === "off") {
     state.actions.unshift({ id: id("act"), intent: "reply", target: parentId, summary: text.trim(), status: "skipped", reason: "Replies are off in the Presence execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id });
     state.events.unshift(event("decision", "Reply intention held", "Jenny formed a social intention, but Replies are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id, decisionId: socialDecision?.id, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId }));
+    recordNoOpTrajectory(state, { presenceId: presence.id, reason: "Replies are off in the Presence execution envelope." });
     return state;
   }
   const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.status === "connected" && connection.access === "read-write" && !xNativeWriteUnavailable(connection) && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle));
@@ -7657,6 +7771,7 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.reply", mode, status, attempts: 0, bridgeId: bridge?.id, connector, target, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: "x.reply", target, text }), publication, reviewReason: publicExpressionReason ?? leakageReason ?? runtimeLeakageReasonValue, createdAt: formedAt, updatedAt: formedAt, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId, assignmentId, environment, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId, attentionEpisodeId: decisionInput?.attentionEpisodeId };
   if (publicExpressionReason) execution.failure = { code: autobiographicalSafetyReason ? "AUTOBIOGRAPHICAL_PRIVACY_BOUNDARY" : mentionGroundingReason ? "UNSUPPORTED_LEADING_MENTION" : sourceEchoReason ? "SOURCE_EXPRESSION_ECHO" : "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionReason, retryable: false };
   state.executions.unshift(execution);
+  recordFormedExecutionLifecycle(state, execution, operatorDirectiveId ? "operator" : "agent");
   state.actions.unshift({ id: id("act"), intent: "reply", target: parentId, summary: text.trim(), status: publicExpressionReason ? "failed" : mode === "review" ? "review" : "queued", reason: publicExpressionReason ?? (operatorDirectiveId ? "The operator directed Jenny to enter this conversation; Jenny supplied the expression through the Presence execution envelope." : "Jenny chose to continue a relevant conversation through the Presence execution envelope."), createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
   state.events.unshift(event("decision", publicExpressionReason ? "Public text boundary blocked" : operatorDirectiveId ? "Jenny expressed the requested reply" : "A reply intention was formed", publicExpressionReason ?? (connector ? (operatorDirectiveId ? "The operator set the social act; Jenny supplied a contextual reply for the Presence execution envelope." : "Jenny found a relevant X conversation and handed a contextual reply to the Presence execution envelope.") : "Jenny found a relevant X conversation, but no write-enabled X connector is available."), publicExpressionReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId }));
   return state;
@@ -7703,6 +7818,7 @@ export function formXDeleteIntent(source: OpenPresenceState, input: { target: En
   if (mode === "off") {
     state.actions.unshift({ id: id("act"), intent: "delete", target: input.target.id, summary: `Delete ${targetObject.objectType === "reply" ? "reply" : "post"}`, status: "skipped", reason: "Delete own posts & replies is off in the Presence execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id });
     state.events.unshift(event("decision", "Deletion intention held", "The Presence identified its own X content, but deletion is Off in the execution envelope.", "quiet", { presenceId: presence.id, intentId: socialIntent.id, decisionId: socialDecision?.id, runId, invocationId }));
+    recordNoOpTrajectory(state, { presenceId: presence.id, reason: "Delete own posts & replies is off in the Presence execution envelope." });
     return state;
   }
   const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && !xNativeWriteUnavailable(connection) && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""))));
@@ -7711,6 +7827,7 @@ export function formXDeleteIntent(source: OpenPresenceState, input: { target: En
   const status = mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
   const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.delete", mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: input.target, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: "x.delete", target: input.target }), reviewReason: `Delete ${targetObject.objectType === "reply" ? "this reply" : "this post"} from X. The original remains in OpenPresence history.`, createdAt: formedAt, updatedAt: formedAt, environment, source: input.source ?? "agent", runId, invocationId, attentionEpisodeId };
   state.executions.unshift(execution);
+  recordFormedExecutionLifecycle(state, execution, input.source === "operator" ? "operator" : "agent");
   state.actions.unshift({ id: id("act"), intent: "delete", target: input.target.id, summary: `Delete ${targetObject.objectType === "reply" ? "reply" : "post"}`, status: mode === "review" ? "review" : "queued", reason: "The Presence selected its own X content for deletion after confirming the durable mirror target.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
   state.events.unshift(event("decision", "Deletion intention formed", `${presence.name} selected its own X ${targetObject.objectType === "reply" ? "reply" : "post"} for deletion.`, mode === "review" ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id, runId, invocationId, sourceObjectId: targetObject.id }));
   return state;
@@ -7779,6 +7896,7 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
   if (mode === "off") {
     state.actions.unshift({ id: id("act"), intent: capability as "like" | "repost" | "quote" | "follow", target: input.target.id, summary: input.text?.trim() ?? capability, status: "skipped", reason: `${capability} is off in the Presence execution envelope.`, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id });
     state.events.unshift(event("decision", `X ${capability} intention held`, `The Presence selected ${capability}, but that affordance is off in the execution envelope.`, "quiet", { presenceId: presence.id, intentId: socialIntent.id, decisionId: socialDecision?.id, runId, invocationId }));
+    recordNoOpTrajectory(state, { presenceId: presence.id, reason: `${capability} is off in the Presence execution envelope.` });
     return state;
   }
   const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && !xNativeWriteUnavailable(connection) && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""))));
@@ -7800,6 +7918,7 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
   const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: input.affordance, mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: input.target, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: input.affordance, target: input.target, text: input.text }), publication, reviewReason: leakageReason, createdAt: formedAt, updatedAt: formedAt, assignmentId: input.assignmentId ?? trial?.assignmentId, environment, source: input.source ?? "agent", attentionTestId: input.attentionTestId, capabilityTrialId: trial?.id, runId, invocationId, attentionEpisodeId };
   if (leakageReason) execution.failure = { code: autobiographicalSafetyReason ? "AUTOBIOGRAPHICAL_PRIVACY_BOUNDARY" : mentionGroundingReason ? "UNSUPPORTED_LEADING_MENTION" : sourceEchoReason ? "SOURCE_EXPRESSION_ECHO" : liveAssetRepeatReason ? "DUPLICATE_LIVE_ASSET" : "PUBLIC_TEXT_INTERNAL_MARKER", message: leakageReason, retryable: false };
   state.executions.unshift(execution);
+  recordFormedExecutionLifecycle(state, execution, input.source === "operator" ? "operator" : "agent");
   state.actions.unshift({ id: id("act"), intent: capability as "like" | "repost" | "quote" | "follow", target: input.target.id, summary: input.text?.trim() ?? capability, status: leakageReason ? "failed" : mode === "review" ? "review" : "queued", reason: leakageReason ?? `The Presence formed a ${capability} action through the live X execution envelope.`, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
   state.events.unshift(event("decision", leakageReason ? "Public action blocked" : `X ${capability} intention formed`, leakageReason ?? `${capability} is ready for the authorized X connector.`, leakageReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id, runId, invocationId }));
   return state;
@@ -7887,6 +8006,9 @@ export function completeNativeExecution(source: OpenPresenceState, executionId: 
   execution.updatedAt = now();
   const outcome: Outcome = { id: id("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, attentionEpisodeId: execution.attentionEpisodeId, status: "succeeded", observedAt: now(), metrics: {}, evidence: [externalRef] };
   state.outcomes.unshift(outcome);
+  recordExecutionTransition(state, execution, { eventType: "provider.result_received", actor: "connector", status: "PROVIDER_ACCEPTED_UNVERIFIED", evidenceRefs: [externalRef], verification: { rung: "provider", oracle: "native connector response", status: "passed", observedAt: outcome.observedAt, remoteObjectId: externalRef.id, evidenceRefs: [externalRef] }, payload: { externalRef } });
+  recordExecutionTransition(state, execution, { eventType: "remote.verification_recorded", actor: "verifier", status: "EXTERNAL_VERIFIED", evidenceRefs: [externalRef], verification: { rung: "remote_object", oracle: "native connector completion", status: "passed", observedAt: outcome.observedAt, remoteObjectId: externalRef.id, evidenceRefs: [externalRef] }, payload: { externalRef } });
+  recordExecutionTransition(state, execution, { eventType: "measurement.scheduled", actor: "worker", status: "MEASUREMENT_PENDING", payload: { reason: "The verified external action is awaiting an outcome measurement window." } });
   state = settlePromotionBurstProgress(state, execution.assignmentId ?? "", execution.presenceId);
   state = recordVerifiedCapabilityTrial(state, execution, outcome);
   if (execution.affordance === "x.delete" && execution.target?.type === "x.post") {
@@ -8060,6 +8182,8 @@ export function failNativeExecution(source: OpenPresenceState, executionId: stri
   if (action) action.status = "failed";
   const outcome: Outcome = { id: id("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, attentionEpisodeId: execution.attentionEpisodeId, status: "failed", observedAt: now(), metrics: {} };
   state.outcomes.unshift(outcome);
+  recordExecutionTransition(state, execution, { eventType: "execution.failed", actor: "connector", status: "EXECUTION_FAILED", payload: { message, failureCode: execution.failure?.code } });
+  recordExecutionTransition(state, execution, { eventType: "measurement.recorded", actor: "verifier", status: "VERIFICATION_FAILED", verification: { rung: "outcome", oracle: "native connector failure", status: "failed", observedAt: outcome.observedAt, failureCode: execution.failure?.code }, payload: { outcomeStatus: outcome.status } });
   if (execution.conversationEpisodeId) settleConversationClosure(state, execution.conversationEpisodeId, "failed", "The native X reply failed before external verification.");
   if (action) action.outcomeId = outcome.id;
   state.events.unshift(event("execution", "X delivery failed", `${message} No external artifact was counted.`, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
@@ -9294,6 +9418,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
         execution.updatedAt = now();
         if (intent && intent.state === "active") { intent.state = "withdrawn"; intent.updatedAt = execution.updatedAt; }
         if (action) { action.status = "skipped"; action.reason = "The operator stopped this delivery before it was sent."; }
+        recordExecutionTransition(state, execution, { eventType: "execution.cancelled", actor: "operator", status: "USER_DENIED", payload: { reason: "operator_denied_before_dispatch" } });
         state.events.unshift(event("execution", "Delivery stopped", "The operator stopped this action before a verified public result. No new delivery will be attempted.", "quiet", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
         return state;
       }
@@ -9305,6 +9430,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
         execution.updatedAt = now();
         if (intent && intent.state === "active") { intent.state = "expired"; intent.updatedAt = execution.updatedAt; }
         if (action) { action.status = "skipped"; action.reason = "The operator stopped this delivery while the external outcome was unresolved."; }
+        recordExecutionTransition(state, execution, { eventType: "execution.cancelled", actor: "operator", status: "MANUAL_REVIEW", payload: { reason: "operator_stopped_after_dispatch" } });
         state.events.unshift(event("execution", "Unresolved delivery stopped", "No retry will be attempted. The external channel may already contain the action, so verify it before trying again.", "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
       }
       return state;

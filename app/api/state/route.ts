@@ -134,7 +134,7 @@ const terminalAssignmentRunStatuses = new Set<AssignmentRunStatus>(["published",
 
 const activityProjectionKeys = new Set<keyof OpenPresenceState>([
   "agent", "agents", "activeAgentId", "activePresenceId", "presence", "presences", "onboarded", "workspaceRevision", "proposals",
-  "assignments", "assignmentRuns", "assignmentPursuitWindows", "actions", "events", "executions", "outcomes", "publications", "socialDecisions", "autobiographicalEvents", "autobiographicalReflections", "socialIntents", "attentionEpisodes", "resourceUsageEvents",
+  "assignments", "assignmentRuns", "assignmentPursuitWindows", "actions", "events", "executions", "operationRecords", "trajectoryEvents", "outcomes", "publications", "socialDecisions", "autobiographicalEvents", "autobiographicalReflections", "socialIntents", "attentionEpisodes", "resourceUsageEvents",
   "mirrorObjects", "nativeConnections", "bridges", "playgroundSessions", "originalPostRehearsals", "assetResearchSessions", "channelDefinitions", "operationalRuns", "scheduledWakes", "standingIntents",
   "growthRevisions", "growthFileVersions",
   "publishingPlans",
@@ -155,7 +155,7 @@ const activityProjectionKeys = new Set<keyof OpenPresenceState>([
 const chatProjectionKeys = new Set<keyof OpenPresenceState>([
   "agent", "agents", "activeAgentId", "activePresenceId", "presence", "presences", "onboarded", "workspaceRevision", "proposals",
   "assignments", "assignmentRuns", "actions", "executions", "outcomes", "socialIntents", "socialDecisions", "mirrorObjects", "nativeConnections", "bridges", "channelDefinitions", "metrics", "assets",
-  "operationalRuns", "attentionEpisodes", "operatorThreads", "operatorConversations", "operatorNudges",
+  "operationalRuns", "attentionEpisodes", "operatorThreads", "operatorConversations", "operatorNudges", "recoveryIncidents", "events",
 ]);
 
 function activityProjection(state: OpenPresenceState): OpenPresenceState {
@@ -245,6 +245,15 @@ function activityProjection(state: OpenPresenceState): OpenPresenceState {
     return compact;
   }) as never;
   projection.outcomes = scopedRecent(state.outcomes, 24) as never;
+  const activeOperation = (operation: NonNullable<OpenPresenceState["operationRecords"]>[number]) => ["AWAITING_APPROVAL", "AUTHORIZED", "QUEUED", "DISPATCHING", "EXTERNAL_STATE_UNKNOWN", "MEASUREMENT_PENDING", "MANUAL_REVIEW"].includes(operation.status);
+  const operationRecords = scopedRecent<NonNullable<OpenPresenceState["operationRecords"]>[number]>(state.operationRecords, 48, activeOperation);
+  projection.operationRecords = operationRecords as never;
+  const retainedOperationIds = new Set(operationRecords.map((operation) => operation.operationId));
+  projection.trajectoryEvents = scopedRecent(
+    state.trajectoryEvents,
+    240,
+    (event) => Boolean(event.operationId && retainedOperationIds.has(event.operationId)) || event.eventType === "no_op.recorded" || event.eventType === "learning.causal_experiment",
+  ) as never;
   projection.publications = scopedRecent(state.publications, 24) as never;
   projection.socialIntents = scopedRecent(state.socialIntents, 24) as never;
   projection.socialDecisions = scopedRecent(state.socialDecisions, 24) as never;
@@ -337,6 +346,8 @@ function chatProjection(state: OpenPresenceState): OpenPresenceState {
   projection.responseProjection = "chat";
   const presenceId = state.presence?.id ?? state.activePresenceId ?? undefined;
   const scoped = <T>(items: T[] | undefined, limit: number) => recentChatItems(items, presenceId, limit);
+  projection.recoveryIncidents = scoped(state.recoveryIncidents, 150);
+  projection.events = scoped(state.events, 150);
   const compactAssignment = (assignment: OpenPresenceState["assignments"][number]) => ({
     ...assignment,
     storyResearch: assignment.storyResearch?.slice(-3),

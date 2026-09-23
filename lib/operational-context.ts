@@ -33,6 +33,23 @@ function normalizeLegacyRuntimeIncidents(presenceId?: string) {
   }
   for (const incident of listRecoveryIncidents(presenceId)) {
     if (incident.state === "resolved") continue;
+    if (incident.state === "needs_operator" && !incident.requiresAuth
+      && /^(?:runtime|model_provider|native_x)\.(?:transient_error|unresponsive|connection_lost)$/.test(incident.rootCauseKey)
+      && !/secure credential|OPENPRESENCE_SECRET_KEY|database.*(?:corrupt|malformed)/i.test(incident.safeSummary)) {
+      incident.state = "recovering";
+      incident.operatorActionRequired = false;
+      incident.nextAttemptAt = new Date(Date.now() + 60_000).toISOString();
+      incident.updatedAt = now;
+      upsertRecoveryIncident(incident);
+      for (const runId of incident.affectedRunIds) {
+        const run = getOperationalRun(runId);
+        if (!run || run.state !== "needs_operator" || run.incidentId !== incident.id) continue;
+        run.state = "recovering";
+        delete run.leaseOwner;
+        delete run.leaseExpiresAt;
+        upsertOperationalRun(run);
+      }
+    }
 
     // A saved native write after the most recent billing failure proves this
     // boundary recovered. Reads, browser delivery, queued retries, and old

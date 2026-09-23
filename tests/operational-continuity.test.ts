@@ -261,8 +261,9 @@ describe("Operational Continuity & Responsibility Invariant Test Suite", () => {
 
     const { state: finalState } = recoverStaleAssignmentRuns(state);
     const updatedAssignment = finalState.assignments.find((a) => a.id === assignment.id);
-    expect(updatedAssignment?.status).toBe("blocked");
-    expect(updatedAssignment?.work?.phase).toBe("blocked");
+    expect(updatedAssignment?.status).toBe("active");
+    expect(updatedAssignment?.work?.phase).toBe("candidate_review");
+    expect(Date.parse(updatedAssignment!.nextDueAt!)).toBeGreaterThan(Date.now());
 
     // Subcase 5B: Connector requires operator auth -> NEEDS_YOU
     state.presence!.execution.post = "auto";

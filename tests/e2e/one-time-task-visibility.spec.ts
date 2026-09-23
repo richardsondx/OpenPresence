@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
 
-test("a Chat-style task without a calendar start survives projection, reload, and both task views", async ({ page, request }) => {
+test("a Chat-style task without a calendar start survives projection, reload, and stays out of the calendar", async ({ page, request }) => {
   expect((await request.post("/api/state", { data: { type: "reset" } })).ok()).toBeTruthy();
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Genny");
-  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await page.getByRole("button", { name: "Meet my Agent" }).click();
   const state = await (await request.get("/api/state")).json();
   const instruction = "Find a few posts worth quoting before 1 PM.";
   const created = await request.post("/api/state", { data: { type: "createAssignment", presenceId: state.presence.id, environment: "sandbox", instruction } });
@@ -17,17 +17,18 @@ test("a Chat-style task without a calendar start survives projection, reload, an
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "Task details", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "ONE-TIME", exact: true }).click();
-  await expect(page.locator(".schedule-list-row").filter({ hasText: instruction })).toBeVisible();
+  await expect(page.locator(".task-row").filter({ hasText: instruction })).toBeVisible();
   await page.getByRole("button", { name: "Calendar", exact: true }).click();
-  await expect(page.getByRole("region", { name: "Tasks without a fixed start time" }).getByRole("button").filter({ hasText: instruction })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Weekly calendar" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Tasks without a fixed start time" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Weekly calendar" }).getByText(instruction, { exact: true })).toHaveCount(0);
 });
 
 test("a bounded task keeps its summary and window without a field editor", async ({ page, request }) => {
   expect((await request.post("/api/state", { data: { type: "reset" } })).ok()).toBeTruthy();
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Genny");
-  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await page.getByRole("button", { name: "Meet my Agent" }).click();
   const state = await (await request.get("/api/state")).json();
   const startsAt = new Date(Date.now() + 3600000).toISOString();
   const deadline = new Date(Date.now() + 7200000).toISOString();
@@ -39,7 +40,7 @@ test("a bounded task keeps its summary and window without a field editor", async
   await expect(page.getByRole("heading", { name: "Task details", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Edit Assignment", exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Edit Assignment instruction")).toHaveCount(0);
-  await expect(page.getByLabel("Tell Jenny something about this", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Tell Genny something about this", { exact: true })).toBeVisible();
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "Task details", exact: true })).toBeVisible();
   const updated = await (await request.get("/api/state")).json();
@@ -48,14 +49,14 @@ test("a bounded task keeps its summary and window without a field editor", async
   expect(Date.parse(unchanged.timeframe.deadline)).toBeGreaterThan(Date.parse(unchanged.timeframe.startsAt));
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Calendar", exact: true }).click();
-  await expect(page.locator(".compact-calendar-item").filter({ hasText: "Quote up to 3 useful posts" })).toBeVisible();
+  await expect(page.locator(".task-calendar-event").filter({ hasText: "Quote up to 3 useful posts" })).toBeVisible();
 });
 
 test("an expired task can be postponed conversationally and retains its identity after reload", async ({ page, request }) => {
   expect((await request.post("/api/state", { data: { type: "reset" } })).ok()).toBeTruthy();
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Genny");
-  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await page.getByRole("button", { name: "Meet my Agent" }).click();
   const state = await request.get("/api/state").then(r => r.json());
   const created = await request.post("/api/state", { data: { type: "createAssignment", presenceId: state.presence.id, environment: "live", title: "Private retry test", instruction: "Prepare one private draft.", timeframe: { startsAt: new Date(Date.now() - 7200000).toISOString(), deadline: new Date(Date.now() - 3600000).toISOString() } } });
   expect(created.ok()).toBeTruthy();

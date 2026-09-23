@@ -1,6 +1,8 @@
 "use client";
 
 import { SocialPlaybook } from "./social-playbook";
+import "./tasks-view.css";
+import { TaskCalendar } from "./task-calendar";
 
 import { useWorkspaceSurface } from "@/lib/use-workspace-surface";
 import { compareRecentChatAssignments, chatToolReceipt, inspectionReportSummary, legacyInspectionEvidence, legacyOperatorChatFailureMessage, toolActivitySummary } from "@/lib/chat-activity-presentation";
@@ -173,9 +175,10 @@ import type {
 } from "@/lib/types";
 import { getDefaultCurationSources } from "@/lib/editorial-curation";
 import { publicExpressionText } from "@/lib/public-expression";
+import { chatRecoveryHistory } from "@/lib/chat-recovery-history";
 import { ChatAttention } from "./chat-attention";
 import { ChatRichText } from "./chat-rich-text";
-import { isXCreditsError, X_API_CONSOLE_URL, xCreditsAlertAppliesToView, xCreditsBillingUrl, xCreditsExhausted } from "@/lib/x-credits";
+import { isXCreditsError, X_API_CONSOLE_URL, xCreditsExhausted } from "@/lib/x-credits";
 import { runtimeTimeoutForOperation, runtimeTimeoutMessage } from "@/lib/runtime-timeout";
 import { deriveHistoricalGrowthContext } from "@/lib/growth-history";
 import { growthEvidenceIsInPresenceScope, growthPublicationIsInPresenceScope, presenceGrowthBoundary } from "@/lib/growth-scope";
@@ -2189,65 +2192,6 @@ function CreateAgentDialog({
   );
 }
 
-function XCreditsAlert({
-  connection,
-  mutate,
-}: {
-  connection: NonNullable<OpenPresenceState["nativeConnections"]>[number];
-  mutate?: Mutate;
-}) {
-  const account = connection.account;
-  const [checking, setChecking] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
-
-  const checkAgain = async () => {
-    if (!mutate || checking) return;
-    setChecking(true);
-    setFeedback(null);
-    try {
-      const next = await mutate({ type: "syncNativeX", presenceId: connection.presenceId, manual: true });
-      const nextConn = next?.nativeConnections?.find(
-        (item) => item.presenceId === connection.presenceId && item.kind === "x"
-      );
-      if (nextConn && xCreditsExhausted(nextConn)) {
-        setFeedback("X still reports credits are exhausted. If you recently added credits, it may take a few moments to activate in your X Developer account.");
-      }
-    } catch (err) {
-      setFeedback(err instanceof Error ? err.message : "Could not verify X credits at this time.");
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  return (
-    <div className="x-credits-alert" role="alert" aria-live="assertive">
-      <CircleAlert size={18} aria-hidden="true" />
-      <div className="x-credits-alert-copy">
-        <strong>X credits are exhausted{account?.username ? ` for @${account.username}` : ""}</strong>
-        <p>Public X reads and publishes use the official X API. Private Chat, Teach, and Playground do not need X credits.</p>
-        {feedback && <p style={{ color: "#713d32", fontWeight: 500, marginTop: "6px" }}>{feedback}</p>}
-      </div>
-      <div className="x-credits-alert-actions">
-        {mutate && (
-          <Button
-            variant="secondary"
-            type="button"
-            className="x-credits-alert-action"
-            onClick={() => void checkAgain()}
-            disabled={checking}
-          >
-            <RotateCcw size={13} className={checking ? "spin" : undefined} aria-hidden="true" />
-            {checking ? "Checking…" : "Check again"}
-                </Button>
-            )}
-        <a className="button button-secondary x-credits-alert-action" href={xCreditsBillingUrl(account?.id)} target="_blank" rel="noreferrer">
-          {account?.id ? "Add X credits" : "Open X API console"} <ArrowUpRight size={14} aria-hidden="true" />
-        </a>
-      </div>
-    </div>
-  );
-}
-
 type ActivitySurface = "now" | "timeline" | "calendar";
 
 function ActivityView({
@@ -2408,11 +2352,6 @@ function AgentWorkspaceShell({
   const agent = state.agent!;
   const presence = state.presence ?? state.presences[0]!;
   const [delegateDraft, setDelegateDraft] = useState<string | null>(null);
-  const nativeXConnection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
-  const xCreditsAlert = presence.channel === "x" && presence.environment !== "sandbox" && xCreditsExhausted(nativeXConnection)
-    ? nativeXConnection
-    : undefined;
-  const showXCreditsAlert = Boolean(xCreditsAlert && xCreditsAlertAppliesToView(view));
   const [healthRefreshKey, setHealthRefreshKey] = useState(0);
   const operationalHealth = useOperationalHealth(presence?.id, healthRefreshKey);
   const [healthFocusKey, setHealthFocusKey] = useState(0);
@@ -2513,7 +2452,6 @@ function AgentWorkspaceShell({
             <CircleAlert size={16} /> {error}
           </div>
         )}
-        {showXCreditsAlert && xCreditsAlert && <XCreditsAlert connection={xCreditsAlert} mutate={mutate} />}
         <div className="workspace-content">
           {switchingAgentId ? <div className="loading-screen agent-switch-loading" role="status" aria-live="polite"><PresenceGlyph accent={state.agents.find((item) => item.id === switchingAgentId)?.accent ?? "#D68754"} pulse size="large" /><p>Opening {state.agents.find((item) => item.id === switchingAgentId)?.name ?? "Agent"}…</p></div> : <>
           {view === "delegate" && <DelegateView setView={setView} agentName={agent.name} onChoose={setDelegateDraft} />}
@@ -7707,6 +7645,11 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
   // out of the transcript makes the sent/queued boundary unambiguous while
   // still allowing choice buttons to know that a selection is already queued.
   const visibleMessages = persistedVisibleMessages;
+  const recoveryEntries = !requestedThreadId || operatorThread.id === `thread:${presence.id}` || conversation?.title === "Main" || conversation?.title === "Main thread" ? chatRecoveryHistory(state, presence.id) : [];
+  const transcript = [
+    ...visibleMessages.map((message) => ({ kind: "message" as const, id: message.id, timestamp: message.timestamp, message })),
+    ...recoveryEntries.map((entry) => ({ kind: "recovery" as const, id: entry.id, timestamp: entry.timestamp, entry })),
+  ].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
   const allVisibleMessages = [...persistedVisibleMessages, ...visiblePendingMessages];
   const actionAnchorByNudge = new Map<string, string>();
   for (const messageItem of visibleMessages) {
@@ -7818,7 +7761,14 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
           followingChatEnd.current = history.scrollHeight - history.scrollTop - history.clientHeight < 80;
         }}>
         {!visibleMessages.length && !visiblePendingMessages.length && <div className="operator-chat-empty"><PresenceGlyph accent={presence.accent} name={presence.name} avatarVariant={state.agent?.avatarVariant} look={presenceAvatarLook(presence)} /><strong>Talk to {presence.name}</strong><span>Ask a question, share context, or give {presence.name} something to work on.</span></div>}
-        {visibleMessages.map((item) => {
+        {transcript.map((row) => {
+          if (row.kind === "recovery") return <ChatAttention key={row.id} entry={row.entry} busy={chatIsBusy} onCheck={(content) => {
+            const clientRequestId = `operator_send_${crypto.randomUUID()}`;
+            const accepted = outbox.enqueue({ id: `pending_operator_message_${clientRequestId}`, role: "operator", content, timestamp: new Date().toISOString(), clientRequestId, threadId: operatorThread.id, inputAttachments: [] });
+            composerRef.current?.focus();
+            return accepted;
+          }} />;
+          const item = row.message;
           const nudge = item.nudgeId ? nudges.find((candidate) => candidate.id === item.nudgeId) : undefined;
           const receipt = chatToolReceipt(item);
           const receiptAssignmentId = receipt && typeof receipt.assignmentId === "string" ? receipt.assignmentId : undefined;
@@ -7877,12 +7827,6 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
           <span>{activeOperatorRun?.stage === "operator_chat.queued" ? `${presence.name} is picking up your request` : `${presence.name} is thinking`}</span>
           <span className="thinking-dots" aria-hidden="true"><i /> <i /> <i /></span>
         </div>}
-        <ChatAttention state={state} health={operationalHealth} busy={chatIsBusy} onReview={() => setView("review")} onCheck={(content) => {
-          const clientRequestId = `operator_send_${crypto.randomUUID()}`;
-          const accepted = outbox.enqueue({ id: `pending_operator_message_${clientRequestId}`, role: "operator", content, timestamp: new Date().toISOString(), clientRequestId, threadId: operatorThread.id, inputAttachments: [] });
-          composerRef.current?.focus();
-          return accepted;
-        }} />
         <div ref={endRef} />
         </div>
         {shouldShowOperatorChatOutbox && <section className="operator-chat-outbox" aria-label={`${visiblePendingMessages.length} queued message${visiblePendingMessages.length === 1 ? "" : "s"}`} data-testid="operator-chat-outbox">
@@ -10379,6 +10323,7 @@ function LiveView({
                                     evidence={contextForEvent(item)}
                                     intent={item.intentId ? state.socialIntents.find((entry) => entry.id === item.intentId) : undefined}
                                     execution={executionForActivityEvent(item)}
+                                    operation={executionForActivityEvent(item) ? state.operationRecords?.find((entry) => entry.operationId === executionForActivityEvent(item)!.operationId || entry.executionId === executionForActivityEvent(item)!.id) : undefined}
                                     outcome={executionForActivityEvent(item) ? state.outcomes.find((entry) => entry.executionId === executionForActivityEvent(item)!.id) : undefined}
                                     onClose={() => setSelectedDecisionId(null)}
                                   />
@@ -11041,6 +10986,7 @@ function ActivityDecisionDisclosure({
   evidence,
   intent,
   execution,
+  operation,
   outcome,
   onClose,
 }: {
@@ -11048,6 +10994,7 @@ function ActivityDecisionDisclosure({
   evidence?: MirrorObject;
   intent?: OpenPresenceState["socialIntents"][number];
   execution?: OpenPresenceState["executions"][number];
+  operation?: NonNullable<OpenPresenceState["operationRecords"]>[number];
   outcome?: OpenPresenceState["outcomes"][number];
   onClose: () => void;
 }) {
@@ -11073,6 +11020,10 @@ function ActivityDecisionDisclosure({
               : "Verifying with Social Mirror";
   const canCancel = execution && ["queued", "awaiting-review"].includes(execution.status);
   const alreadyDispatched = execution && ["claimed", "executing", "succeeded", "verification-pending"].includes(execution.status);
+  const latestVerification = operation?.verification?.slice().sort((left, right) => {
+    const rank: Record<string, number> = { intent: 1, tool: 2, provider: 3, remote_object: 4, mirror: 5, outcome: 6, learning: 7 };
+    return (rank[right.rung] ?? 0) - (rank[left.rung] ?? 0);
+  })[0];
 
   return (
     <div className="activity-why-panel" role="region" aria-label="Why this action?">
@@ -11112,6 +11063,16 @@ function ActivityDecisionDisclosure({
           <strong style={{ display: "block", fontSize: "11px", textTransform: "uppercase", color: "var(--text-muted, #777)", marginBottom: "4px" }}>3. Has X verified it?</strong>
           <p style={{ margin: 0 }}>{outcome?.status === "succeeded" ? "Verified · Social Mirror observed public external confirmation." : execution?.status === "succeeded" ? "Delivery confirmed · awaiting Social Mirror verification cycle." : isInformedSilence ? "No external action to verify." : "Pending external verification."}</p>
         </div>
+
+        {operation && <div style={{ background: "var(--bg-surface, #fafafa)", padding: "10px", borderRadius: "6px", border: "1px solid var(--border, #e5e5e5)" }}>
+          <strong style={{ display: "block", fontSize: "11px", textTransform: "uppercase", color: "var(--text-muted, #777)", marginBottom: "4px" }}>Operation evidence</strong>
+          <p style={{ margin: 0, lineHeight: 1.45 }}>
+            <span style={{ display: "block" }}>ID · <code>{operation.operationId}</code></span>
+            <span style={{ display: "block" }}>State · {operation.status.replaceAll("_", " ").toLowerCase()}</span>
+            <span style={{ display: "block" }}>Verification · {latestVerification ? `${latestVerification.rung.replaceAll("_", " ")} · ${latestVerification.status}` : "intent persisted"}</span>
+            {operation.remoteObjectId && <span style={{ display: "block" }}>Remote object · <code>{operation.remoteObjectId}</code></span>}
+          </p>
+        </div>}
 
         <div style={{ background: "var(--bg-surface, #fafafa)", padding: "10px", borderRadius: "6px", border: "1px solid var(--border, #e5e5e5)" }}>
           <strong style={{ display: "block", fontSize: "11px", textTransform: "uppercase", color: "var(--text-muted, #777)", marginBottom: "4px" }}>4. Can I still stop it?</strong>
@@ -13258,48 +13219,7 @@ function ExecutionLedger({
 
 const calendarWeekDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const presenceTimezone = (presence: OpenPresenceState["presence"]) => presence?.publishingInitiative?.timezone || "UTC";
-const weekdayInTimezone = (date: Date, timezone: string) => {
-  try {
-    return new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: timezone }).format(date);
-  } catch {
-    return new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(date);
-  }
-};
-const assignmentOccursOnDay = (assignment: Assignment, day: string) => assignment.schedule?.day === "Daily" || assignment.schedule?.day === day;
-const assignmentOccursThisWeek = (assignment: Assignment, day: string) => {
-  if (!assignmentOccursOnDay(assignment, day)) return false;
-  if (!assignment.schedule?.date) return true;
-  const date = new Date(`${assignment.schedule.date}T12:00:00`);
-  if (Number.isNaN(date.getTime())) return false;
-  const today = new Date();
-  const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - ((today.getDay() + 6) % 7), 12);
-  const nextMonday = new Date(monday);
-  nextMonday.setDate(monday.getDate() + 7);
-  return date >= monday && date < nextMonday;
-};
 const assignmentIsOneTime = (assignment: Assignment) => Boolean(assignment.activation?.type !== "continuous" && (!assignment.schedule || assignment.schedule.date || assignment.recurrence?.kind === "once"));
-const assignmentIsRecurring = (assignment: Assignment) => Boolean(assignment.activation?.type !== "continuous" && assignment.schedule && !assignmentIsOneTime(assignment));
-const scheduleRecurrenceFilters = [
-  { value: "all", label: "ALL" },
-  { value: "recurring", label: "WEEKLY" },
-  { value: "one-time", label: "ONE-TIME" },
-] as const;
-type ScheduleRecurrenceFilter = (typeof scheduleRecurrenceFilters)[number]["value"];
-const assignmentMatchesRecurrenceFilter = (assignment: Assignment, filter: ScheduleRecurrenceFilter) => filter === "all"
-  || (filter === "one-time" && assignmentIsOneTime(assignment))
-  || (filter === "recurring" && assignmentIsRecurring(assignment));
-const scheduleDayFilters = [
-  { value: "Monday", label: "M" },
-  { value: "Tuesday", label: "T" },
-  { value: "Wednesday", label: "W" },
-  { value: "Thursday", label: "TH" },
-  { value: "Friday", label: "F" },
-  { value: "Saturday", label: "S" },
-  { value: "Sunday", label: "Su" },
-  { value: "all", label: "ALL" },
-] as const;
-type ScheduleDayFilter = (typeof scheduleDayFilters)[number]["value"];
-const calendarHours = Array.from({ length: 24 }, (_, index) => index);
 const timeToMinutes = (value: string) => { const [hours, minutes] = value.split(":").map(Number); return (Number.isFinite(hours) ? hours : 8) * 60 + (Number.isFinite(minutes) ? minutes : 0); };
 const splitConsiderationWindow = (value: string, fallback: string) => {
   const [start, end] = value.split(/[–-]/).map((part) => part.trim());
@@ -13917,18 +13837,6 @@ function assignmentCompletedToday(assignment: Assignment, state: OpenPresenceSta
   return Boolean(assignment.schedule && !assignmentIsOneTime(assignment) && verifiedToday >= Math.max(1, assignment.progress.required));
 }
 
-function assignmentScheduleStatus(assignment: Assignment, state: OpenPresenceState, processing: ReturnType<typeof getAssignmentProcessingState>, occurrenceDay?: string) {
-  if (processing.isProcessing) return `Working now · ${processing.phaseLabel}`;
-  if (assignmentCompletedToday(assignment, state) && (!occurrenceDay || occurrenceDay === calendarWeekDays[(new Date().getDay() + 6) % 7] || assignment.schedule?.day === "Daily")) return "Done today";
-  if (assignment.status === "draft") return "Not started";
-  if (["needs_operator", "blocked"].includes(assignment.status)) return "Needs attention";
-  if (assignment.status === "expired_incomplete") return "Ended incomplete · choose a new time";
-  if (assignment.status === "failed") return "Attempt failed · retry";
-  if (assignment.status === "working") return "Waiting for its next run";
-  if (occurrenceDay && occurrenceDay !== calendarWeekDays[(new Date().getDay() + 6) % 7] && ["active", "awaiting_execution"].includes(assignment.status)) return "Scheduled";
-  return assignment.status.replaceAll("_", " ");
-}
-
 const onDemandAssignmentTiming = "One-time · On demand";
 const assignmentTimingLabel = (assignment: Assignment) => assignment.activation?.type === "continuous" ? "Ongoing goal" : assignment.timeframe?.startsAt && assignment.timeframe.deadline ? `${new Date(assignment.timeframe.startsAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${formatTime(assignment.timeframe.startsAt)}–${new Date(assignment.timeframe.startsAt).toDateString() !== new Date(assignment.timeframe.deadline).toDateString() ? `${new Date(assignment.timeframe.deadline).toLocaleDateString(undefined, { month: "short", day: "numeric" })} ` : ""}${formatTime(assignment.timeframe.deadline)}` : assignment.schedule
   ? `${assignmentIsOneTime(assignment) ? "One-time · " : "Weekly · "}${assignment.schedule.date ? assignmentDateLabel(assignment) : assignment.schedule.day} · ${assignment.schedule.time}`
@@ -13946,29 +13854,19 @@ function ScheduleView({
   const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
   const selectedPresence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   const presenceName = selectedPresence?.name ?? "this Presence";
-  const timezone = presenceTimezone(selectedPresence);
   const [viewMode, setViewMode] = useState<"list" | "week">("list");
-  const [scheduleDayFilter, setScheduleDayFilter] = useState<ScheduleDayFilter>(() => weekdayInTimezone(new Date(), timezone) as ScheduleDayFilter);
-  const [scheduleRecurrenceFilter, setScheduleRecurrenceFilter] = useState<ScheduleRecurrenceFilter>("all");
-  const [compactSchedule, setCompactSchedule] = useState(true);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(() => typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("assignmentId"));
-  const [runningLiveAssignmentId, setRunningLiveAssignmentId] = useState<string | null>(null);
+  const runningLiveAssignmentId = null;
   const pendingReviewCount = state.executions.filter((execution) => execution.presenceId === presenceId && execution.status === "awaiting-review").length;
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [intervention, setIntervention] = useState("");
   const [sendingIntervention, setSendingIntervention] = useState(false);
   const [scheduleNow] = useState(() => Date.now());
-  const visibleSlots: CalendarSlot[] = [];
   const visibleAssignments = state.assignments.filter((item) => item.presenceId === presenceId && item.status !== "cancelled");
   const taskAssignments = visibleAssignments.filter((assignment) => assignment.activation?.type !== "continuous");
-  const filteredVisibleAssignments = taskAssignments.filter((assignment) => assignmentMatchesRecurrenceFilter(assignment, scheduleRecurrenceFilter));
   const projectedPublishingPlan = derivePublishingPlanProjection(state, presenceId);
   const projectedPlanWindows = (projectedPublishingPlan?.windows ?? []).filter((window) => window.status === "future" || window.status === "active");
   const publishingResponsibility = visibleAssignments.find((assignment) => assignment.id === selectedPresence?.publishingInitiative.assignmentId || assignment.origin === "publishing_initiative");
-  const processingAssignments = visibleAssignments.filter((assignment) => {
-    const { isProcessing } = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId);
-    return isProcessing;
-  });
   const cancelAssignment = async (assignment: OpenPresenceState["assignments"][number]) => {
     const publishingItem = assignment.origin === "publishing_initiative";
     if (!window.confirm(`${publishingItem ? "Cancel the next planned publishing item?" : "Cancel this Assignment?"}\n\n${cleanUserFacingAssignmentInstruction(assignment.instruction)}`)) return;
@@ -13980,15 +13878,6 @@ function ScheduleView({
       if (next && !publishingItem) setSelectedAssignmentId(null);
     } finally {
       setCancellingId(null);
-    }
-  };
-  const runLiveAssignment = async (assignment: Assignment) => {
-    if (!selectedPresence || runningLiveAssignmentId) return;
-    setRunningLiveAssignmentId(assignment.id);
-    try {
-      await mutate({ type: "runLiveAssignment", assignmentId: assignment.id, presenceId: selectedPresence.id });
-    } finally {
-      setRunningLiveAssignmentId(null);
     }
   };
   const sendPlanIntervention = async (assignment: Assignment) => {
@@ -14020,11 +13909,10 @@ function ScheduleView({
   };
   const selectedAssignment = visibleAssignments.find((assignment) => assignment.id === selectedAssignmentId) ?? null;
   return (
-    <div className="page">
+    <div className="page tasks-page">
       <PageHeader
-        eyebrow={presenceName}
         title="Tasks"
-        description={<>A calm view of what {presenceName} is handling now and what comes next.</>}
+        description={<>What {presenceName} is working on for you.</>}
         actionsClassName="heading-actions calendar-heading-actions"
         actions={<>
           <Button variant="ghost" onClick={() => setView("chat")} title="Return to the Agent conversation">
@@ -14032,7 +13920,7 @@ function ScheduleView({
           </Button>
           {pendingReviewCount > 0 && (
             <Button variant="secondary" onClick={() => setView("live")} title="Open Activity to approve actions waiting for you">
-              <CircleAlert size={14} /> Review {pendingReviewCount} approval{pendingReviewCount === 1 ? "" : "s"} in Activity
+              <CircleAlert size={14} /> Review {pendingReviewCount}
             </Button>
           )}
           <div className="calendar-view-toggle" role="group" aria-label="Calendar view mode">
@@ -14041,21 +13929,6 @@ function ScheduleView({
           </div>
         </>}
       />
-      {processingAssignments.length > 0 && (
-        <div className="schedule-live-progress-banner" role="status" aria-live="polite">
-          <LoaderCircle size={16} className="spin schedule-banner-spinner" />
-          <div className="schedule-banner-content">
-            <div className="schedule-banner-title">
-              <strong>{presenceName} is working on a scheduled item</strong>
-              <span className="schedule-banner-phase">Working now</span>
-            </div>
-            <p className="schedule-banner-detail">
-              {cleanUserFacingAssignmentInstruction(processingAssignments[0].instruction)}
-            </p>
-          </div>
-          {processingAssignments.length > 1 && <span className="schedule-banner-count">+{processingAssignments.length - 1} more</span>}
-        </div>
-      )}
       {selectedAssignment && (
         <aside
           ref={assignmentInspectorRef}
@@ -14088,6 +13961,9 @@ function ScheduleView({
             <h3>{selectedAssignment.title || cleanUserFacingAssignmentInstruction(selectedAssignment.instruction)}</h3>
             {selectedAssignment.description && <p>{selectedAssignment.description}</p>}
           </div>
+          <p className="task-detail-update">{taskUpdate(selectedAssignment, state, runningLiveAssignmentId)}</p>
+          <details className="task-detail-evidence">
+            <summary>Timing & details</summary>
           <details><summary>More about this</summary><p>{selectedAssignment.instruction}</p></details>
           <div className="assignment-inspector-meta">
             <div><span>When</span><strong>{assignmentTimingLabel(selectedAssignment)}</strong><small>{selectedAssignment.status === "expired_incomplete" ? "The deadline passed before this attempt finished. Choose a new window to try again." : selectedAssignment.schedule?.date ? `Starts once on ${assignmentDateLabel(selectedAssignment)} at ${selectedAssignment.schedule.time}.` : selectedAssignment.schedule ? `Starts every ${selectedAssignment.schedule.day} at ${selectedAssignment.schedule.time}.` : selectedAssignment.activation?.type === "continuous" ? "Progress is tracked over time in Growth." : selectedAssignment.timeframe?.deadline ? "Work is limited to this time window." : "No start time is set."}</small></div>
@@ -14124,7 +14000,7 @@ function ScheduleView({
               </small>
             </section>
           )}
-          <p className="assignment-inspector-note">{presenceName} handles the work. Add guidance only when you want to change the direction.</p>
+          </details>
           <form className="assignment-intervention" onSubmit={(event) => { event.preventDefault(); void sendPlanIntervention(selectedAssignment); }}>
             <div className="assignment-intervention-heading">
               <label htmlFor="assignment-intervention-input">Tell {presenceName} something about this</label>
@@ -14158,14 +14034,6 @@ function ScheduleView({
           </form>
           <div className="assignment-inspector-actions">
 
-            {! ["completed", "completed_with_adaptation", "cancelled"].includes(selectedAssignment.status) && !getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing && (
-              <Button variant="ghost" onClick={() => setIntervention("Please review this plan and choose the next worthwhile step.")}>Ask {presenceName} to review this plan</Button>
-            )}
-            {!["completed", "completed_with_adaptation", "cancelled", "draft", "expired_incomplete", "failed"].includes(selectedAssignment.status) && (
-              <Button variant="primary" disabled={sendingIntervention || getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing} onClick={() => setIntervention("Please prioritize this and decide whether it should happen now.")}>
-                {getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing ? <><LoaderCircle size={14} className="spin" /> Working now…</> : <><Play size={14} /> Ask {presenceName} to prioritize</>}
-              </Button>
-            )}
             {!["completed", "completed_with_adaptation", "cancelled", "failed", "expired_incomplete"].includes(selectedAssignment.status) && (
               <Button variant="danger" disabled={cancellingId === selectedAssignment.id} onClick={() => void cancelAssignment(selectedAssignment)}>
                 {cancellingId === selectedAssignment.id ? <><LoaderCircle size={14} className="spin" /> {selectedAssignment.origin === "publishing_initiative" ? "Canceling…" : "Closing…"}</> : selectedAssignment.origin === "publishing_initiative" ? "Cancel planned item" : selectedAssignment.status === "needs_operator" || selectedAssignment.status === "blocked" ? "Close Assignment" : "Cancel Assignment"}
@@ -14175,136 +14043,86 @@ function ScheduleView({
         </aside>
       )}
       {viewMode === "week" ? (
-        <WeekCalendar assignments={filteredVisibleAssignments} compact={compactSchedule} onToggleCompact={() => setCompactSchedule((current) => !current)} state={state} presenceName={presenceName} runningLiveAssignmentId={runningLiveAssignmentId} onAssignment={openAssignment} />
+        <TaskCalendar assignments={taskAssignments} windows={projectedPlanWindows} publishingResponsibility={publishingResponsibility} timezone={presenceTimezone(selectedPresence)} onAssignment={openAssignment} />
       ) : (
         <>
-          <ScheduleList assignments={filteredVisibleAssignments} presenceName={presenceName} timezone={timezone} state={state} runningLiveAssignmentId={runningLiveAssignmentId} dayFilter={scheduleDayFilter} onDayFilterChange={setScheduleDayFilter} recurrenceFilter={scheduleRecurrenceFilter} onRecurrenceFilterChange={setScheduleRecurrenceFilter} onAssignment={openAssignment} />
+          <ScheduleList assignments={taskAssignments} presenceName={presenceName} state={state} runningLiveAssignmentId={runningLiveAssignmentId} onAssignment={openAssignment} onChat={() => setView("chat")} />
         </>
       )}
-      {projectedPlanWindows.length > 0 && (
-        <section className="schedule-plan-projection" aria-label="Agent publishing plan">
-          <div className="schedule-plan-projection-heading">
-            <div>
-              <SectionEyebrow>Coming up</SectionEyebrow>
-              <h2>Open opportunities</h2>
-            </div>
-            <span>{presenceName} decides in the moment</span>
-          </div>
+      {viewMode === "list" && projectedPlanWindows.length > 0 && (
+        <details className="schedule-plan-projection task-upcoming" aria-label="Agent publishing plan">
+          <summary>Upcoming opportunities <span>{projectedPlanWindows.length}</span></summary>
           <p className="schedule-plan-projection-note">These are flexible opportunities, not guaranteed posts. Open one to guide {presenceName}.</p>
           <div className="schedule-plan-projection-list">
             {projectedPlanWindows.map((window) => (
               <button type="button" className="schedule-plan-projection-item" key={window.id} onClick={() => publishingResponsibility && openAssignment(publishingResponsibility)} disabled={!publishingResponsibility}>
                 <span className="schedule-plan-projection-time">{new Date(window.startAt).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} · {new Date(window.startAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
                 <strong>{window.summary}</strong>
-                <small>{window.status === "active" ? "Open now" : "Upcoming · Jenny will evaluate it"}</small>
+                <small>{window.status === "active" ? "Open now" : "Upcoming · Will be considered"}</small>
               </button>
             ))}
           </div>
-        </section>
+        </details>
       )}
     </div>
   );
 }
 
-function ScheduleList({
-  assignments,
-  presenceName,
-  timezone,
-  state,
-  runningLiveAssignmentId,
-  dayFilter,
-  onDayFilterChange,
-  recurrenceFilter,
-  onRecurrenceFilterChange,
-  onAssignment,
-}: {
+const taskIsEnded = (assignment: Assignment) => ["failed", "expired_incomplete"].includes(assignment.status)
+  || assignment.status === "needs_operator" && /expired[_ ]permit|execution permit.*expired/i.test(assignment.lastOutcome?.message ?? "");
+const taskNeedsAttention = (assignment: Assignment) => !taskIsEnded(assignment) && (["awaiting_review", "needs_operator", "blocked"].includes(assignment.status) || (assignment.status === "draft" && ["needs_input", "blocked"].includes(assignment.preflight?.status ?? "")));
+const taskIsFinished = (assignment: Assignment) => ["completed", "completed_with_adaptation"].includes(assignment.status);
+
+function taskUpdate(assignment: Assignment, state: OpenPresenceState, runningId?: string | null) {
+  if (getAssignmentProcessingState(assignment, state.assignmentRuns, runningId).isProcessing) return "Working on this now.";
+  if (assignment.status === "awaiting_review") return "Waiting for your review before continuing.";
+  if (assignment.status === "paused") return "Paused.";
+  if (taskNeedsAttention(assignment) || taskIsEnded(assignment)) {
+    const message = assignment.status === "draft" ? assignment.preflight?.semanticSummary?.trim() : assignment.lastOutcome?.message?.trim();
+    const prefix = assignment.status === "expired_incomplete" ? "The time window ended before this was finished." : assignment.status === "failed" ? "The last attempt didn’t finish." : assignment.status === "needs_operator" ? "Waiting for your input." : "Unable to continue yet.";
+    return message || prefix;
+  }
+  if (taskIsFinished(assignment)) return assignment.status === "completed_with_adaptation" ? "Completed with an adjustment. Open to see the result." : "Completed.";
+  if (assignmentCompletedToday(assignment, state)) return "Done for today. Will continue at the next scheduled time.";
+  if (assignment.status === "draft") return "Not started yet.";
+  if (assignment.status === "awaiting_execution") return "Prepared and waiting to run.";
+  if (assignment.timeframe?.deadline && !assignment.timeframe.startsAt && !assignment.schedule) return `Due ${new Date(assignment.timeframe.deadline).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.`;
+  if (assignment.progress.verified > 0) return `${assignment.progress.verified} of ${assignment.progress.required} results verified so far.`;
+  if (assignment.schedule || assignment.timeframe?.deadline) return `Planned for ${assignmentTimingLabel(assignment).replace(/^Weekly · /, "").replace(/^One-time · /, "")}.`;
+  return "Waiting for the next step.";
+}
+
+function ScheduleList({ assignments, presenceName, state, runningLiveAssignmentId, onAssignment, onChat }: {
   assignments: Assignment[];
   presenceName: string;
-  timezone: string;
   state: OpenPresenceState;
   runningLiveAssignmentId?: string | null;
-  dayFilter: ScheduleDayFilter;
-  onDayFilterChange: (filter: ScheduleDayFilter) => void;
-  recurrenceFilter: ScheduleRecurrenceFilter;
-  onRecurrenceFilterChange: (filter: ScheduleRecurrenceFilter) => void;
   onAssignment: (assignment: Assignment) => void;
+  onChat: () => void;
 }) {
-  const scheduledAssignments = assignments.filter((assignment) => assignment.status !== "cancelled");
-  const today = weekdayInTimezone(new Date(), timezone);
-  const filteredAssignments = dayFilter === "all"
-    ? scheduledAssignments
-    : scheduledAssignments.filter((assignment) => {
-        if (assignmentOccursOnDay(assignment, dayFilter)) return true;
-        // Type filters are an explicit request to find work outside today's scan.
-        if (recurrenceFilter !== "all" && !assignment.schedule) return true;
-        if (dayFilter !== today) return false;
-        const processing = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing;
-        return processing || ["needs_operator", "blocked"].includes(assignment.status);
-      });
-  const selectedDayLabel = scheduleDayFilters.find((item) => item.value === dayFilter)?.value;
-  const hasItems = filteredAssignments.length > 0;
-  const currentAssignments = filteredAssignments.filter((assignment) => !["completed", "completed_with_adaptation", "failed", "expired_incomplete"].includes(assignment.status) || assignmentCompletedToday(assignment, state));
-  const archivedAssignments = filteredAssignments.filter((assignment) => ["completed", "completed_with_adaptation", "failed", "expired_incomplete"].includes(assignment.status) && !assignmentCompletedToday(assignment, state));
-  const completedTodayCount = filteredAssignments.filter((assignment) => assignmentCompletedToday(assignment, state)).length;
-  const renderAssignment = (assignment: Assignment) => {
-    const oneTime = assignmentIsOneTime(assignment);
-    const timing = assignmentTimingLabel(assignment);
-    const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId);
-    const promotionPursuit = (state.assignmentPursuitWindows ?? []).filter((item) => item.assignmentId === assignment.id && isPromotionBurstWindow(item) && ["active", "paused", "completed"].includes(item.status)).sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())[0];
-    const promotionCounts = promotionPursuit ? assignmentPursuitVerifiedCounts(state, promotionPursuit) : undefined;
-    const status = promotionPursuit ? (promotionPursuit.status === "completed" ? "Completed" : promotionPursuit.status === "paused" ? "Recovering" : proc.isProcessing ? `Working now · ${proc.phaseLabel}` : "Running") : assignmentScheduleStatus(assignment, state, proc);
-    const schedule = assignment.schedule;
-    return <button type="button" className={`schedule-list-row schedule-list-row-assignment${oneTime ? " is-one-time" : ""}${assignmentCompletedToday(assignment, state) ? " is-completed-today" : ""}${proc.isProcessing ? " is-processing schedule-list-row-processing" : ""}`} key={assignment.id} onClick={() => onAssignment(assignment)} aria-label={`Open ${oneTime ? "one-time " : ""}Assignment ${assignment.instruction}`} aria-busy={proc.isProcessing}>
-      <div className="schedule-list-row-mark" aria-hidden="true" />
-      <div className="schedule-list-row-time" aria-label={schedule ? `${schedule.day} at ${schedule.time}` : "One-time on demand"}>
-        <strong>{(assignment.activation?.type === "continuous" ? "Ongoing" : schedule?.time) ?? (assignment.timeframe?.deadline ? `By ${formatTime(assignment.timeframe.deadline)}` : "On demand")}</strong>
-        <span>{schedule?.date ? assignmentDateLabel(assignment) : schedule?.day}</span>
-      </div>
-      <div className="schedule-list-row-copy">
-        <div className="schedule-list-row-kicker">
-          <strong>{assignment.createdBy === "operator" ? "From you" : `From ${presenceName}`}</strong>
-          <span className="schedule-recurrence-badge">{assignment.activation?.type === "continuous" ? "Goal" : oneTime ? "One-time" : "Weekly"}</span>
-          {proc.isProcessing && <span className="schedule-processing-badge"><LoaderCircle size={9} className="spin" /> Working now · {proc.phaseLabel}</span>}
-          {assignmentCompletedToday(assignment, state) && !proc.isProcessing && <span className="schedule-completed-badge"><CheckCircle2 size={10} /> Done today</span>}
-        </div>
-        <h3>{promotionPursuit ? "OwnTheHype promotion" : cleanUserFacingAssignmentInstruction(assignment.title || assignment.instruction)}</h3>
-        {!promotionPursuit && assignment.description && <p className="schedule-list-row-description">{assignment.description}</p>}
-        <small>{promotionPursuit ? `${promotionCounts?.verified ?? 0} / ${promotionPursuit.requiredVerifiedPromotionalActions ?? 40} verified · ${status}` : `${timing} · ${assignmentScheduleProgress(assignment)} · ${proc.isProcessing ? `Working · ${proc.phaseLabel}` : status}`}</small>
-      </div>
-      <ChevronRight size={16} aria-hidden="true" />
+  const attention = assignments.filter(taskNeedsAttention);
+  const current = assignments.filter((item) => !taskNeedsAttention(item) && !taskIsEnded(item) && !taskIsFinished(item) && item.status !== "cancelled");
+  const ended = assignments.filter(taskIsEnded);
+  const completed = assignments.filter(taskIsFinished);
+  const renderTask = (assignment: Assignment) => {
+    const working = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing;
+    return <button type="button" className="task-row" key={assignment.id} onClick={() => onAssignment(assignment)} aria-label={`Open task: ${cleanUserFacingAssignmentInstruction(assignment.title || assignment.instruction)}`}>
+      <span className={`task-row-icon${taskNeedsAttention(assignment) ? " needs-attention" : ""}`} aria-hidden="true">
+        {working ? <LoaderCircle size={19} className="spin" /> : taskIsFinished(assignment) ? <CheckCircle2 size={19} /> : taskNeedsAttention(assignment) ? <CircleAlert size={19} /> : <Circle size={19} />}
+      </span>
+      <span className="task-row-copy">
+        <strong>{cleanUserFacingAssignmentInstruction(assignment.title || assignment.instruction)}</strong>
+        <span>{taskUpdate(assignment, state, runningLiveAssignmentId)}</span>
+      </span>
+      <ChevronRight size={16} className="task-row-arrow" aria-hidden="true" />
     </button>;
   };
-  return <section className="schedule-list" aria-label="Schedule list">
-    <div className="schedule-list-header">
-      <div>
-        <SectionEyebrow>Today</SectionEyebrow>
-        <h2 aria-label="What needs to happen"><span aria-hidden="true">Today’s work</span></h2>
-        <p>Open an item to see its status or give {presenceName} a little direction. Completed work stays available below.</p>
-        <div className="schedule-list-summary" aria-label="Schedule summary"><span><strong>{completedTodayCount}</strong> done today</span><span><strong>{currentAssignments.length}</strong> open</span></div>
-      </div>
-      <div className="schedule-list-header-controls">
-        <div className="schedule-day-filter-label">Type</div>
-        <div className="feed-filter schedule-recurrence-filter" role="group" aria-label="Assignment type filter">
-          {scheduleRecurrenceFilters.map((item) => <button type="button" key={item.value} className={recurrenceFilter === item.value ? "active" : ""} aria-pressed={recurrenceFilter === item.value} onClick={() => onRecurrenceFilterChange(item.value)}>{item.label}</button>)}
-        </div>
-        <div className="schedule-day-filter-label">Day</div>
-        <div className="feed-filter schedule-day-filter" role="group" aria-label="Scheduled responsibility filter">
-            {scheduleDayFilters.map((item) => {
-              const isToday = item.value === today;
-              return <button type="button" key={item.value} className={`${dayFilter === item.value ? "active " : ""}${isToday ? "today" : ""}`.trim()} aria-pressed={dayFilter === item.value} aria-label={item.value === "all" ? "Show all scheduled items" : `Show ${item.value.slice(0, 3)} scheduled items${isToday ? " · Today" : ""}`} title={item.value === "all" ? "Show all days" : `${item.value}${isToday ? " · Today" : ""}`} onClick={() => onDayFilterChange(item.value)}>{item.label}</button>;
-            })}
-          </div>
-          <div className="schedule-timezone" aria-label={`Schedule timezone: ${timezone}`}>Timezone · {timezone}</div>
-        </div>
-    </div>
-      {!hasItems ? <EmptyState title={dayFilter !== "all" ? `No responsibilities on ${selectedDayLabel}` : recurrenceFilter !== "all" ? `No ${recurrenceFilter} responsibilities` : "No tasks yet"} body={dayFilter !== "all" ? "Try another day or show all scheduled responsibilities." : recurrenceFilter !== "all" ? "Try another assignment type or show all scheduled responsibilities." : "Jenny will add work here when Chat or her autonomous plan calls for it."} action={dayFilter !== "all" ? <Button onClick={() => onDayFilterChange("all")} variant="secondary">Show all days</Button> : recurrenceFilter !== "all" ? <Button onClick={() => onRecurrenceFilterChange("all")} variant="secondary">Show all types</Button> : undefined} /> : <>
-      <div className="schedule-list-rows">
-      {currentAssignments.map(renderAssignment)}
-    </div></>}
-    {archivedAssignments.length > 0 && <details className="schedule-archive-details">
-      <summary><span><strong>Past or incomplete responsibilities</strong><small>Kept available for review without competing with current work.</small></span><b>{archivedAssignments.length}</b></summary>
-      <div className="schedule-list-rows schedule-list-rows-archive">{archivedAssignments.map(renderAssignment)}</div>
-    </details>}
+  return <section className="task-list" aria-label="Tasks list">
+    {attention.length > 0 && <section className="task-group" aria-label="Tasks needing attention"><h2>Needs attention</h2>{attention.map(renderTask)}</section>}
+    {current.length > 0 && <section className="task-group" aria-label="Tasks in progress"><h2>In progress</h2>{current.map(renderTask)}</section>}
+    {attention.length === 0 && current.length === 0 && ended.length === 0 && <div className="tasks-empty"><CheckCircle2 size={25} aria-hidden="true" /><h2>{completed.length ? "All caught up" : "Nothing here yet"}</h2><p>Tell {presenceName} what you want to accomplish.<br />You can follow the work here.</p><Button variant="secondary" onClick={onChat}>Talk to {presenceName}</Button></div>}
+    {ended.length > 0 && <details className="task-ended"><summary>Ended without completion <span>{ended.length}</span></summary><p className="task-ended-note">These attempts stay available as history. Start a fresh task only if the outcome still matters.</p>{ended.map(renderTask)}</details>}
+    {completed.length > 0 && <details className="task-completed"><summary>Completed <span>{completed.length}</span></summary>{completed.map(renderTask)}</details>}
   </section>;
 }
 
@@ -14329,112 +14147,6 @@ function GoalsSection({ goals, presenceName, state, onAssignment }: { goals: Ass
       </button>;
     })}</div>}
   </section>;
-}
-
-function WeekCalendar({
-  assignments,
-  compact,
-  onToggleCompact,
-  state,
-  presenceName,
-  runningLiveAssignmentId,
-  onAssignment,
-}: {
-  assignments: Assignment[];
-  compact: boolean;
-  onToggleCompact: () => void;
-  state: OpenPresenceState;
-  presenceName: string;
-  runningLiveAssignmentId?: string | null;
-  onAssignment: (assignment: Assignment) => void;
-}) {
-  const calendarAssignments = assignments.map((assignment) => {
-    if (assignment.schedule || !assignment.timeframe?.startsAt || assignment.activation?.type === "continuous") return assignment;
-    const start = new Date(assignment.timeframe.startsAt);
-    const end = new Date(assignment.timeframe.deadline ?? assignment.timeframe.startsAt);
-    const clock = (date: Date) => `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-    return { ...assignment, schedule: { date: localDateInputValue(start), day: start.toLocaleDateString("en-US", { weekday: "long" }), time: clock(start), executionWindow: `${clock(start)}–${clock(end)}` } };
-  });
-  const scheduledAssignments = calendarAssignments.filter((assignment) => assignment.schedule && (assignmentIsOpen(assignment) || assignmentCompletedToday(assignment, state)));
-  const unscheduledAssignments = calendarAssignments.filter((assignment) => !assignment.schedule && assignment.status !== "cancelled" && assignment.activation?.type !== "continuous");
-  const dayAssignments = new Map(calendarWeekDays.map((day) => [day, scheduledAssignments.filter((assignment) => assignmentOccursThisWeek(assignment, day))]));
-  const gridHeight = calendarHours.length * 64;
-  const hasAnyItems = scheduledAssignments.length > 0;
-  const hasDatedItems = scheduledAssignments.length > 0;
-  const hasItems = hasDatedItems;
-  const calendarLabel = "Assignments";
-  const compactDays = calendarWeekDays.map((day) => {
-    const items = [
-      ...(dayAssignments.get(day) ?? []).map((assignment) => {
-        const schedule = assignment.schedule!;
-        const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId, day);
-        const status = assignmentScheduleStatus(assignment, state, proc, day);
-        return {
-          id: "assignment-" + assignment.id,
-          kind: "assignment" as const,
-          startMinutes: timeToMinutes(schedule.time),
-          time: schedule.time,
-          title: assignment.title || "Task",
-          detail: assignment.description || "",
-          meta: assignmentScheduleProgress(assignment) + " · " + status,
-          assignment,
-          isOneTime: assignmentIsOneTime(assignment),
-          isCompletedToday: assignmentCompletedToday(assignment, state),
-          isProcessing: proc.isProcessing,
-          phaseLabel: proc.phaseLabel,
-        };
-      }),
-    ].sort((left, right) => left.startMinutes - right.startMinutes || left.id.localeCompare(right.id));
-    return { day, items };
-  }).filter((entry) => entry.items.length > 0);
-  const renderCompactItem = (item: (typeof compactDays)[number]["items"][number]) => {
-    return <button type="button" className={`compact-calendar-item compact-calendar-item-assignment${item.isOneTime ? " is-one-time" : ""}${item.isCompletedToday ? " is-completed-today" : ""}${item.isProcessing ? " is-processing compact-calendar-item-processing" : ""}`} key={item.id} onClick={() => onAssignment(item.assignment)} aria-label={`Open ${item.isOneTime ? "one-time " : ""}Assignment ${item.assignment.instruction}, ${item.assignment.schedule?.day} at ${item.assignment.schedule?.time}`} aria-busy={item.isProcessing}>
-      <div className="compact-calendar-time-col">
-        <span className="compact-calendar-time">{item.time}</span>
-        {item.isProcessing && <span className="compact-calendar-processing-pill"><LoaderCircle size={9} className="spin" /> Processing</span>}
-      </div>
-      <div>
-        <div className="compact-calendar-item-header">
-          <strong>{item.title}</strong>
-          <span className="compact-calendar-recurrence">{item.isOneTime ? "One-time" : "Weekly"}</span>
-          {item.isCompletedToday && !item.isProcessing && <span className="compact-calendar-complete"><CheckCircle2 size={9} /> Done today</span>}
-        </div>
-        <small>{item.detail}</small>
-        {item.isProcessing ? (
-          <em className="compact-calendar-meta-processing"><LoaderCircle size={9} className="spin" /> {item.meta}</em>
-        ) : (
-          <em>{item.meta}</em>
-        )}
-      </div>
-    </button>;
-  };
-  const blockStyle = (start: number, end: number, minimum: number) => {
-    const top = Math.max(0, (start / 60) * 64);
-    const height = Math.max(minimum, Math.min(gridHeight - top - 8, (Math.max(start + 60, end) - start) / 60 * 64 - 8));
-    return { top, height };
-  };
-  return (
-    <section className={compact ? "week-calendar week-calendar-compact-mode" : "week-calendar"} aria-label={`Weekly schedule showing ${calendarLabel || "no layers"}`}>
-      {unscheduledAssignments.length > 0 && <section className="calendar-flexible-tasks" aria-label="Tasks without a fixed start time"><h2>No fixed start time</h2><p>These tasks are still tracked here. Open one to see its deadline and progress.</p>{unscheduledAssignments.map(task => <button type="button" className="schedule-list-row" key={task.id} onClick={() => onAssignment(task)}><span><strong>{task.title ?? cleanUserFacingAssignmentInstruction(task.instruction)}</strong><small>{task.timeframe?.deadline ? `Due ${new Date(task.timeframe.deadline).toLocaleString()}` : "On demand"} · {task.status === "expired_incomplete" ? "Ended incomplete · tell Jenny if timing should change" : task.status === "failed" ? "Attempt failed · retry" : task.status.replaceAll("_", " ")}</small></span><ChevronRight size={16} /></button>)}</section>}
-      <div className="week-calendar-toolbar">
-        <div>
-          <SectionEyebrow>This week</SectionEyebrow>
-          <h2>When {presenceName} can notice and act</h2>
-          <p>One-time assignments appear on their date. Weekly assignments repeat on the same weekday. Verified work stays visible as done.</p>
-        </div>
-        <div className="week-calendar-toolbar-side">
-          <div className="calendar-density-toggle" role="group" aria-label="Visual schedule density">
-            <button type="button" aria-pressed={compact} className={compact ? "active" : ""} onClick={() => { if (!compact) onToggleCompact(); }}>Compact</button>
-            <button type="button" aria-pressed={!compact} className={!compact ? "active" : ""} onClick={() => { if (compact) onToggleCompact(); }}>Full hours</button>
-          </div>
-        </div>
-      </div>
-      {!hasItems ? <EmptyState title={hasAnyItems ? "Nothing scheduled this week" : "Nothing scheduled for this Presence"} body={`${presenceName} will add work here when Chat or its autonomous plan calls for it.`} /> : <>
-        {hasDatedItems && <div className="week-grid-scroll"><div className="week-grid" style={{ "--week-grid-height": `${gridHeight}px` } as React.CSSProperties}><div className="week-grid-header"><span className="week-time-header">Local time</span>{calendarWeekDays.map((day) => <span key={day}>{day.slice(0, 3)}<small>{day}</small></span>)}</div><div className="week-grid-body"><div className="week-time-rail">{calendarHours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{calendarWeekDays.map((day) => <div className="week-day-column" key={day}>{calendarHours.map((hour) => <div className="week-hour-cell" key={hour} />)}{(dayAssignments.get(day) ?? []).map((assignment) => { const schedule = assignment.schedule!; const oneTime = assignmentIsOneTime(assignment); const style = blockStyle(timeToMinutes(schedule.time), timeToMinutes(schedule.time), 58); const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId, day); const status = assignmentScheduleStatus(assignment, state, proc, day); const doneToday = assignmentCompletedToday(assignment, state); const progress = assignmentScheduleProgress(assignment); return <button type="button" key={assignment.id} className={`week-assignment${oneTime ? " is-one-time" : ""}${doneToday ? " is-completed-today" : ""}${proc.isProcessing ? " is-processing week-assignment-processing" : ""}`} style={style} onClick={() => onAssignment(assignment)} aria-label={`Open ${oneTime ? "one-time " : ""}Assignment ${assignment.title || assignment.instruction}, ${schedule.day} at ${schedule.time}`} title={`${oneTime ? "One-time Assignment" : "Weekly Assignment"} · ${assignment.title || assignment.instruction} · ${schedule.day} ${schedule.time}`} aria-busy={proc.isProcessing}><span className="week-intent-time">{schedule.time}</span><strong>{oneTime ? "One time" : "Weekly"}</strong><small>{assignment.description || assignment.title || cleanUserFacingAssignmentInstruction(assignment.instruction)}</small>{proc.isProcessing ? <em className="week-assignment-processing-tag"><LoaderCircle size={8} className="spin" /> {progress} · {proc.phaseLabel}…</em> : <em>{progress} · {status}</em>}</button>; })}</div>)}</div></div></div>}
-      </>}
-      {hasDatedItems && <div className="week-calendar-compact" aria-label="Compact weekly schedule">{compactDays.map(({ day, items }) => <section className="compact-calendar-day" key={day}><div className="compact-calendar-day-label"><strong>{day.slice(0, 3)}</strong><span>{day}</span></div><div className="compact-calendar-items">{items.map(renderCompactItem)}</div></section>)}</div>}
-    </section>
-  );
 }
 
 function AgentSettingsView({

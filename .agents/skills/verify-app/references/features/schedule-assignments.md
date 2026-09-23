@@ -1,57 +1,40 @@
-# Schedule and Assignments
+# Tasks, Calendar, and Assignments
 
-Schedule manages durable operator responsibility and timing; the Agent chooses the method and only verified outcomes advance completion. Tasks is the common List/Calendar surface; `/work` and `/calendar` are compatibility routes.
+Tasks is a quiet projection of the Agent's work. The operator supplies outcomes in Chat; the Agent owns the method. `/schedule`, `/work`, and `/calendar` reach the same surface.
 
-## Sub-features
+## User journey
 
-- Create and review an Assignment with a completion contract.
-- View Week/List timing without pretending scheduled content is already published.
-- Open Tasks and select a responsibility directly into its details.
-- Work now or cancel a responsibility from its details; Playground remains a separate rehearsal surface.
-- Inspect due, working, blocked, deferred, failed, and completed states.
-- Scan prominent start times and distinguish one-time dates from weekly cadence.
-- Return to the originating Agent conversation with the persistent `Back to Chat` action.
-
-## How to get to it (user POV)
-
-Choose `Schedule` or open `/schedule`; `/calendar` remains a legacy alias that resolves to the same Schedule view. When Schedule is opened from the Chat context sidebar, use the visible `Back to Chat` action in the Schedule header to return to the Agent conversation. The current route offers `List`/`Calendar`, `Add task`, assignment-type/day filters, and Assignment details. Use `Add task`, fill `What should <Presence> accomplish?`, choose `One time only` with a specific `Date` or `Weekly` with a `Day`, choose one exact `Time`, then choose `Create assignment`. The Agent interprets the instruction and owns the method; there is no operator Objective or activation step. In Task list/detail views, the interpreted title and short description are shown first; the full instruction and constraints stay behind progressive disclosure.
+- Open **Tasks**. All non-cancelled, non-continuous tasks are visible without choosing a day or type. Continuous growth goals remain in Growth.
+- **Needs attention** includes blocked, awaiting review, failed, expired incomplete, and operator-input states. **In progress** contains other open work, with paused/not-started states explicitly described.
+- Each row has a title and current update. Click **Open task: <title>** to open **Assignment details** (visible heading: **Task details**). The icon is a status indicator, never a manual completion checkbox.
+- Details lead with the current update and **Tell <Agent> something about this**. **Send guidance** uses the existing scoped conversational intervention. **Timing & details** discloses timing, progress, readiness, original instructions, and detailed failure evidence.
+- **Completed** stays collapsed. Failed/expired tasks remain under Needs attention, never in the completion archive.
+- **Calendar** is only a seven-day dated calendar with Previous week, Next week, and Today. Desktop shows all seven days; mobile selects a day from the date strip. Truly undated tasks stay in List. Deadline-only tasks appear as Due; publishing plan windows appear as Opportunity events, never promised posts. No density toggle or task-list panels.
+- In List, **Upcoming opportunities** discloses the current publishing plan.
+- **Back to Chat**, or **Talk to <Agent>** in the empty state, returns to the real conversation. No separate task creation/activation form exists.
 
 ## Driving it with verify-app
 
 ```bash
 verify-app open schedule
-verify-app click --role button --name 'Add task'
 verify-app snapshot
-verify-app type --label 'What should Jenny accomplish?' --text 'Teach one useful idea about persistent agents.'
-verify-app click --role radio --name 'One time only'
-verify-app type --label 'Assignment date' --text '2026-09-03'
-verify-app type --role textbox --name Time --text 08:00
-verify-app click --role button --name 'Create assignment'
-verify-app wait-for --text 'Assignment details'
-verify-app click --role button --name Week
-verify-app wait-for --role region --name 'Weekly schedule'
+verify-app click --role button --name 'Open task: <actual title>' --exact
+verify-app type --label 'Tell Jenny something about this' --text 'Focus this on developers.'
+verify-app submit --role button --name 'Send guidance'
+verify-app click --text 'Timing & details' --exact
 verify-app state --projection schedule
 ```
 
-Inspect the assignment card, schedule, readiness, and persisted status after switching between Week/List or reloading.
+Use a single `run` flow when the next assertion must wait for an asynchronous mutation. `assignmentId` deep links still open the matching inspector after reload. Escape dismisses the inspector.
 
-## Proof
+## Proof anchors
 
-Proof is a visible Assignment with the correct timing and completion contract plus persisted schedule/assignment state. A verified recurring execution/outcome stays visible as `Done today` for the current occurrence. It is not a prewritten post, queue entry, or HTTP success.
+- `tests/e2e/schedule-state.spec.ts`: supervisory controls; populated attention/in-progress/completed states; detailed evidence disclosure; responsive overflow; screenshots. Status fixtures test presentation, not delivery.
+- `tests/e2e/one-time-task-visibility.spec.ts`: unscheduled visibility in List and exclusion from Calendar, deep-link reload, bounded timing, expired-task identity and no accidental execution.
+- `tests/e2e/task-calendar.spec.ts`: week/date navigation, explicit daily recurrence, deadline/timezone projection, historical completion, mobile day selection, detail access, no undated/list panels, screenshots.
+- `tests/e2e/responsive-workspace.spec.ts`: workspace scope, aliases, Calendar, empty-state Chat handoff.
+- `tests/runtime.test.ts`, `tests/plan-intervention-process-boundary.test.ts`: durable intervention and underlying execution semantics.
 
-## Gotchas
+## Truth boundaries
 
-- A one-time Assignment carries an ISO local date; a weekly Assignment carries a weekday. Both carry one exact local start time.
-- A rejected candidate, blocked expression, or delivery failure leaves responsibility incomplete.
-- Live assignments need a real connector; harness verification should remain Sandbox-safe.
-- Chat-created responsibilities are immediate one-time work and are not silently converted into weekly schedule entries.
-
-## Ended attempts and retry (2026-09-15)
-
-The inspector's visible heading is `Task details` (accessible region remains `Assignment details`). Schedule and current-attempt state are separate. Failed/expired work offers `Retry with a new time`: set `Task window start` and `Task window end`, then `Save changes`. Saving prepares the same assignment as a draft; `Start task` is the explicit activation. Prior verified progress remains recorded. An unresolved delivery prevents another attempt. Ended one-time tasks do not offer cancellation. Partial progress cannot produce a `Done today` badge.
-
-`one-time-task-visibility.spec.ts` verifies both task views, editing, expiration, retry-window persistence, identity preservation, and no execution created by saving a new window. `assignment-timeframe.test.ts` additionally covers failed-task recovery and unresolved-delivery protection.
-
-### Active billing recovery (2026-09-16)
-
-`tests/operator-chat-tools.test.ts` verifies recovery of the same active assignment when its last delivery failed for X credits. `tests/growth-runtime.test.ts` distinguishes a temporary billing fallback from a true action-permission browser requirement. Read checks and queued retries do not prove public write recovery.
+Partial progress, a draft, a queued execution, failed delivery, and candidate rejection are not completion. Recurring work remains open after a successful occurrence. Cancellation retains confirmation. Sandbox fixtures are not live delivery evidence. This presentation change does not alter runtime scheduling, authority, or Assignment state.

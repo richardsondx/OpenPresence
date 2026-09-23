@@ -274,6 +274,11 @@ export function recordOperationalFailure(input: {
     }
   }
 
+  if (!classification.requiresOperator) {
+    incident.operatorActionRequired = false;
+    incident.requiresAuth = false;
+  }
+
   // 3. Check recovery budget & circuit breakers
   let circuitOpen = false;
   let quotaWaiting = false;
@@ -297,12 +302,14 @@ export function recordOperationalFailure(input: {
     incident.nextAttemptAt = retryAt;
     incident.safeSummary = "The browser delivery route failed to claim or complete three equivalent actions within 15 minutes. New work for that route is paused until fresh liveness and verified identity are observed.";
   } else if (incident.recoveryAttempts >= budget.maxAttempts) {
-    // Exhaustion is a human boundary, not an invitation to retry forever.
-    circuitOpen = true;
-    health.state = "requires_operator";
-    incident.state = "needs_operator";
-    incident.operatorActionRequired = true;
-    incident.nextAttemptAt = undefined;
+    // End the fast retry burst, not the Agent's responsibility. A transient
+    // outage has no useful operator action; the temporal worker probes later.
+    const retryAt = new Date(Date.now() + Math.min(3600, budget.cooldownSeconds * 2 ** Math.min(incident.recoveryAttempts, 6)) * 1000).toISOString();
+    health.state = "circuit_open";
+    health.circuitUntil = retryAt;
+    incident.state = "recovering";
+    incident.operatorActionRequired = false;
+    incident.nextAttemptAt = retryAt;
   } else {
     health.state = "recovering";
     incident.state = "recovering";
@@ -412,7 +419,7 @@ export function resolveOperationalIncident(incidentId: string): RecoveryIncident
   delete incident.nextAttemptAt;
   upsertRecoveryIncident(incident);
 
-  const dependencyKind = (incident.dependencyId?.replace(/^dh_/, "").split("_")[0] ?? "runtime") as DependencyHealthKind;
+  const dependencyKind = (Object.keys(RECOVERY_BUDGETS) as DependencyHealthKind[]).find((kind) => incident.dependencyId === `dh_${kind}` || incident.dependencyId.startsWith(`dh_${kind}_`)) ?? "runtime";
   const health = getDependencyHealth(dependencyKind, incident.presenceId);
   if (health?.currentIncidentId === incident.id) {
     health.state = "healthy";
@@ -460,7 +467,7 @@ export function logRecoveryAttempt(input: {
       incident.affectedRunIds.push(input.runId);
     }
 
-    const dependencyKind = (incident.dependencyId?.replace(/^dh_/, "").split("_")[0] ?? "runtime") as DependencyHealthKind;
+    const dependencyKind = (Object.keys(RECOVERY_BUDGETS) as DependencyHealthKind[]).find((kind) => incident.dependencyId === `dh_${kind}` || incident.dependencyId.startsWith(`dh_${kind}_`)) ?? "runtime";
     const health = getDependencyHealth(dependencyKind, incident.presenceId);
     const budget = RECOVERY_BUDGETS[dependencyKind] ?? RECOVERY_BUDGETS.runtime;
 
@@ -477,12 +484,17 @@ export function logRecoveryAttempt(input: {
         health.updatedAt = attempt.timestamp;
         upsertDependencyHealth(health);
       }
-    } else if (incident.recoveryAttempts >= budget.maxAttempts) {
+    } else if (incident.operatorActionRequired || incident.requiresAuth) {
       incident.state = "needs_operator";
-      incident.operatorActionRequired = true;
       delete incident.nextAttemptAt;
+    } else if (incident.recoveryAttempts >= budget.maxAttempts) {
+      const retryAt = new Date(Date.now() + Math.min(3600, budget.cooldownSeconds * 2 ** Math.min(attemptNumber, 6)) * 1000).toISOString();
+      incident.state = "recovering";
+      incident.operatorActionRequired = false;
+      incident.nextAttemptAt = retryAt;
       if (health) {
-        health.state = "requires_operator";
+        health.state = "circuit_open";
+        health.circuitUntil = retryAt;
         health.updatedAt = attempt.timestamp;
         upsertDependencyHealth(health);
       }

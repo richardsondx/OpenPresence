@@ -251,7 +251,7 @@ These are three different ways to work with the Agent:
 
 **User POV**
 
-Chat shows link previews, consideration status, assignment handoff, verified actions, and failures. Supervisory replies should answer the direct point first, take the smallest warranted runtime action, and stay short unless the operator asks for detail. Growth, Calendar, plan, and Activity state are grounded context for these turns. Teach explains that the transcript stays with the Agent while durable meaning belongs in Brain. Rehearsal explicitly says nothing publishes or silently teaches the Agent.
+Chat shows link previews, consideration status, assignment handoff, verified actions, and failures. Recovery and connector actions are optional, dismissible system/tool bubbles in the scrollable transcript—not fixed banners—and “Check again” queues a normal operator turn. Supervisory replies should answer the direct point first, take the smallest warranted runtime action, and stay short unless the operator asks for detail. Growth, Calendar, plan, and Activity state are grounded context for these turns. Teach explains that the transcript stays with the Agent while durable meaning belongs in Brain. Rehearsal explicitly says nothing publishes or silently teaches the Agent.
 
 Natural-supervision QA covers realistic utterances such as progress checks, growth concerns, intensity requests, shared posts, breaking opportunities, feedback, and casual strategy questions. It also checks the reverse direction: the Agent may initiate a private update only for a meaningful breakthrough, problem, opportunity, permission need, material strategy change, or useful recap, not for every routine action receipt.
 
@@ -393,14 +393,14 @@ Schedule expresses future responsibility. A Standing Intent persists an instruct
 
 **Code POV**
 
-- `ScheduleView`, calendar/list/week modes, layers, assignment cards, preflight, run, cancel, and plan expansion are in `app/page.tsx`.
+- `ScheduleView` and `ScheduleList` in `app/client-page.tsx`, with `app/tasks-view.css` and `app/task-calendar.tsx`, provide a simple all-open task list, Calendar, scoped guidance, cancellation, and disclosed plan/evidence details.
 - `compileAssignmentInstruction`, `preflightAssignment`, `compileAgenda`, `compileAgendaWork`, `assignmentIsSatisfied`, and assignment progress helpers live in `lib/runtime.ts`.
 - Assignment lifecycle is typed in `lib/types.ts`; recovery and live work are in `assignment-recovery.ts`, `live-assignment-run.ts`, and `responsibility-continuity.ts`.
 - Schedule creation creates linked Calendar/Standing Intent/Assignment state. A scheduled evaluation can still end in social `NO_OP`; an Assignment cannot silently complete from candidate rejection.
 
 **User POV**
 
-Schedule is an Agent-owned projection: it shows what Genny decided to pursue and why. The normal user path is Chat → Agent decision → Assignment → schedule/execution → measurement. The user can observe an item and intervene conversationally with “Tell Jenny something about this”; Genny owns the resulting plan. Traditional Add task, Edit Assignment, and Start task controls are not part of the primary UX. `planningOnly` is retained only as a compatibility state for legacy persisted user-created work and must not become a new workflow.
+Schedule is an Agent-owned projection: it shows what Genny decided to pursue and why. The normal user path is Chat → Agent decision → Assignment → schedule/execution → measurement. The user can observe an item and intervene conversationally with “Tell Jenny something about this”; Genny owns the resulting plan. Tasks opens with title-and-update rows grouped into Needs attention and In progress, with Completed, ended-without-completion history, and Upcoming opportunities collapsed. Only states requiring a current operator decision remain in Needs attention; failed or expired attempts stay inspectable without masquerading as active work. Day/type filters and duplicate progress summaries are removed; Calendar contains only dated events with week navigation and mobile day selection; undated tasks remain in List. Timing & details retains scheduling and evidence. Traditional Add task, Edit Assignment, and Start task controls are not part of the primary UX. `planningOnly` is retained only as a compatibility state for legacy persisted user-created work and must not become a new workflow.
 
 **QA expectations**
 
@@ -718,3 +718,7 @@ pnpm --silent openpresence playground timeline
 ```
 
 The final test is always the product test from the philosophy: **does this help the Agent notice better opportunities, say better things, stay coherent, use the right medium, maintain relationships, or learn how to earn the next qualified follower without losing itself?**
+
+### Recovery continuity update — 2026-09-22
+
+Temporary model/worker failures retain the existing Assignment and schedule backoff instead of exhausting into operator work. Supported X actions can use enabled, verified browser hands when the native API is unavailable; browser reads use the authenticated `/api/bridge/v1/reads` queue. Main Chat shows dated recovery and route-change bubbles from persisted evidence, including resolved history. See `qa-learnings/agent-resilience-2026-09-22/README.md` for bounded proof and live-session gaps.

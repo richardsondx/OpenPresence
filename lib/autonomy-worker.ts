@@ -1,3 +1,4 @@
+import { readChannelThroughBrowser, recordBrowserReadMirrors, readyBrowserForRead } from "./browser-channel-read";
 import { compileSocialStrategyContext } from "./social-strategy";
 import { randomUUID } from "node:crypto";
 import { scheduleOperationalSweep } from "./temporal";
@@ -139,7 +140,7 @@ import {
   isAiRateLimitError,
   type AgentSocialDecision,
 } from "./ai";
-import { hydrateNativeXThreadContext, reconcileNativeX } from "./native-x";
+import { hydrateNativeXThreadContext, nextObservationAt, reconcileNativeX } from "./native-x";
 import { compileSocialThreadContext } from "./thread-context";
 import { bridgeExecutionStatus } from "./bridge-contract";
 import { verifyChromeExecution } from "./bridge";
@@ -166,6 +167,7 @@ import { applyConversationDisposition, conversationDispositionForAction, convers
 import { ensurePlayfulToneEmoji, socialReplyQualityIssue } from "./social-quality";
 import { formatReplyText } from "./public-expression";
 import { runLiveExplorationWorker } from "./exploration-worker";
+import { xNativeWriteUnavailable } from "./x-credits";
 import type {
   JsonValue,
   MirrorObject,
@@ -1172,10 +1174,30 @@ export async function runAutonomousObservation(
     return current;
   }
 
-  // X observation always uses the native API. The attached browser is an
-  // optional action capability and never replaces the native reader.
   const connection = current.nativeConnections.find((c) => c.presenceId === presence.id && c.channelId === "x");
   if (!connection) {
+    // A connected browser can also be the observation body. Bridge events are
+    // still valid evidence, but a scheduled look should not require a native
+    // X connection when the browser can read the public conversation itself.
+    if (readyBrowserForRead(current, presenceId)) {
+      const browserPosts = await readChannelThroughBrowser(current, presenceId);
+      let next = recordBrowserReadMirrors(current, presenceId, browserPosts);
+      const browserObservation = { status: "up-to-date" as const, lastObservedAt: new Date().toISOString(), nextObservationAt: nextObservationAt(presence) };
+      let withObservation = next;
+      if (options?.attentionEpisodeId) {
+        const observedMirrors = withObservation.mirrorObjects.filter((item) => item.presenceId === presenceId && browserPosts.some((post) => post.id === item.externalRef.id));
+        const newMirrors = observedMirrors.filter((item) => !current.mirrorObjects.some((prior) => prior.externalRef.id === item.externalRef.id));
+        withObservation = updateAttentionEpisode(withObservation, options.attentionEpisodeId, { stage: "choosing", fetchedCount: browserPosts.length, newCount: newMirrors.length, changedCount: 0, knownCount: Math.max(0, browserPosts.length - newMirrors.length), currentMirrorObjectId: observedMirrors[0]?.id });
+        withObservation = recordAttentionStepInPlace(withObservation, options.attentionEpisodeId, "observing", { label: "Checked the live social world", detail: newMirrors.length ? `${newMirrors.length} new social item${newMirrors.length === 1 ? "" : "s"} found through the authorized browser.` : "No new eligible social item was found.", current: browserPosts.length, total: browserPosts.length, status: "completed" });
+        withObservation = summarizeAttentionEpisode(withObservation, options.attentionEpisodeId);
+      }
+      const browserWake = browserObservation.nextObservationAt;
+      if (browserWake) requestAttention(presenceId, "scheduled_observation", browserWake, "observe_inbound");
+      next = await runAutonomousPulse(presenceId, { ...options, persist: false }, withObservation);
+      next = recordRuntimeEvent(next, presenceId, "X activity available through browser", `Observed ${browserPosts.length} public item${browserPosts.length === 1 ? "" : "s"} through the authorized browser while Native X access is unavailable.`, "positive", { communicationDedupeKey: "browser-x-observation" });
+      await writeStateWithRetry(current, next);
+      return next;
+    }
     // A Bridge event is already an observed Social Mirror update. Continue
     // into the inbound judgment stage instead of treating the absence of
     // native read credentials as a reason to discard the wake.
@@ -1186,13 +1208,34 @@ export async function runAutonomousObservation(
     touchAutonomyRun(options?.runId, "native.observe");
     const beforeMirrors = new Map(current.mirrorObjects.filter((item) => item.presenceId === presenceId && item.channelId === "x").map((item) => [item.externalRef.id, item]));
     const observing = options?.attentionEpisodeId ? recordAttentionStepInPlace(current, options.attentionEpisodeId, "observing", { label: "Checking what changed", detail: "Refreshing mentions, conversations, and known publications." }) : current;
-    let next = await reconcileNativeX(observing, presenceId, options);
-    const observation = next.nativeConnections.find((c) => c.presenceId === presenceId && c.channelId === "x")?.observation;
+    let next: OpenPresenceState;
+    let observation: OpenPresenceState["nativeConnections"][number]["observation"];
+    let browserReadPostIds = new Set<string>();
+    const browserAvailable = Boolean(readyBrowserForRead(observing, presenceId));
+    const nativeCredentialsAvailable = Boolean(readNativeXCredentials(connection.id));
+    if ((!nativeCredentialsAvailable || xNativeWriteUnavailable(connection)) && browserAvailable) {
+      const browserPosts = await readChannelThroughBrowser(observing, presenceId);
+      next = recordBrowserReadMirrors(observing, presenceId, browserPosts);
+      browserReadPostIds = new Set(browserPosts.map((post) => post.id));
+      observation = { status: "up-to-date", lastObservedAt: new Date().toISOString(), nextObservationAt: nextObservationAt(presence), ownPostCount: 0, mentionCount: 0, conversationCount: 0 };
+    } else {
+      try {
+        next = await reconcileNativeX(observing, presenceId, options);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!browserAvailable || !xNativeWriteUnavailable({ deliveryError: message })) throw error;
+        const browserPosts = await readChannelThroughBrowser(observing, presenceId);
+        next = recordBrowserReadMirrors(observing, presenceId, browserPosts);
+        browserReadPostIds = new Set(browserPosts.map((post) => post.id));
+        observation = { status: "up-to-date", lastObservedAt: new Date().toISOString(), nextObservationAt: nextObservationAt(presence), ownPostCount: 0, mentionCount: 0, conversationCount: 0 };
+      }
+      observation ??= next.nativeConnections.find((c) => c.presenceId === presenceId && c.channelId === "x")?.observation;
+    }
     if (observation?.status === "error") {
       throw new Error(observation.error ?? "The native X observer could not complete.");
     }
     if (options?.attentionEpisodeId) {
-      const observedMirrors = next.mirrorObjects.filter((item) => item.presenceId === presenceId && item.channelId === "x" && item.attentionEpisodeId === options.attentionEpisodeId);
+      const observedMirrors = next.mirrorObjects.filter((item) => item.presenceId === presenceId && item.channelId === "x" && (item.attentionEpisodeId === options.attentionEpisodeId || browserReadPostIds.has(item.externalRef.id)));
       const newMirrors = observedMirrors.filter((item) => !beforeMirrors.has(item.externalRef.id));
       const changedMirrors = observedMirrors.filter((item) => {
         const prior = beforeMirrors.get(item.externalRef.id);
@@ -1700,6 +1743,14 @@ export async function runAutonomousSelfDirectedDiscovery(
   }
 
   if (discoverySource === "bridge") {
+    if (queries[0] && !next.mirrorObjects.some((item) => item.presenceId === presence.id && item.bridgeId === bridge?.id && !item.archived) && readyBrowserForRead(next, presence.id)) {
+      try {
+        const observed = await readChannelThroughBrowser(next, presence.id, queries[0]);
+        next = recordBrowserReadMirrors(next, presence.id, observed);
+      } catch (error) {
+        next = recordRuntimeEvent(next, presence.id, "Browser discovery delayed", error instanceof Error ? error.message : "The browser read did not finish. Existing observed evidence remains available.", "quiet");
+      }
+    }
     const permission = requestAttentionCapacity(next, presence.id, "self_directed_discovery", "channel_read");
     if (!permission.allowed) return deferDiscovery(next, 60 * 60_000);
     recordResourceUsageEventInPlace(next, { presenceId: presence.id, invocationId, runId, originKind: "self_directed_discovery", attentionSource: "self_directed_discovery", category: "channel_read", provider: "chrome-bridge", usage: { requests: 1 }, attentionEpisodeId: options?.attentionEpisodeId });
