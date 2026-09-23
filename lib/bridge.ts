@@ -610,7 +610,7 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
   for (const execution of candidates) {
     if (execution.environment === "live" && execution.publication?.publicExpression) {
       try {
-        authorizeAssetSelection(state, execution.publication.assetIds ?? [], { presenceId: execution.presenceId, requireReady: !execution.publication.operatorOverride });
+        authorizeAssetSelection(state, execution.publication.assetIds ?? [], { presenceId: execution.presenceId, requireReady: !execution.publication.operatorOverride && !execution.publication.operatorAssetApproval, allowReviewable: Boolean(execution.publication.operatorAssetApproval) });
         const liveAssetRepeatReason = liveAssetReuseReason(state, execution.presenceId, execution.publication.assetIds ?? [], { excludePublicationId: execution.publication.id });
         if (liveAssetRepeatReason) {
           execution.status = "blocked";
@@ -712,7 +712,7 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
   }
   if (execution.environment === "live" && execution.publication?.publicExpression) {
     try {
-      authorizeAssetSelection(state, execution.publication.assetIds ?? [], { presenceId: execution.presenceId, requireReady: !execution.publication.operatorOverride });
+      authorizeAssetSelection(state, execution.publication.assetIds ?? [], { presenceId: execution.presenceId, requireReady: !execution.publication.operatorOverride && !execution.publication.operatorAssetApproval, allowReviewable: Boolean(execution.publication.operatorAssetApproval) });
       const liveAssetRepeatReason = liveAssetReuseReason(state, execution.presenceId, execution.publication.assetIds ?? [], { excludePublicationId: execution.publication.id });
       if (liveAssetRepeatReason) {
         execution.status = "blocked";

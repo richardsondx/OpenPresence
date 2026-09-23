@@ -231,7 +231,17 @@ export function assetPostingUnavailableUntil(state: OpenPresenceState, assetOrId
   return unavailableUntil && unavailableUntil > at ? unavailableUntil : undefined;
 }
 
-export function assetSelectionFailure(state: OpenPresenceState, assetId: string, options?: { presenceId?: string; collectionId?: string; requireReady?: boolean }) {
+export function assetReviewReason(state: OpenPresenceState, assetId: string, options?: { presenceId?: string }) {
+  const asset = state.assets.find((item) => item.id === assetId);
+  if (!asset || !assetIsEligibleForPresence(state, asset, options?.presenceId ?? state.presence?.id)) return undefined;
+  const reasons: string[] = [];
+  if (asset.reusePermission === "reference_only" || asset.reusePermission === "needs_approval") reasons.push("it is reference-only and needs explicit reuse approval");
+  const readiness = deriveAssetReadiness(state, asset);
+  if (isLibraryAsset(asset) && readiness !== "ready") reasons.push(`its visual metadata is ${readiness.replace("_", " ")}`);
+  return reasons.length ? `${asset.description ?? "This visual"} needs review because ${reasons.join(" and ")}.` : undefined;
+}
+
+export function assetSelectionFailure(state: OpenPresenceState, assetId: string, options?: { presenceId?: string; collectionId?: string; requireReady?: boolean; allowReviewable?: boolean }) {
   const asset = state.assets.find((item) => item.id === assetId);
   if (!asset) return "The selected Asset is no longer available.";
   if (!state.agent?.id || asset.agentId !== state.agent.id) return "That Asset belongs to another Agent and cannot be used here.";
@@ -239,18 +249,18 @@ export function assetSelectionFailure(state: OpenPresenceState, assetId: string,
   if (asset.archivedAt) return "That Asset is archived.";
   if (asset.retention === "ephemeral") return "That discovery is temporary evidence. Preserve it intentionally before using it in a post.";
   if (asset.reusePermission === "blocked") return "That Asset is blocked from reuse by its safety or rights assessment.";
-  if (asset.reusePermission === "reference_only" || asset.reusePermission === "needs_approval") return "That Asset is preserved as a reference, but it needs explicit reuse approval before publication.";
+  if (!options?.allowReviewable && (asset.reusePermission === "reference_only" || asset.reusePermission === "needs_approval")) return "That Asset is preserved as a reference, but it needs explicit reuse approval before publication.";
   const unavailableUntil = assetPostingUnavailableUntil(state, asset, options?.presenceId ?? state.presence?.id);
   if (unavailableUntil) return `That Asset was already published by this Presence and is unavailable for posting until ${new Date(unavailableUntil).toLocaleDateString()}.`;
   if (asset.rights?.status === "restricted") return "That Asset has restricted rights and cannot be published.";
   if ((options?.collectionId || options?.collectionId === "") && !collectionContainsAsset(state, options.collectionId, asset.id)) return "That Asset is not in the requested Collection.";
   const readiness = deriveAssetReadiness(state, asset);
-  if (options?.requireReady !== false && isLibraryAsset(asset) && readiness !== "ready") return `That Asset is ${readiness.replace("_", " ")} and cannot be published until its visual metadata is resolved.`;
+  if (!options?.allowReviewable && options?.requireReady !== false && isLibraryAsset(asset) && readiness !== "ready") return `That Asset is ${readiness.replace("_", " ")} and cannot be published until its visual metadata is resolved.`;
   if (asset.status !== "ready" && !isLibraryAsset(asset)) return "That Asset is not ready for publication.";
   return undefined;
 }
 
-export function authorizeAssetSelection(state: OpenPresenceState, assetIds: string[], options?: { presenceId?: string; collectionId?: string; requireReady?: boolean }) {
+export function authorizeAssetSelection(state: OpenPresenceState, assetIds: string[], options?: { presenceId?: string; collectionId?: string; requireReady?: boolean; allowReviewable?: boolean }) {
   const failures = assetIds.map((assetId) => assetSelectionFailure(state, assetId, options)).filter((failure): failure is string => Boolean(failure));
   if (failures.length) throw new Error(failures[0]);
   return [...new Set(assetIds)];

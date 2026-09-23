@@ -148,6 +148,54 @@ describe("Chat runtime tools", () => {
     expect(delivered.outcomes).toHaveLength(0);
   });
 
+  it("creates a durable publication approval for unresolved reference media and scopes approval to that media", async () => {
+    const initial = connected();
+    const state = applyOperation(initial.state, { type: "setPresence", patch: { connectionMode: "native", status: "live", execution: { post: "auto" } } });
+    const presenceId = initial.presenceId;
+    const timestamp = new Date().toISOString();
+    state.assets.push({
+      id: "reference-image-review",
+      agentId: state.agent!.id,
+      presenceId,
+      accessScope: { mode: "selected_presences", presenceIds: [presenceId] },
+      type: "image",
+      sourceId: "reference-source",
+      retention: "preserved",
+      reusePermission: "reference_only",
+      description: "Reference image awaiting metadata review",
+      dataUrl: "data:image/png;base64,AAAA",
+      mimeType: "image/png",
+      status: "ready",
+      metadataReview: { status: "open" },
+      provenance: { origin: "operator_upload", importedAt: timestamp },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    } as never);
+
+    const result = await executeChatRuntimeTool(state, presenceId, {
+      kind: "social_action",
+      action: "post",
+      text: "A useful visual note from the work.",
+      assetIds: ["reference-image-review"],
+    }, "reference-media-review-run");
+    const execution = result.state.executions[0];
+
+    expect(result.deliveryExecutionIds).toEqual([execution?.id]);
+    expect(execution).toMatchObject({ status: "awaiting-review", reviewReason: expect.stringContaining("needs your review") });
+    expect(execution?.publication?.assetIds).toEqual(["reference-image-review"]);
+    expect(result.result).toEqual([expect.objectContaining({ executionId: execution?.id, status: "awaiting-review" })]);
+
+    const cancelled = applyOperation(structuredClone(result.state), { type: "cancelExecution", id: execution!.id });
+    expect(cancelled.executions.find((item) => item.id === execution!.id)).toMatchObject({ status: "cancelled" });
+    expect(cancelled.outcomes).toHaveLength(0);
+
+    const approved = applyOperation(result.state, { type: "approveExecution", id: execution!.id });
+    const approvedExecution = approved.executions.find((item) => item.id === execution!.id)!;
+    expect(approvedExecution.status).toBe("approved");
+    expect(approvedExecution.publication?.operatorAssetApproval).toMatchObject({ assetIds: ["reference-image-review"] });
+    expect(approved.trajectoryEvents).toEqual(expect.arrayContaining([expect.objectContaining({ eventType: "permission.decided", operationId: approvedExecution.operationId, payload: expect.objectContaining({ status: "AUTHORIZED", approvedAssetIds: ["reference-image-review"] }) })]));
+  });
+
   it("materializes a raw operator upload into a scoped durable Asset", async () => {
     const { state, presenceId } = connected();
     const result = await materializeOperatorChatAttachments(state, presenceId, [{

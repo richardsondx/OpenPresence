@@ -135,7 +135,7 @@ const terminalAssignmentRunStatuses = new Set<AssignmentRunStatus>(["published",
 const activityProjectionKeys = new Set<keyof OpenPresenceState>([
   "agent", "agents", "activeAgentId", "activePresenceId", "presence", "presences", "onboarded", "workspaceRevision", "proposals",
   "assignments", "assignmentRuns", "assignmentPursuitWindows", "actions", "events", "executions", "operationRecords", "trajectoryEvents", "outcomes", "publications", "socialDecisions", "autobiographicalEvents", "autobiographicalReflections", "socialIntents", "attentionEpisodes", "resourceUsageEvents",
-  "mirrorObjects", "nativeConnections", "bridges", "playgroundSessions", "originalPostRehearsals", "assetResearchSessions", "channelDefinitions", "operationalRuns", "scheduledWakes", "standingIntents",
+  "mirrorObjects", "nativeConnections", "bridges", "playgroundSessions", "originalPostRehearsals", "assetResearchSessions", "assets", "channelDefinitions", "operationalRuns", "scheduledWakes", "standingIntents",
   "growthRevisions", "growthFileVersions",
   "publishingPlans",
   "operatorThreads", "operatorConversations", "operatorNudges",
@@ -243,6 +243,17 @@ function activityProjection(state: OpenPresenceState): OpenPresenceState {
       }
     }
     return compact;
+  }) as never;
+  const reviewAssetIds = new Set((projection.executions ?? [])
+    .filter((execution) => execution.status === "awaiting-review")
+    .flatMap((execution) => execution.publication?.assetIds ?? []));
+  const activityPresence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+  projection.assets = state.assets.filter((asset) => {
+    if (!reviewAssetIds.has(asset.id) || asset.agentId !== state.agent?.id || asset.archivedAt) return false;
+    if (asset.environment && asset.environment !== (activityPresence?.environment ?? "live")) return false;
+    return asset.accessScope?.mode === "all_agent_presences"
+      || asset.accessScope?.mode !== "selected_presences"
+      || asset.accessScope.presenceIds.includes(presenceId ?? "");
   }) as never;
   projection.outcomes = scopedRecent(state.outcomes, 24) as never;
   const activeOperation = (operation: NonNullable<OpenPresenceState["operationRecords"]>[number]) => ["AWAITING_APPROVAL", "AUTHORIZED", "QUEUED", "DISPATCHING", "EXTERNAL_STATE_UNKNOWN", "MEASUREMENT_PENDING", "MANUAL_REVIEW"].includes(operation.status);
@@ -392,8 +403,17 @@ function chatProjection(state: OpenPresenceState): OpenPresenceState {
     messages: conversation.messages.slice(-100),
   })) as never;
   const chatPresence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+  const reviewAssetIds = new Set((projection.executions ?? [])
+    .filter((execution) => execution.status === "awaiting-review")
+    .flatMap((execution) => execution.publication?.assetIds ?? []));
   projection.assets = state.assets.filter((asset) => {
-    if (asset.agentId !== state.agent?.id || asset.provenance.origin.toLowerCase() !== "operator_upload" || asset.status !== "ready" || asset.archivedAt) return false;
+    const isReviewAsset = reviewAssetIds.has(asset.id);
+    if (asset.agentId !== state.agent?.id || asset.archivedAt) return false;
+    // Private Chat can use an uploaded image as context before vision
+    // processing finishes. Public publication still enforces readiness at the
+    // execution boundary; the picker must not make a real upload disappear
+    // while that metadata job is running.
+    if (!isReviewAsset && asset.provenance.origin.toLowerCase() !== "operator_upload") return false;
     if (asset.environment && asset.environment !== (chatPresence?.environment ?? "live")) return false;
     return asset.accessScope?.mode === "all_agent_presences"
       || asset.accessScope?.mode !== "selected_presences"

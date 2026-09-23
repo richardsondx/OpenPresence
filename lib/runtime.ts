@@ -15,7 +15,7 @@ import { normalizeMirrorObject } from "./mirror-content";
 import { bridgeExecutionStatus, chromeBrowserBridgeCapabilities } from "./bridge-contract";
 import type { RelationshipVisibility } from "./types";
 import { addKnowledgeItem, archiveKnowledgeCollection, archiveKnowledgeDocument, archiveKnowledgeItem, createKnowledgeCollection, createKnowledgeDocument, migrateKnowledgeState, saveKnowledgeDocument, setKnowledgeAccess, setMindFileKnowledgeBinding, setKnowledgeBinding, updateKnowledgeCollection, uploadKnowledgeVersion } from "./knowledge";
-import { applyAssetLibraryOperation, authorizeAssetSelection, liveAssetReuseReason, normalizeAssetLibraryState, normalizeAssetReuseCooldownMonths } from "./asset-library";
+import { applyAssetLibraryOperation, assetReviewReason, authorizeAssetSelection, liveAssetReuseReason, normalizeAssetLibraryState, normalizeAssetReuseCooldownMonths } from "./asset-library";
 import { evaluateExecutionReadiness } from "./execution-readiness";
 import { isXCreditsError, xCreditsExhausted, xNativeWriteUnavailable } from "./x-credits";
 import { getDefaultCurationSources, normalizeCurationSources, seedDefaultEditorialReferences } from "./editorial-curation";
@@ -4103,9 +4103,10 @@ export function formSandboxIntent(source: OpenPresenceState, input: { sessionId:
   const executionMode = presence.execution[input.affordance] ?? "off";
   const timestamp = now();
   const existingAssetIds = [...new Set((input.assets ?? []).map((assetInput) => assetInput.existingAssetId).filter((assetId): assetId is string => Boolean(assetId)))];
+  const libraryMediaReviewReason = publicationMediaReviewReason(state, presence.id, existingAssetIds, false);
   if (existingAssetIds.length) {
     try {
-      authorizeAssetSelection(state, existingAssetIds, { presenceId: presence.id });
+      authorizeAssetSelection(state, existingAssetIds, { presenceId: presence.id, requireReady: !libraryMediaReviewReason, allowReviewable: Boolean(libraryMediaReviewReason) });
     } catch (error) {
       state.events.unshift({ ...event("decision", "Asset selection blocked", error instanceof Error ? error.message : "The selected Asset is not authorized for this Presence.", "warning", { presenceId: presence.id, sourceObjectId: targetObject?.id }), sessionId: session.id });
       return state;
@@ -4147,7 +4148,7 @@ export function formSandboxIntent(source: OpenPresenceState, input: { sessionId:
   const languageResult = validateLanguage(expressionText, effectiveLanguagePolicy(state.agent, presence));
   const languageReason = languageResult.valid ? undefined : "The final expression violates an explicit Never use language rule.";
   const duplicateReason = duplicateAssets.length && !input.assetReuse ? "This exact asset was already used in this Sandbox Presence and needs an explicit reuse reason." : undefined;
-  const reviewReason = languageReason ?? duplicateReason ?? publicExpressionLeakageReasonValue ?? assignmentLeakageReason ?? mentionGroundingReason ?? sourceEchoReason ?? leakageReason ?? runtimeLeakageReasonValue ?? (mediaReviewRequired ? "Attached media remains uncertain and this Presence requires review before acting." : undefined);
+  const reviewReason = languageReason ?? duplicateReason ?? publicExpressionLeakageReasonValue ?? assignmentLeakageReason ?? mentionGroundingReason ?? sourceEchoReason ?? leakageReason ?? runtimeLeakageReasonValue ?? libraryMediaReviewReason ?? (mediaReviewRequired ? "Attached media remains uncertain and this Presence requires review before acting." : undefined);
   const status = languageReason || duplicateReason || publicExpressionLeakageReasonValue || assignmentLeakageReason || mentionGroundingReason || sourceEchoReason ? "blocked" as const : reviewReason ? "awaiting-review" as const : executionMode === "auto" ? "queued" as const : executionMode === "review" ? "awaiting-review" as const : "awaiting-manual" as const;
   const execution: Execution = { id: id("execution"), socialIntentId: intent.id, presenceId: presence.id, affordance: input.affordance, mode: executionMode, status, attempts: 0, bridgeId: `sandbox:${session.environmentId}`, connector: "simulated", idempotencyKey: `sandbox:${session.id}:${intent.id}`, target: input.target, publication, reviewReason, createdAt: timestamp, updatedAt: timestamp, assignmentId: input.assignmentId, conversationEpisodeId, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, invocationId: input.invocationId, source: input.source ?? (input.operatorDirectiveId ? "operator" : "agent"), operatorDirectiveId: input.operatorDirectiveId, attentionTestId: input.attentionTestId } as Execution & { invocationId?: string };
   state.publications.unshift(publication); state.socialIntents.unshift(intent); state.executions.unshift(execution);
@@ -4158,7 +4159,7 @@ export function formSandboxIntent(source: OpenPresenceState, input: { sessionId:
   if (assignmentLeakageReason) execution.failure = { code: "ASSIGNMENT_TEXT_LEAKAGE", message: assignmentLeakageReason, retryable: false };
   if (mentionGroundingReason) execution.failure = { code: "UNSUPPORTED_LEADING_MENTION", message: mentionGroundingReason, retryable: false };
   if (sourceEchoReason) execution.failure = { code: "SOURCE_EXPRESSION_ECHO", message: sourceEchoReason, retryable: false };
-  state.events.unshift({ ...event("decision", publicExpressionLeakageReasonValue || assignmentLeakageReason || mentionGroundingReason || sourceEchoReason ? "Public text boundary blocked" : leakageReason ? "Identity disclosure needs review" : mediaReviewRequired ? "Media action needs review" : "Social Intent formed", reviewReason ?? `${presence.name} chose ${input.affordance} for the simulated ${channelName(session.channelId)} world.`, publicExpressionLeakageReasonValue || assignmentLeakageReason || mentionGroundingReason || sourceEchoReason || leakageReason || mediaReviewRequired ? "warning" : "positive", { presenceId: presence.id, intentId: intent.id, executionId: execution.id, sourceObjectId: targetObject?.id }), sessionId: session.id });
+  state.events.unshift({ ...event("decision", publicExpressionLeakageReasonValue || assignmentLeakageReason || mentionGroundingReason || sourceEchoReason ? "Public text boundary blocked" : leakageReason ? "Identity disclosure needs review" : libraryMediaReviewReason || mediaReviewRequired ? "Media action needs review" : "Social Intent formed", reviewReason ?? `${presence.name} chose ${input.affordance} for the simulated ${channelName(session.channelId)} world.`, publicExpressionLeakageReasonValue || assignmentLeakageReason || mentionGroundingReason || sourceEchoReason || leakageReason || libraryMediaReviewReason || mediaReviewRequired ? "warning" : "positive", { presenceId: presence.id, intentId: intent.id, executionId: execution.id, sourceObjectId: targetObject?.id }), sessionId: session.id });
   const observationParents = [...new Set([...(targetObject ? [targetObject.id] : []), ...(input.causalEventId ? [input.causalEventId] : [])])];
   recordSandboxTrajectoryInPlace(state, session.id, "decision", { mirrorObjectId: targetObject?.id, intentId: intent.id, executionId: execution.id, affordance: input.affordance, status, causal: { parentIds: observationParents } }, timestamp);
   recordSandboxTrajectoryInPlace(state, session.id, "intent", { intentId: intent.id, executionId: execution.id, environment: intent.environment, sessionId: session.id, causal: { parentIds: observationParents } }, timestamp);
@@ -4178,7 +4179,7 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
   const publication = intent?.publicationId ? state.publications.find((item) => item.id === intent.publicationId) : undefined;
   if (publication?.assetIds?.length) {
     try {
-      authorizeAssetSelection(state, publication.assetIds, { presenceId: execution.presenceId, requireReady: !publication.operatorOverride });
+      authorizeAssetSelection(state, publication.assetIds, { presenceId: execution.presenceId, requireReady: !publication.operatorOverride && !publication.operatorAssetApproval, allowReviewable: Boolean(publication.operatorAssetApproval) });
     } catch (error) {
       execution.status = "blocked";
       execution.failure = { code: "ASSET_AUTHORIZATION_FAILED", message: error instanceof Error ? error.message : "The selected Asset cannot be used by this Presence.", retryable: false };
@@ -7460,6 +7461,12 @@ function operatorAssetOverrideApplies(assetIds: string[], operatorAssetIds: stri
   return assetIds.length > 0 && assetIds.every((assetId) => operatorAssetIds.includes(assetId));
 }
 
+function publicationMediaReviewReason(state: OpenPresenceState, presenceId: string, assetIds: string[], operatorAssetOverride: boolean) {
+  if (operatorAssetOverride || !assetIds.length) return undefined;
+  const reasons = [...new Set(assetIds.map((assetId) => assetReviewReason(state, assetId, { presenceId })).filter((reason): reason is string => Boolean(reason)))];
+  return reasons.length ? `Selected media needs your review before publication: ${reasons.join(" ")}` : undefined;
+}
+
 function makePublication(state: OpenPresenceState, text: string, format: string, source: "agent_model" | "operator_manual" | "operational" = "operational", assetIds: string[] = [], presenceOverride?: Presence, operatorAssetIds: string[] = []): Publication {
   const presence = presenceOverride ?? state.presence;
   const formattedText = formatPublicExpression(text, format);
@@ -7553,7 +7560,8 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
   const autobiographicalEventIds = decisionInput?.autobiographicalEventIds ?? autobiographicalContext?.eventIds;
   const effectiveDecisionInput = decisionInput ? { ...decisionInput, autobiographicalEventIds } : undefined;
   const operatorAssetOverride = operatorAssetOverrideApplies(assetIds, operatorAssetIds);
-  const validAssetIds = authorizeAssetSelection(state, assetIds, { presenceId: presence.id, requireReady: !operatorAssetOverride });
+  const mediaReviewReason = publicationMediaReviewReason(state, presence.id, assetIds, operatorAssetOverride);
+  const validAssetIds = authorizeAssetSelection(state, assetIds, { presenceId: presence.id, requireReady: !operatorAssetOverride && !mediaReviewReason, allowReviewable: Boolean(mediaReviewReason) });
   const publication = makePublication(state, text.trim(), validAssetIds.length ? "x.media-post" : "x.post", sourceKind === "operator" ? "operator_manual" : "agent_model", validAssetIds, presence, operatorAssetOverride ? operatorAssetIds : []);
   const origin: SocialOrigin = standingIntentId ? { kind: "standing_intent", refId: standingIntentId } : sourceKind === "operator" ? { kind: "operator" } : { kind: "other" };
   publication.origin = origin;
@@ -7580,15 +7588,16 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
   const leakageReason = identityLeakageReason(state, presence, text);
   const autobiographicalSafetyReason = sourceKind === "agent" ? autobiographicalExpressionSafetyReason(state, presence.id, autobiographicalEventIds, text) : undefined;
   const publicExpressionReason = publicExpressionLeakageReason(text) ?? autobiographicalSafetyReason ?? liveAssetRepeatReason;
-  const status = publicExpressionReason ? "blocked" : leakageReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
-  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.post", mode, status, attempts: 0, bridgeId: bridge?.id, connector, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: "x.post", text }), publication, reviewReason: publicExpressionReason ?? leakageReason, createdAt: formedAt, updatedAt: formedAt, environment, runId };
+  const reviewReason = leakageReason ?? mediaReviewReason;
+  const status = publicExpressionReason ? "blocked" : reviewReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
+  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.post", mode, status, attempts: 0, bridgeId: bridge?.id, connector, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: "x.post", text }), publication, reviewReason: publicExpressionReason ?? reviewReason, createdAt: formedAt, updatedAt: formedAt, environment, runId };
   execution.source = sourceKind;
   if (publicExpressionReason) execution.failure = { code: autobiographicalSafetyReason ? "AUTOBIOGRAPHICAL_PRIVACY_BOUNDARY" : liveAssetRepeatReason ? "DUPLICATE_LIVE_ASSET" : "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionReason, retryable: false };
   state.executions.unshift(execution);
   recordFormedExecutionLifecycle(state, execution, sourceKind === "operator" ? "operator" : "agent");
   const reason = standingIntentId ? "Jenny evaluated a Calendar standing intention and handed the resulting Social Intent to the Presence execution envelope." : "The operator asked Jenny to introduce this Presence through the native X connector.";
-  state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: publicExpressionReason ? "failed" : mode === "review" ? "review" : "queued", reason: publicExpressionReason ?? reason, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
-  state.events.unshift(event("decision", liveAssetRepeatReason ? "Live media blocked" : publicExpressionReason ? "Public text boundary blocked" : leakageReason ? "Identity disclosure needs review" : standingIntentId ? "A Calendar post intention was formed" : "A post intention was formed", publicExpressionReason ?? leakageReason ?? (connector ? (standingIntentId ? `${presence.name} judged the standing intention worthwhile and handed it to the native X connector.` : `${presence.name} formed an X post from the conversation and handed it to the Presence execution envelope.`) : `${presence.name} formed an X post, but no write-enabled X connector is available.`), publicExpressionReason || leakageReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id }));
+  state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: publicExpressionReason ? "failed" : reviewReason ? "review" : mode === "review" ? "review" : "queued", reason: publicExpressionReason ?? reviewReason ?? reason, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
+  state.events.unshift(event("decision", liveAssetRepeatReason ? "Live media blocked" : publicExpressionReason ? "Public text boundary blocked" : mediaReviewReason ? "Media publication needs review" : leakageReason ? "Identity disclosure needs review" : standingIntentId ? "A Calendar post intention was formed" : "A post intention was formed", publicExpressionReason ?? reviewReason ?? (connector ? (standingIntentId ? `${presence.name} judged the standing intention worthwhile and handed it to the native X connector.` : `${presence.name} formed an X post from the conversation and handed it to the Presence execution envelope.`) : `${presence.name} formed an X post, but no write-enabled X connector is available.`), publicExpressionReason || reviewReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id }));
   return state;
 }
 
@@ -7722,7 +7731,8 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   const assignment = assignmentId ? state.assignments.find((item) => item.id === assignmentId) : undefined;
   if (assignment?.assetConstraint?.required && !assetIds.length) throw new Error("This Assignment requires an Asset from its Collection.");
   const operatorAssetOverride = operatorAssetOverrideApplies(assetIds, operatorAssetIds);
-  const validAssetIds = authorizeAssetSelection(state, assetIds, { presenceId: presence.id, collectionId: assignment?.assetConstraint?.collectionId, requireReady: !operatorAssetOverride });
+  const mediaReviewReason = publicationMediaReviewReason(state, presence.id, assetIds, operatorAssetOverride);
+  const validAssetIds = authorizeAssetSelection(state, assetIds, { presenceId: presence.id, collectionId: assignment?.assetConstraint?.collectionId, requireReady: !operatorAssetOverride && !mediaReviewReason, allowReviewable: Boolean(mediaReviewReason) });
   const publication = makePublication(state, text.trim(), validAssetIds.length ? "x.media-post" : "x.reply", operatorDirectiveId ? "operator_manual" : "agent_model", validAssetIds, undefined, operatorAssetOverride ? operatorAssetIds : []);
   const conversationEpisodeId = parentObject ? ensureConversationEpisode(state, parentObject, presence.id)?.id : undefined;
   const origin: SocialOrigin = decisionInput?.origin ?? (assignmentId
@@ -7767,13 +7777,14 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   const mentionGroundingReason = !operatorDirectiveId ? expressionMentionGroundingReason(state, presence, target, text) : undefined;
   const sourceEchoReason = !operatorDirectiveId ? expressionSourceEchoReason(state, presence, target, text) : undefined;
   const publicExpressionReason = publicExpressionLeakageReason(text) ?? autobiographicalSafetyReason ?? mentionGroundingReason ?? sourceEchoReason;
-  const status = publicExpressionReason ? "blocked" : leakageReason || runtimeLeakageReasonValue ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
-  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.reply", mode, status, attempts: 0, bridgeId: bridge?.id, connector, target, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: "x.reply", target, text }), publication, reviewReason: publicExpressionReason ?? leakageReason ?? runtimeLeakageReasonValue, createdAt: formedAt, updatedAt: formedAt, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId, assignmentId, environment, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId, attentionEpisodeId: decisionInput?.attentionEpisodeId };
+  const reviewReason = leakageReason ?? runtimeLeakageReasonValue ?? mediaReviewReason;
+  const status = publicExpressionReason ? "blocked" : reviewReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
+  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.reply", mode, status, attempts: 0, bridgeId: bridge?.id, connector, target, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: "x.reply", target, text }), publication, reviewReason: publicExpressionReason ?? reviewReason, createdAt: formedAt, updatedAt: formedAt, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId, assignmentId, environment, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId, attentionEpisodeId: decisionInput?.attentionEpisodeId };
   if (publicExpressionReason) execution.failure = { code: autobiographicalSafetyReason ? "AUTOBIOGRAPHICAL_PRIVACY_BOUNDARY" : mentionGroundingReason ? "UNSUPPORTED_LEADING_MENTION" : sourceEchoReason ? "SOURCE_EXPRESSION_ECHO" : "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionReason, retryable: false };
   state.executions.unshift(execution);
   recordFormedExecutionLifecycle(state, execution, operatorDirectiveId ? "operator" : "agent");
-  state.actions.unshift({ id: id("act"), intent: "reply", target: parentId, summary: text.trim(), status: publicExpressionReason ? "failed" : mode === "review" ? "review" : "queued", reason: publicExpressionReason ?? (operatorDirectiveId ? "The operator directed Jenny to enter this conversation; Jenny supplied the expression through the Presence execution envelope." : "Jenny chose to continue a relevant conversation through the Presence execution envelope."), createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
-  state.events.unshift(event("decision", publicExpressionReason ? "Public text boundary blocked" : operatorDirectiveId ? "Jenny expressed the requested reply" : "A reply intention was formed", publicExpressionReason ?? (connector ? (operatorDirectiveId ? "The operator set the social act; Jenny supplied a contextual reply for the Presence execution envelope." : "Jenny found a relevant X conversation and handed a contextual reply to the Presence execution envelope.") : "Jenny found a relevant X conversation, but no write-enabled X connector is available."), publicExpressionReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId }));
+  state.actions.unshift({ id: id("act"), intent: "reply", target: parentId, summary: text.trim(), status: publicExpressionReason ? "failed" : reviewReason ? "review" : mode === "review" ? "review" : "queued", reason: publicExpressionReason ?? reviewReason ?? (operatorDirectiveId ? "The operator directed Jenny to enter this conversation; Jenny supplied the expression through the Presence execution envelope." : "Jenny chose to continue a relevant conversation through the Presence execution envelope."), createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
+  state.events.unshift(event("decision", publicExpressionReason ? "Public text boundary blocked" : mediaReviewReason ? "Media publication needs review" : operatorDirectiveId ? "Jenny expressed the requested reply" : "A reply intention was formed", publicExpressionReason ?? reviewReason ?? (connector ? (operatorDirectiveId ? "The operator set the social act; Jenny supplied a contextual reply for the Presence execution envelope." : "Jenny found a relevant X conversation and handed a contextual reply to the Presence execution envelope.") : "Jenny found a relevant X conversation, but no write-enabled X connector is available."), publicExpressionReason || reviewReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId }));
   return state;
 }
 
@@ -7879,7 +7890,8 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
   const assignment = input.assignmentId ? state.assignments.find((item) => item.id === input.assignmentId) : undefined;
   if (assignment?.assetConstraint?.required && !(input.assetIds ?? []).length) throw new Error("This Assignment requires an Asset from its Collection.");
   const operatorAssetOverride = operatorAssetOverrideApplies(input.assetIds ?? [], input.operatorAssetIds ?? []);
-  const validAssetIds = authorizeAssetSelection(state, input.assetIds ?? [], { presenceId: presence.id, collectionId: assignment?.assetConstraint?.collectionId, requireReady: !operatorAssetOverride });
+  const mediaReviewReason = requiresExpression ? publicationMediaReviewReason(state, presence.id, input.assetIds ?? [], operatorAssetOverride) : undefined;
+  const validAssetIds = authorizeAssetSelection(state, input.assetIds ?? [], { presenceId: presence.id, collectionId: assignment?.assetConstraint?.collectionId, requireReady: !operatorAssetOverride && !mediaReviewReason, allowReviewable: Boolean(mediaReviewReason) });
   const publication = requiresExpression ? makePublication(state, input.text!.trim(), validAssetIds.length ? "x.media-post" : input.affordance, "agent_model", validAssetIds, undefined, operatorAssetOverride ? input.operatorAssetIds : []) : undefined;
   if (publication) { publication.origin = origin; publication.assignmentId = input.assignmentId; publication.invocationId = input.invocationId ?? input.decision?.invocationId; publication.autobiographicalEventIds = autobiographicalEventIds; }
   const trial = input.capabilityTrialId ? state.capabilityTrials.find((item) => item.id === input.capabilityTrialId && item.presenceId === presence.id && item.capability === capability) : undefined;
@@ -7914,13 +7926,14 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
     ? expressionSourceEchoReason(state, presence, input.target, input.text!.trim())
     : undefined;
   const leakageReason = publication ? publicExpressionLeakageReason(input.text!.trim()) ?? autobiographicalSafetyReason ?? mentionGroundingReason ?? sourceEchoReason ?? liveAssetRepeatReason : undefined;
-  const status = leakageReason ? "blocked" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
-  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: input.affordance, mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: input.target, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: input.affordance, target: input.target, text: input.text }), publication, reviewReason: leakageReason, createdAt: formedAt, updatedAt: formedAt, assignmentId: input.assignmentId ?? trial?.assignmentId, environment, source: input.source ?? "agent", attentionTestId: input.attentionTestId, capabilityTrialId: trial?.id, runId, invocationId, attentionEpisodeId };
+  const reviewReason = leakageReason ?? mediaReviewReason;
+  const status = leakageReason ? "blocked" : reviewReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
+  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: input.affordance, mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: input.target, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: input.affordance, target: input.target, text: input.text }), publication, reviewReason, createdAt: formedAt, updatedAt: formedAt, assignmentId: input.assignmentId ?? trial?.assignmentId, environment, source: input.source ?? "agent", attentionTestId: input.attentionTestId, capabilityTrialId: trial?.id, runId, invocationId, attentionEpisodeId };
   if (leakageReason) execution.failure = { code: autobiographicalSafetyReason ? "AUTOBIOGRAPHICAL_PRIVACY_BOUNDARY" : mentionGroundingReason ? "UNSUPPORTED_LEADING_MENTION" : sourceEchoReason ? "SOURCE_EXPRESSION_ECHO" : liveAssetRepeatReason ? "DUPLICATE_LIVE_ASSET" : "PUBLIC_TEXT_INTERNAL_MARKER", message: leakageReason, retryable: false };
   state.executions.unshift(execution);
   recordFormedExecutionLifecycle(state, execution, input.source === "operator" ? "operator" : "agent");
-  state.actions.unshift({ id: id("act"), intent: capability as "like" | "repost" | "quote" | "follow", target: input.target.id, summary: input.text?.trim() ?? capability, status: leakageReason ? "failed" : mode === "review" ? "review" : "queued", reason: leakageReason ?? `The Presence formed a ${capability} action through the live X execution envelope.`, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
-  state.events.unshift(event("decision", leakageReason ? "Public action blocked" : `X ${capability} intention formed`, leakageReason ?? `${capability} is ready for the authorized X connector.`, leakageReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id, runId, invocationId }));
+  state.actions.unshift({ id: id("act"), intent: capability as "like" | "repost" | "quote" | "follow", target: input.target.id, summary: input.text?.trim() ?? capability, status: leakageReason ? "failed" : reviewReason ? "review" : mode === "review" ? "review" : "queued", reason: leakageReason ?? reviewReason ?? `The Presence formed a ${capability} action through the live X execution envelope.`, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
+  state.events.unshift(event("decision", leakageReason ? "Public action blocked" : mediaReviewReason ? "Media publication needs review" : `X ${capability} intention formed`, leakageReason ?? reviewReason ?? `${capability} is ready for the authorized X connector.`, leakageReason || reviewReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id, runId, invocationId }));
   return state;
 }
 
@@ -7960,7 +7973,7 @@ export function completeNativeExecution(source: OpenPresenceState, executionId: 
   }
   if (execution.publication?.assetIds?.length) {
     try {
-      authorizeAssetSelection(state, execution.publication.assetIds, { presenceId: execution.presenceId, requireReady: !execution.publication.operatorOverride });
+      authorizeAssetSelection(state, execution.publication.assetIds, { presenceId: execution.presenceId, requireReady: !execution.publication.operatorOverride && !execution.publication.operatorAssetApproval, allowReviewable: Boolean(execution.publication.operatorAssetApproval) });
     } catch (error) {
       execution.status = "blocked";
       execution.failure = { code: "ASSET_AUTHORIZATION_FAILED", message: error instanceof Error ? error.message : "The selected Asset cannot be used by this Presence.", retryable: false };
@@ -9759,7 +9772,33 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     case "disconnectAssetProvider": { const connection = state.assetProviderConnections.find((item) => item.provider === operation.provider); if (connection) { state.assetProviderConnections = state.assetProviderConnections.filter((item) => item.id !== connection.id); state.events.unshift(event("system", `${connection.label} disconnected`, "Asset discovery will ask for setup before searching again.", "quiet")); } return state; }
     case "runSlot": { const slot = state.calendar.find((item) => item.id === operation.id); if (!slot) return state; const standing = state.standingIntents.find((item) => item.id === slot.standingIntentId) ?? makeStandingIntent(state, slot.instruction, state.presence, slot.day, slot.time, slot.objective, slot.executionWindow); addSocialEvaluation(state, standing, slot); return state; }
     case "confirmAutoMode": return confirmAutoMode(state, operation.presenceId, operation.capabilities, operation.executionIds);
-    case "approveExecution": { const execution = state.executions.find((item) => item.id === operation.id); if (execution?.status === "awaiting-review") { execution.status = execution.bridgeId ? "approved" : "approved"; execution.updatedAt = now(); state.events.unshift(event("execution", "Approved for execution", "The operator approved this social action; it remains separate from Jenny's judgment.", "positive", { executionId: execution.id })); } return state; }
+    case "approveExecution": {
+      const execution = state.executions.find((item) => item.id === operation.id);
+      if (execution?.status === "awaiting-review") {
+        const approvedAt = now();
+        execution.status = "approved";
+        execution.updatedAt = approvedAt;
+        const assetIds = execution.publication?.assetIds ?? [];
+        if (execution.publication && assetIds.length) {
+          execution.publication.operatorAssetApproval = {
+            assetIds: [...assetIds],
+            reason: "The operator reviewed the proposed expression and selected media for this exact publication.",
+            at: approvedAt,
+          };
+        }
+        recordExecutionTransition(state, execution, {
+          eventType: "permission.decided",
+          actor: "operator",
+          status: "AUTHORIZED",
+          payload: {
+            reason: assetIds.length ? "operator_reviewed_publication_media" : "operator_approved_social_action",
+            approvedAssetIds: assetIds,
+          },
+        });
+        state.events.unshift(event("execution", "Approved for execution", assetIds.length ? "The operator reviewed the proposed expression and selected media for this exact publication." : "The operator approved this social action; it remains separate from Jenny's judgment.", "positive", { executionId: execution.id }));
+      }
+      return state;
+    }
     case "reviewFailedExecution": {
       const execution = state.executions.find((item) => item.id === operation.id);
       if (!execution || !["failed", "blocked", "expired"].includes(execution.status) || execution.externalRef) return state;

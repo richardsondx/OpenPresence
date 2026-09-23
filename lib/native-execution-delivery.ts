@@ -227,7 +227,7 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
     }
     if (execution.publication) {
       try {
-        authorizeAssetSelection(next, execution.publication.assetIds ?? [], { presenceId: execution.presenceId, requireReady: !execution.publication.operatorOverride });
+        authorizeAssetSelection(next, execution.publication.assetIds ?? [], { presenceId: execution.presenceId, requireReady: !execution.publication.operatorOverride && !execution.publication.operatorAssetApproval, allowReviewable: Boolean(execution.publication.operatorAssetApproval) });
         const liveAssetRepeatReason = liveAssetReuseReason(next, execution.presenceId, execution.publication.assetIds ?? [], { excludePublicationId: execution.publication.id });
         if (liveAssetRepeatReason) {
           const current = next.executions.find((item) => item.id === execution.id);

@@ -7317,7 +7317,22 @@ function OperatorChatAttachmentPreview({ attachments, heading = "Image to review
   </section>;
 }
 
-function OperatorChatMessageBody({ message, state }: { message: OperatorConversationMessage; state: OpenPresenceState }) {
+function executionReviewAttachments(state: OpenPresenceState, execution: OpenPresenceState["executions"][number]): PresenceChatAttachment[] {
+  return (execution.publication?.assetIds ?? []).flatMap((assetId) => {
+    const asset = state.assets.find((item) => item.id === assetId);
+    if (!asset) return [];
+    const kind = asset.type === "pdf" ? "document" : asset.type;
+    return [{
+      id: `execution-review:${execution.id}:${asset.id}`,
+      existingAssetId: asset.id,
+      name: asset.description?.trim() || "Selected image",
+      kind,
+      mimeType: asset.mimeType,
+    } satisfies PresenceChatAttachment];
+  });
+}
+
+function OperatorChatMessageBody({ message, state, mutate, onOpenReview }: { message: OperatorConversationMessage; state: OpenPresenceState; mutate: Mutate; onOpenReview?: () => void }) {
   const receipt = chatToolReceipt(message);
   if (receipt) {
     const result = Array.isArray(receipt.result) ? receipt.result.map((item) => {
@@ -7326,9 +7341,34 @@ function OperatorChatMessageBody({ message, state }: { message: OperatorConversa
       return execution ? { ...item, status: execution.status, failure: execution.failure, verified: execution.status === "succeeded" && state.outcomes.some((outcome) => outcome.executionId === execution.id && outcome.status === "succeeded") } : item;
     }) : receipt.result;
     const activity = toolActivitySummary({ ...receipt, result });
+    const reviewExecutionIds = Array.isArray(result)
+      ? result.flatMap((item) => item && typeof item === "object" && "executionId" in item && typeof item.executionId === "string" ? [item.executionId] : [])
+      : [];
+    const reviewExecutions = reviewExecutionIds
+      .map((executionId) => state.executions.find((execution) => execution.id === executionId))
+      .filter((execution): execution is OpenPresenceState["executions"][number] => execution?.status === "awaiting-review");
     return <details className="operator-chat-tool" data-testid="operator-chat-tool">
       <summary><span className={`operator-chat-tool-icon${activity.failed ? " is-failed" : ""}`} aria-hidden="true">{activity.failed ? <CircleAlert size={15} /> : ["Awaiting verification", "Needs review"].includes(activity.status) ? <Clock3 size={15} /> : <Check size={15} />}</span><span className="operator-chat-tool-title">{activity.title}</span><span className="operator-chat-tool-status">{activity.status}</span><time dateTime={message.timestamp}>{formatTime(message.timestamp)}</time><ChevronDown size={13} className="operator-chat-tool-chevron" aria-hidden="true" /></summary>
-      <div className="operator-chat-tool-result"><p>{activity.summary}</p>{activity.limit && <p className="operator-chat-tool-limit">{activity.limit}</p>}<details className="operator-chat-technical"><summary>Technical details</summary><pre>{JSON.stringify({ ...receipt, result }, null, 2)}</pre></details></div>
+      <div className="operator-chat-tool-result">
+        <p>{activity.summary}</p>
+        {activity.limit && <p className="operator-chat-tool-limit">{activity.limit}</p>}
+        {reviewExecutions.map((execution) => {
+          const attachments = executionReviewAttachments(state, execution);
+          const proposedText = execution.publication?.payload && typeof execution.publication.payload === "object" && "text" in execution.publication.payload && typeof execution.publication.payload.text === "string" ? execution.publication.payload.text : undefined;
+          return <section className="operator-chat-review-card" key={execution.id} data-testid="operator-chat-publication-review">
+            <div className="operator-chat-review-heading"><strong>{attachments.length ? "Review image and approve publication" : "Review and approve publication"}</strong><span>Needs you</span></div>
+            {proposedText && <blockquote>{proposedText}</blockquote>}
+            {attachments.length > 0 && <OperatorChatAttachmentPreview attachments={attachments} heading="Image to review" detail="This exact media is attached to the proposed publication" />}
+            <p className="operator-chat-review-reason">{execution.reviewReason ?? "The Presence is waiting for your approval before delivery."}</p>
+            <div className="operator-chat-review-actions">
+              <Button type="button" variant="primary" data-testid={`operator-chat-approve-${execution.id}`} onClick={() => void mutate({ type: "approveExecution", id: execution.id })}>Approve publication</Button>
+              <Button type="button" variant="secondary" data-testid={`operator-chat-cancel-${execution.id}`} onClick={() => void mutate({ type: "cancelExecution", id: execution.id })}>Cancel</Button>
+              {onOpenReview && <Button type="button" variant="ghost" onClick={onOpenReview}>Open Review</Button>}
+            </div>
+          </section>;
+        })}
+        <details className="operator-chat-technical"><summary>Technical details</summary><pre>{JSON.stringify({ ...receipt, result }, null, 2)}</pre></details>
+      </div>
     </details>;
   }
   const inspection = message.role === "presence" ? legacyInspectionEvidence(message.content) : undefined;
@@ -7804,7 +7844,7 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
           const receiptAttachments = item.attachments?.filter((attachment) => !decisionAttachments.some((decisionAttachment) => decisionAttachment.id === attachment.id)) ?? [];
           return <Fragment key={item.id}><article className={`operator-chat-message is-${item.role}${isToolActivity ? " is-tool-activity" : ""}`}>
             {!isToolActivity && <div className="operator-chat-message-meta"><strong>{item.role === "operator" ? "You" : item.role === "presence" ? presence.name : "OpenPresence"}</strong><span>{formatTime(item.timestamp)}</span></div>}
-            <OperatorChatMessageBody message={item} state={state} />
+            <OperatorChatMessageBody message={item} state={state} mutate={mutate} onOpenReview={() => setView("review")} />
             {acknowledgedReaction && <OperatorChatReaction reaction={acknowledgedReaction} />}
             {item.role === "presence" && decisionAttachments.length ? <OperatorChatAttachmentPreview attachments={decisionAttachments} heading={item.choices?.length ? "Image to review" : "Attached artifact"} detail={item.choices?.length ? "Use it only if it strengthens the post" : "Recovered from the Agent’s authorized artifact library"} /> : null}
             {item.role === "presence" && item.choices?.length ? <div className="operator-chat-choices" role="group" aria-label="Choose an option">{item.choices.map((choice, index) => {
@@ -11781,14 +11821,22 @@ function NeedsYouQueue({
         );
       })}
 
-      {approvals.map((execution) => (
-        <article className="needs-you-queue-card" key={execution.id}>
-          <div className="needs-you-queue-card-topline"><span className="needs-you-queue-badge needs-you-queue-badge-neutral">Review</span><span>Social action approval</span></div>
-          <h3>{formatAssignmentActionLabel(execution.affordance)} {targetLabel(execution)}</h3>
-          <p>Open the Agenda to review the proposed expression and approve or cancel it before delivery.</p>
-          <div className="needs-you-queue-card-actions"><button type="button" className="action-button secondary" onClick={onOpenAgenda}>Open Agenda &amp; Review</button></div>
-        </article>
-      ))}
+      {approvals.map((execution) => {
+        const mediaAssetId = execution.publication?.assetIds?.[0];
+        const mediaAsset = mediaAssetId ? state.assets.find((asset) => asset.id === mediaAssetId) : undefined;
+        const proposedText = execution.publication?.payload && typeof execution.publication.payload === "object" && "text" in execution.publication.payload && typeof execution.publication.payload.text === "string" ? execution.publication.payload.text : undefined;
+        const hasMediaReview = Boolean(mediaAssetId);
+        return (
+          <article className="needs-you-queue-card" key={execution.id} data-testid="needs-you-publication-review">
+            <div className="needs-you-queue-card-topline"><span className="needs-you-queue-badge needs-you-queue-badge-neutral">Review</span><span>{hasMediaReview ? "Image publication approval" : "Social action approval"}</span></div>
+            <h3>{hasMediaReview ? "Review image and approve publication" : `${formatAssignmentActionLabel(execution.affordance)} ${targetLabel(execution)}`}</h3>
+            <p>{hasMediaReview ? "Review the exact image and proposed expression before delivery. Approval applies only to this publication." : "Open the Agenda to review the proposed expression and approve or cancel it before delivery."}</p>
+            {proposedText && <blockquote className="needs-you-queue-proposed-text">{proposedText}</blockquote>}
+            {mediaAsset && <div className="needs-you-queue-media"><img src={`/api/assets/${encodeURIComponent(mediaAsset.id)}`} alt={mediaAsset.description || "Image proposed for publication"} /><span>{mediaAsset.description || "Selected image"}</span></div>}
+            <div className="needs-you-queue-card-actions"><button type="button" className="action-button secondary" data-testid={`needs-you-review-${execution.id}`} onClick={onOpenAgenda}>{hasMediaReview ? "Review image & approve" : "Open Agenda & Review"}</button></div>
+          </article>
+        );
+      })}
 
       {blocked.map((assignment) => (
         <article className="needs-you-queue-card" key={assignment.id}>
@@ -13069,6 +13117,14 @@ function ExecutionLedger({
           </div>
         </div>
 
+        {latest.publication && (latest.publication.assetIds.length > 0 || (typeof latest.publication.payload === "object" && latest.publication.payload !== null && "text" in latest.publication.payload)) && (
+          <section className="execution-publication-review" data-testid="execution-publication-review">
+            <strong>{latest.publication.assetIds.length > 0 && isNeedsReview ? "Review image and approve publication" : "Proposed publication"}</strong>
+            {typeof latest.publication.payload === "object" && latest.publication.payload !== null && "text" in latest.publication.payload && typeof latest.publication.payload.text === "string" && <blockquote>{latest.publication.payload.text}</blockquote>}
+            {latest.publication.assetIds.length > 0 && <OperatorChatAttachmentPreview attachments={executionReviewAttachments(state, latest)} heading="Image to review" detail="Approval applies to this exact selected media" />}
+          </section>
+        )}
+
         {actionContext && (
           <div className="action-context-card">
             <span>{actionSnippet ? `“${actionSnippet.slice(0, 150)}${actionSnippet.length > 150 ? "…" : ""}”` : "This post is the source context for the action."}</span>
@@ -13138,7 +13194,7 @@ function ExecutionLedger({
               variant="primary"
               onClick={approveReviewAction}
             >
-              <Check size={14} /> {isDeletion ? confirmingDeletion ? "Confirm deletion" : "Review deletion" : `Approve ${actionName.toLowerCase()}`}
+              <Check size={14} /> {isDeletion ? confirmingDeletion ? "Confirm deletion" : "Review deletion" : latest.publication?.assetIds.length && isNeedsReview ? "Approve publication" : `Approve ${actionName.toLowerCase()}`}
             </Button>
             <Button
               variant="secondary"
