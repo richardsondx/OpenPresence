@@ -7,10 +7,72 @@ coverage
 test-results
 playwright-report
 tmp/
+var/
 *.tsbuildinfo
-data/*.db
-data/*.db-shm
-data/*.db-wal
-data/.secret-key
-data/assets/
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+.env
+.env.*
+!.env.example
 .DS_Store
+
+# Private local evidence and captured third-party content are not source releases.
+qa-learnings/**
+!qa-learnings/README.md
+!qa-learnings/regression-rules.md
+remotion-jev-qa/
+qa_check.mjs
+# Curated public screenshots belong in docs/screenshots/.
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
+/*.gif
+scenarios/boardy-additional-leads-development.json
+scenarios/boardy-capture-development-48.json
+scenarios/boardy-development-observed-2026-08-13.json
+scenarios/boardy-replies-20.json
+scenarios/boardy-replies-20-rubric.json
+scenarios/boardy-social-cue-smoke.json
+scenarios/boardy-thread-replay-development.json
+# Entire private runtime workspace, including assets, browser profiles, and keys.
+data/
+
+# Credentials, browser sessions, backups, and generated Python artifacts.
+*.db
+*.db-*
+*.bak
+*.backup*
+.secret-key
+.publication-signing-key
+*.pem
+*.key
+*.p12
+*.pfx
+*.har
+trace.zip
+storage-state*.json
+storageState*.json
+.venv/
+__pycache__/
+*.py[cod]
+
+/better-sqlite3
+
+# Generated paths from legacy absolute build-directory resolution.
+/Users/
+/.eslintcache
+
+# Private, account-specific recovery scripts and historical operator reports.
+/docs/OpenPresence_Autonomy_Debug_Report_2026-08-25.md
+/docs/OpenPresence_Product_Audit_Report.md
+/docs/OpenPresence_Runtime_Performance_and_Social_Action_Audit_2026-08-24.md
+/docs/OpenPresence_Stability_Assessment_2026-08-21.md
+/docs/PLAYGROUND_RELENTLESS_AUDIT.md
+
+/scripts/recover-*.mjs
+/scripts/restore-*.mjs
+/scripts/repair-*.mjs
+/docs/*-connection-runbook.md
