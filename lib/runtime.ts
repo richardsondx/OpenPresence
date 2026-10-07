@@ -5625,7 +5625,7 @@ const socialHumorTasteGuidance = [
 function isHumorTastePreferenceLanguage(content: string) {
   return /\b(?:absurd(?:ist)?|sophom(?:oric)?|blue\s+humou?r|raunch(?:y|iness)?|innuendo|playful|silly|sarcasm|sarcastic|emoji|dry|self-aware|contextual|light(?:ly)?|personality|voice|tone|humou?r\s+(?:style|boundary|preference|policy))\b/i.test(content)
     && /\b(?:should|want|prefer|use|have|make|keep|never|don['’]?t|do not|update|change|more|less|sometimes|occasionally|always)\b/i.test(content)
-    && /\b(?:agent|you|we|repl(?:y|ies)|conversation|people|someone|social|public|presence|genny|example_agent|humou?r|jok(?:e|es|ing)|personality|voice|tone)\b/i.test(content);
+    && /\b(?:agent|you|we|repl(?:y|ies)|conversation|people|someone|social|public|presence|genny|humou?r|jok(?:e|es|ing)|personality|voice|tone)\b/i.test(content);
 }
 
 function isBlueHumorTastePreferenceLanguage(content: string) {
@@ -5646,7 +5646,7 @@ function isTastePreferenceLanguage(content: string) {
 
 function isConversationalTastePreferenceLanguage(content: string) {
   return /\b(?:conversational|natural(?:ly)?|human(?:-like)?|assistant[- ]like|prompt[- ]like|ticket[- ]like|social(?:ly)?|voice|tone|concise|brief|short(?:er)?)\b/i.test(content)
-    && /\b(?:agent|you|we|repl(?:y|ies)|conversation|people|someone|public|presence|genny|example_agent|answer(?:ing)?|sound|feel)\b/i.test(content)
+    && /\b(?:agent|you|we|repl(?:y|ies)|conversation|people|someone|public|presence|genny|answer(?:ing)?|sound|feel)\b/i.test(content)
     && /\b(?:should|want|prefer|use|have|make|keep|never|don['’]?t|do not|update|change|more|less|stop|avoid)\b/i.test(content);
 }
 

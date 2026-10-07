@@ -33,7 +33,7 @@ type GoldenDay = {
 
 type GoldenSet = { schema: string; days: GoldenDay[] };
 
-const golden = JSON.parse(readFileSync(join(process.cwd(), "qa-learnings/conversation-prompt-evals/2026-09-16-natural-supervision-golden.json"), "utf8")) as GoldenSet;
+const golden = JSON.parse(readFileSync(join(process.cwd(), "tests/fixtures/natural-supervision-seven-day.json"), "utf8")) as GoldenSet;
 
 function records(value: unknown): JsonRecord[] {
   return Array.isArray(value) ? value.filter((item): item is JsonRecord => Boolean(item && typeof item === "object" && !Array.isArray(item))) : [];

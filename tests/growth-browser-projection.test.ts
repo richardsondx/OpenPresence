@@ -1,3 +1,4 @@
+import { writeState } from "../lib/db";
 import { describe, expect, it } from "vitest";
 import { GET as stateGet } from "../app/api/state/route";
 import { derivePublicHistory, createAgent } from "../lib/runtime";
@@ -38,8 +39,10 @@ describe("Growth browser projection", () => {
     expect(history[0]).toMatchObject({ id: "mirror-1", kind: "post" });
   });
 
-  it("keeps the canonical Growth response under the browser payload budget", async () => {
-    const response = await stateGet(new Request("http://localhost/api/state?projection=growth&agentId=agent_example_2&presenceId=presence_example_19"));
+  it("keeps the synthetic Growth response under the browser payload budget", async () => {
+    const state = createAgent({ name: "Projection fixture", description: "Synthetic browser projection", mode: "agent", handle: "@projection_fixture", accent: "#777777" });
+    writeState(state, { force: true });
+    const response = await stateGet(new Request(`http://localhost/api/state?projection=growth&agentId=${state.agent!.id}&presenceId=${state.presence!.id}`));
     const body = await response.json();
 
     expect(response.status).toBe(200);

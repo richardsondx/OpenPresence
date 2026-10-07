@@ -60,3 +60,19 @@ __pycache__/
 *.py[cod]
 
 /better-sqlite3
+
+# Generated paths from legacy absolute build-directory resolution.
+/Users/
+/.eslintcache
+
+# Private, account-specific recovery scripts and historical operator reports.
+/docs/OpenPresence_Autonomy_Debug_Report_2026-08-25.md
+/docs/OpenPresence_Product_Audit_Report.md
+/docs/OpenPresence_Runtime_Performance_and_Social_Action_Audit_2026-08-24.md
+/docs/OpenPresence_Stability_Assessment_2026-08-21.md
+/docs/PLAYGROUND_RELENTLESS_AUDIT.md
+
+/scripts/recover-*.mjs
+/scripts/restore-*.mjs
+/scripts/repair-*.mjs
+/docs/*-connection-runbook.md

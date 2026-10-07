@@ -22,7 +22,8 @@
     "v2:cli": "node --env-file-if-exists=.env.v2.local --import tsx scripts/v2-cli.ts",
     "v2:http": "node --env-file-if-exists=.env.v2.local --import tsx scripts/v2-http.ts",
     "v2:setup": "tsx scripts/v2-setup.ts",
-    "export:public": "node scripts/export-public-source.mjs"
+    "export:public": "node scripts/export-public-source.mjs",
+    "clean": "node scripts/clean-project.mjs"
   },
   "dependencies": {
     "@ai-sdk/typesafe-ai": "3.0.3",

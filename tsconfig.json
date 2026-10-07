@@ -32,8 +32,7 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    "next-env.d.ts",
-    "/var/folders/yv/1mjm9zl16kj8gykks67kp7j40000gn/T/openpresence-verify-00e51d1719/next-dist/types/**/*.ts"
+    "next-env.d.ts"
   ],
   "exclude": [
     "node_modules",

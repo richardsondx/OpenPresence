@@ -54,8 +54,10 @@ describe("Usage browser projection", () => {
     expect(projection.proposals).toEqual([{ id: "proposal-pending", status: "pending" }]);
   });
 
-  it("keeps the canonical Usage response compact", async () => {
-    const response = await stateGet(new Request("http://localhost/api/state?projection=usage&agentId=agent_example_2&presenceId=presence_example_19"));
+  it("keeps the synthetic Usage response compact", async () => {
+    const state = createAgent({ name: "Projection fixture", description: "Synthetic browser projection", mode: "agent", handle: "@projection_fixture", accent: "#777777" });
+    writeState(state, { force: true });
+    const response = await stateGet(new Request(`http://localhost/api/state?projection=usage&agentId=${state.agent!.id}&presenceId=${state.presence!.id}`));
     const body = await response.json();
 
     expect(response.status).toBe(200);

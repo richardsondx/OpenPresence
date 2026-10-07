@@ -1,3 +1,4 @@
+import { writeState } from "../lib/db";
 import { describe, expect, it } from "vitest";
 import { agentLibraryBrowserProjection } from "../lib/agent-library-browser-projection";
 import { createAgent } from "../lib/runtime";
@@ -78,9 +79,11 @@ describe("Agent library browser projections", () => {
     expect(projection.assets).toEqual([]);
   });
 
-  it("keeps the canonical People response under the browser payload budget", async () => {
+  it("keeps the synthetic People response under the browser payload budget", async () => {
+    const state = createAgent({ name: "Projection fixture", description: "Synthetic browser projection", mode: "agent", handle: "@projection_fixture", accent: "#777777" });
+    writeState(state, { force: true });
     const response = await (await import("../app/api/state/route")).GET(
-      new Request("http://localhost/api/state?projection=people&agentId=agent_example_2&presenceId=presence_example_19"),
+      new Request(`http://localhost/api/state?projection=people&agentId=${state.agent!.id}&presenceId=${state.presence!.id}`),
     );
     const body = await response.json();
 
@@ -91,9 +94,11 @@ describe("Agent library browser projections", () => {
     expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThan(800_000);
   });
 
-  it("keeps the canonical Feed response compact while preserving derived history", async () => {
+  it("keeps the synthetic Feed response compact while preserving derived history", async () => {
+    const state = createAgent({ name: "Projection fixture", description: "Synthetic browser projection", mode: "agent", handle: "@projection_fixture", accent: "#777777" });
+    writeState(state, { force: true });
     const response = await (await import("../app/api/state/route")).GET(
-      new Request("http://localhost/api/state?projection=feed&agentId=agent_example_2&presenceId=presence_example_19"),
+      new Request(`http://localhost/api/state?projection=feed&agentId=${state.agent!.id}&presenceId=${state.presence!.id}`),
     );
     const body = await response.json();
 
