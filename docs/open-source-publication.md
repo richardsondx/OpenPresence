@@ -5,21 +5,52 @@ all autonomous product capabilities or internet-facing deployment security.
 
 ## Publication decision
 
-**Publish a clean source snapshot with a new Git history. Do not make the existing
-repository public or push its original branches and tags to a public repository.**
+**Keep the repository private until GitHub has purged the old pull-request refs
+and cached views, and the historical encryption-key exposure is addressed.**
 
-The original history contains private SQLite databases/backups and a local
-`.secret-key` under an old temporary rehearsal directory. That commit is present
-in the existing remote history. Ignoring or untracking those paths does not erase
-their Git objects. The existing GitHub repository was private at audit time.
-No remote visibility, history, or account credentials were changed by this work.
+The authorized security sweep rewrote local branch/tag histories after a full
+private ZIP backup. The rewritten histories remove databases, encryption keys,
+captured QA evidence, account-specific recovery scripts, operational reports,
+old screenshots, personal filesystem paths, private runtime IDs, and identifying
+operator examples. Commit identities use a public noreply address. Current
+source remains intact apart from the deliberate privacy and cleanup changes.
 
-The preparation preserves original files locally while removing 571 private or
-generated files from Git tracking. This includes raw QA reports, conversations,
-browser traces, screenshots outside the curated docs gallery, captured social
-corpora, a local Remotion QA project, cached Python bytecode, and an ad-hoc script
-with personal paths. Synthetic scenarios, tests, eval criteria, project skills,
-curated demo screenshots, and generalized regression rules remain source.
+GitHub retains three old pull-request head refs that ordinary branch pushes
+cannot rewrite. Request their removal and cached-object cleanup through GitHub
+Support before making the repository public. Other clones must migrate to the
+rewritten history; merging or pushing old history can restore the removed data.
+Never publish the original ZIP, old repository refs, or private local captures.
+
+The removed historical key matches the primary local encryption key. The live
+key and databases were preserved. Encrypting credential columns does not encrypt
+conversations or the whole database, and removing a key from Git does not revoke
+it. Rotate affected external credentials if necessary and re-encrypt live stored
+credentials with a coordinated key migration before releasing historical access;
+never simply replace the key file and strand encrypted credentials.
+
+## Backup and history verification
+
+The private backup is stored outside the project in the sibling
+`OpenPresence-private-backups/` directory as
+`OpenPresence-before-security-sweep-2026-10-07.zip`. It contains all remaining
+project files, Git history, databases, keys, and local evidence after the
+explicitly authorized generated-file cleanup. Its ZIP CRC checks and SHA-256
+checksum passed. Folder/file permissions restrict access to the owner. The
+archive deliberately contains sensitive material and must remain private.
+
+The rewrite was verified in a separate mirror before adopting it locally.
+Gitleaks scanned all rewritten commit refs with two decode levels and found no
+secrets. A real TruffleHog Git scan processed retained history with external
+credential verification disabled: only the two reviewed synthetic URI rejection
+fixtures remained. Independent checks found zero forbidden historical paths and
+confirmed that the historical key blob is absent from retained history. Internal
+checkpoint refs carrying unfiltered trees were removed from the cleaned source;
+originals remain in the private backup. Linked working files were preserved.
+
+The current source tree before and after filtering was identical. Runtime-profile
+and projection tests now use synthetic isolated identities. Publication-review
+browser tests use a small synthetic workspace instead of a captured personal
+workspace, and the synthetic seven-day golden lives in `tests/fixtures/`.
 
 ## Artifact organization and database privacy
 
@@ -110,29 +141,19 @@ may be unavailable in the public checkout.
 
 ## Publish the prepared source
 
-The reviewed snapshot is generated under `out/openpresence-public/`, outside the
-tracked source set, and packaged as `out/OpenPresence-public.tar.gz`.
-To generate a later snapshot, choose a new empty destination:
+Generate a fresh history-free snapshot and scan that exact snapshot:
 
 ```bash
 pnpm export:public -- out/openpresence-public-next
 gitleaks dir out/openpresence-public-next --redact
 ```
 
-After reviewing and scanning the exact source you intend to publish, initialize
-a new Git repository **inside the clean export**, with a new remote. Do not copy
-`.git`, fetch the old private repository, push old refs, or change the existing
-repository's visibility. Those actions would reintroduce the historical material.
+This export excludes Git metadata and ignored runtime/evidence files. A new
+repository initialized inside it is the safest alternative if GitHub cannot
+purge the existing repository's retained refs. Otherwise, publish only after
+confirming the rewritten remote refs, GitHub's retained-object cleanup, and
+credential/key remediation. Keep secret-scanning push protection enabled.
 
-```bash
-cd out/openpresence-public
-git init -b main
-git add .
-gitleaks git --staged --redact .
-```
-
-Review the staged source, then commit and publish through your chosen GitHub
-workflow. Enable secret-scanning push protection and private vulnerability
-reporting on the new repository. If any affected credentials were exposed outside
-trusted private storage, revoke/rotate those external credentials; do not blindly
-replace your current database encryption key without a migration.
+See [GitHub's sensitive-data removal guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository)
+for cached refs and clone remediation. Do not fetch, merge, or push original refs
+into the cleaned repository.
