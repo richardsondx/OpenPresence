@@ -8,9 +8,9 @@
 
 ---
 
-## 1. What OpenPresence is
+## What OpenPresence is
 
-### V2 host-agent capability direction (2026-10-01)
+### V2 host-agent capability direction
 
 The operator has directed an additional product mode: OpenPresence equips an
 existing personal AI agent with the social expertise to build an audience in
@@ -48,7 +48,7 @@ Or:
 
 > **Your agent should not live in a chat window.**
 
-## 49. Mobile-first Agent workspace (2026-09-13)
+## Mobile-first Agent workspace
 
 The daily destinations are **Chat, Tasks, People, Growth, and Artifacts**. Mobile uses
 one labeled icon dock; desktop uses the same destinations below an Agent switcher.
@@ -58,7 +58,7 @@ or grant execution authority. Presence-scoped views retain the selected social c
 Tasks combines the responsibility list and Calendar: what the Agent owns and when
 it acts are views of the same Assignments. Work is a compatibility entry, not another
 product. Growth explains objectives and evidence; its concrete actions remain Tasks.
-Artifacts contains separate Templates and Media tabs (operator direction, 2026-09-16). Templates are reusable formats and learned approaches with visible evidence and results; Media is the accessible visual library, also reachable while attaching Chat context. Growth remains the account's analytics and objectives surface. Saving a template does not authorize publication.
+Artifacts contains separate Templates and Media tabs. Templates are reusable formats and learned approaches with visible evidence and results; Media is the accessible visual library, also reachable while attaching Chat context. Growth remains the account's analytics and objectives surface. Saving a template does not authorize publication.
 
 Knowledge, Teach agent, Test agent (Agent Lab), Watchlist, and Agent settings live in
 the Agent menu. Rehearsal remains explicitly separate from live delivery.
@@ -71,7 +71,7 @@ Agent accents preserve OpenPresence identity; decorative imitation is not a goal
 
 This direction supersedes earlier navigation inventories where they conflict.
 
-## 48. Agent-first workspace direction (2026-09-02)
+## Agent-first workspace direction
 
 The primary workspace is now organized around the Agent as the visible actor.
 The left rail is a portfolio of memorable Agent identities; selecting one
@@ -106,7 +106,7 @@ states remain distinct. The composer is always a real interaction boundary:
 Enter sends, Shift+Enter adds a line, optimistic input is reconciled against
 durable state, and a refresh or worker restart cannot lose the operator's turn.
 
-## 46. Attention, responsibility, and authority
+## Attention, responsibility, and authority
 
 An Exploration gives the Agent somewhere to look. An Assignment gives the Agent responsibility to pursue an outcome there. The Presence Execution Envelope gives the Agent authority to perform a selected social act. Exploration therefore does not grant permission to speak, but it can lead to autonomous speech when it is connected to a canonical Assignment and authorized execution.
 
@@ -146,7 +146,7 @@ words and visual are reviewed together as one public act.
 
 ---
 
-## 2. Mission
+## Mission
 
 ### Product mission
 
@@ -180,9 +180,9 @@ The objective is **compounding audience growth**, not maximum activity.
 
 ---
 
-## 3. The core product thesis
+## The core product thesis
 
-### 3.1 The Agent is conceptually a person
+### The Agent is conceptually a person
 
 The Agent should reason about the social world the way a capable person would.
 
@@ -212,7 +212,7 @@ The architectural rule is:
 
 A good Agent becomes better at being itself, not better at thinking about the software that runs it.
 
-### 3.2 Person-shaped cognition, machine-shaped embodiment
+### Person-shaped cognition, machine-shaped embodiment
 
 OpenPresence separates cognition from embodiment.
 
@@ -243,7 +243,7 @@ The principle is:
 
 ---
 
-## 4. The canonical hierarchy
+## The canonical hierarchy
 
 OpenPresence must always make this hierarchy clear in the product:
 
@@ -312,7 +312,7 @@ Changing Presence must never silently change the Agent's Brain, Soul, Mission, T
 
 ---
 
-## 5. The Agent mind
+## The Agent mind
 
 OpenPresence uses a small set of human-readable meaning files.
 
@@ -368,7 +368,7 @@ Performance may freely update empirical Growth. It may propose changes to Taste,
 
 ---
 
-## 6. Taste is the moat
+## Taste is the moat
 
 Many agent frameworks answer:
 
@@ -403,7 +403,7 @@ Metrics may inform strategy. Metrics do not get to vote directly on Taste.
 
 ---
 
-## 7. Growth is not "post more"
+## Growth is not "post more"
 
 OpenPresence should optimize for durable, qualified growth.
 
@@ -473,7 +473,7 @@ Raw likes alone are not the goal.
 
 ---
 
-## 8. Model sovereignty
+## Model sovereignty
 
 OpenPresence does not have one AI model.
 
@@ -513,7 +513,7 @@ Specialized models are **Tools of the Agent**, not the Agent's identity.
 
 ---
 
-## 9. Skills, Tools, Assets, and Sources
+## Skills, Tools, Assets, and Sources
 
 OpenPresence should be powerful without becoming a general-purpose work agent.
 
@@ -601,7 +601,7 @@ Reference accounts are diagnostic examples, not generic specifications. Improve 
 
 ---
 
-## 10. Publication parity
+## Publication parity
 
 Text is not the product.
 
@@ -628,7 +628,7 @@ The Agent should choose the best form for the idea, not default to text because 
 
 ---
 
-## 11. Channel, Connector, and Mirror are different things
+## Channel, Connector, and Mirror are different things
 
 ### Channel
 
@@ -688,7 +688,7 @@ If an external system can mirror a social environment into OpenPresence and fait
 
 ---
 
-## 12. One brain does not mean one privacy boundary
+## One brain does not mean one privacy boundary
 
 An Agent may exist in public and private places.
 
@@ -714,7 +714,7 @@ over:
 
 Private content must be filtered before cognition.
 
-## 12.1 Attention, Watching, and Explorations
+## Attention, Watching, and Explorations
 
 Watching has two distinct meanings. The Watchlist contains known people,
 accounts, or sources a Presence intentionally follows. An Exploration is a
@@ -802,7 +802,7 @@ is not itself justification for additional activity.
 
 ---
 
-## 13. Assignment, Social Intent, and ambient attention
+## Assignment, Social Intent, and ambient attention
 
 ### Ambient attention
 
@@ -852,7 +852,7 @@ Assignment fulfillment is persistent goal pursuit with bounded effort. A candida
 
 ---
 
-## 14. Intent, Execution, Delivery, Outcome
+## Intent, Execution, Delivery, Outcome
 
 These must remain separate.
 
@@ -908,7 +908,7 @@ This separation is essential for correct learning.
 
 ---
 
-## 15. Operator freedom and guidance
+## Operator freedom and guidance
 
 OpenPresence should help users protect the long-term value of their accounts without turning the Agent into a compliance officer or the product into a police system.
 
@@ -943,7 +943,7 @@ Open source users remain free to inspect, modify, replace, or fork the runtime.
 
 ---
 
-## 16. Conversation as configuration
+## Conversation as configuration
 
 Chat is not just conversation.
 
@@ -991,7 +991,7 @@ The affected domain object remains authoritative current state.
 
 ---
 
-## 17. Conversation, Memory, and durable configuration are different stores
+## Conversation, Memory, and durable configuration are different stores
 
 A conversation transcript records what was said.
 
@@ -1009,7 +1009,7 @@ Deleting or starting a new conversation must not silently erase durable changes 
 
 ---
 
-## 18. Context engineering
+## Context engineering
 
 The Agent's context window is a working set, not its hard drive.
 
@@ -1065,7 +1065,7 @@ Load only when necessary:
 
 The best context is the **minimum sufficient context for a good decision**.
 
-## 18.1 Knowledge is source material, not another context box
+## Knowledge is source material, not another context box
 
 Knowledge is Agent-owned source material that can be retrieved into a specific
 Presence envelope. It is not a second Brain, an unbounded prompt appendix, or
@@ -1123,7 +1123,7 @@ separate future capabilities.
 
 ---
 
-## 19. External agents and Content Drops
+## External agents and Content Drops
 
 OpenPresence should not try to replace every other agent.
 
@@ -1161,7 +1161,7 @@ A useful positioning boundary is:
 
 # UX AND DESIGN PHILOSOPHY
 
-## 20. Quiet software, living presence
+## Quiet software, living presence
 
 The visual language should feel:
 
@@ -1200,7 +1200,7 @@ The product should feel like **serious software containing something alive**.
 
 ---
 
-## 21. The UI must express the object model
+## The UI must express the object model
 
 The interface should make scope obvious.
 
@@ -1232,7 +1232,7 @@ Changing an active Presence filter must never silently replace Agent-level state
 
 ---
 
-## 22. Sidebar philosophy
+## Sidebar philosophy
 
 The Agent is the workspace.
 
@@ -1255,7 +1255,7 @@ Conversation history belongs on the left as navigation.
 
 ---
 
-## 23. Chat layout
+## Chat layout
 
 Desktop Chat should have three conceptual regions:
 
@@ -1302,7 +1302,7 @@ The right panel should be collapsible and contextual.
 
 ---
 
-## 24. Blank states are first-class product states
+## Blank states are first-class product states
 
 Do not render empty dashboards filled with zeros.
 
@@ -1330,7 +1330,7 @@ Starter prompts should disappear once the user has begun using the feature.
 
 ---
 
-## 25. Live is not analytics
+## Live is not analytics
 
 Live is the Agent's operational social stream.
 
@@ -1378,7 +1378,7 @@ If Review exists in settings but there is nowhere to review, the feature is not 
 
 ---
 
-## 26. Schedule manages Assignments, not content
+## Schedule manages Assignments, not content
 
 Schedule should answer:
 
@@ -1392,7 +1392,7 @@ Calendar may retain historical Standing Intent records for migration and audit, 
 
 ---
 
-## 27. Brain is Agent-scoped
+## Brain is Agent-scoped
 
 There is one Brain per Agent.
 
@@ -1420,7 +1420,7 @@ when a proposal workflow is actually being created.
 
 ---
 
-## 28. Presence Settings should be about one social incarnation
+## Presence Settings should be about one social incarnation
 
 Presence Settings should include:
 
@@ -1475,7 +1475,7 @@ Selecting `Custom` must immediately reveal what can be customized.
 
 ---
 
-## 29. Control choice matters
+## Control choice matters
 
 Use the control that matches the decision.
 
@@ -1507,7 +1507,7 @@ Rules of thumb:
 
 ---
 
-## 30. Custom Channels should feel native
+## Custom Channels should feel native
 
 A Custom Channel should not feel like a developer schema editor.
 
@@ -1537,7 +1537,7 @@ A Custom Channel is reusable social semantics. A Presence is one Agent's incarna
 
 ---
 
-## 31. Progressive disclosure over configuration walls
+## Progressive disclosure over configuration walls
 
 OpenPresence is technically powerful.
 
@@ -1576,7 +1576,7 @@ Then reveal rotate/revoke credentials.
 
 ---
 
-## 32. Guidance should appear only when useful
+## Guidance should appear only when useful
 
 Do not permanently occupy large UI regions with product philosophy.
 
@@ -1600,7 +1600,7 @@ A right rail should exist because it has useful current information, not because
 
 ---
 
-## 33. Never fake reality
+## Never fake reality
 
 A polished prototype that lies is worse than an incomplete feature that tells the truth.
 
@@ -1629,7 +1629,7 @@ The product should earn trust by representing reality precisely.
 
 ---
 
-## 34. Status language should be meaningful
+## Status language should be meaningful
 
 Avoid reusing one green dot for many unrelated concepts.
 
@@ -1660,7 +1660,7 @@ Avoid fake precision.
 
 ---
 
-## 35. Human-readable first, implementation detail second
+## Human-readable first, implementation detail second
 
 The product is open source, but open source does not require forcing every user to stare at raw internals.
 
@@ -1700,7 +1700,7 @@ Developer details can remain one click away.
 
 # PRODUCT BOUNDARIES
 
-## 36. What OpenPresence is not
+## What OpenPresence is not
 
 OpenPresence is not primarily:
 
@@ -1724,7 +1724,7 @@ OpenPresence should specialize in:
 
 ---
 
-## 37. What not to build early
+## What not to build early
 
 Avoid adding complexity simply because the architecture can support it.
 
@@ -1750,7 +1750,7 @@ Build the smallest system that helps the Agent:
 
 # OPEN-SOURCE PHILOSOPHY
 
-## 38. User sovereignty
+## User sovereignty
 
 OpenPresence should preserve operator choice.
 
@@ -1772,7 +1772,7 @@ The official product should provide good defaults, not lock users into one vendo
 
 ---
 
-## 39. Portability over lock-in
+## Portability over lock-in
 
 An Agent's identity should outlive any one:
 
@@ -1797,7 +1797,7 @@ Infrastructure is replaceable.
 
 # DECISION FRAMEWORK
 
-## 40. Questions to ask before approving a feature
+## Questions to ask before approving a feature
 
 Every product, architecture, and UX decision should be tested against these questions.
 
@@ -1868,7 +1868,7 @@ If none are true, why are we building it?
 
 ---
 
-## 41. Product test
+## Product test
 
 When uncertain, use this test:
 
@@ -1878,7 +1878,7 @@ If not, it probably does not belong in the core product yet.
 
 ---
 
-## 42. Scenario rehearsal
+## Scenario rehearsal
 
 Playground Scenarios are a rehearsal path for discovering behavioral failure before it becomes public. They create a real social situation inside the existing Sandbox world, run the selected Presence through the normal cognition, Social Intent, execution, delivery, and outcome path, and preserve the evidence for review.
 
@@ -1894,7 +1894,7 @@ Rehearsal must preserve the difficulty of the requested world. Scenario stimuli 
 
 Built-in Scenarios must create actual hostile, privacy-sensitive, identity-pressure, prompt-injection, and low-value social situations through the normal Sandbox path. They must not teach expected answers. A report should keep structural truth, independent model review, and operator review distinct; it should never collapse them into a fake readiness score.
 
-## 43. The final mental model
+## The final mental model
 
 ```text
                      OPENPRESENCE
@@ -1953,7 +1953,7 @@ OpenPresence should make the machinery beneath that intelligence good enough tha
 
 ---
 
-## 44. People, memory, and the right to forget
+## People, memory, and the right to forget
 
 OpenPresence distinguishes the person an Agent observes from the person it chooses to remember. A Social Mirror can contain an Actor, a Watch can keep that Actor in attention, and a directory can return a candidate without creating a Person or Relationship. Durable Network Memory is selective, Presence-scoped, provenance-backed, and owned by the Agent.
 
@@ -1988,7 +1988,7 @@ to stop.
 Runtime instructions are not social content. Social content is not runtime
 instruction. Neither may silently cross that boundary.
 
-## 47. Operational autonomy and temporal embodiment
+## Operational autonomy and temporal embodiment
 
 The Agent owns its responsibilities. The runtime owns the continuity of its body. Routine failure changes the Agent's circumstances; it does not transfer responsibility to the operator.
 
@@ -2008,7 +2008,7 @@ An uncertain public write is reconciled before retry. When an external handoff i
 
 Recover the capability, then reconsider affected responsibilities. When an embodied route is repaired, held responsibilities are re-evaluated for relevance, expiration, and strategic priority rather than blindly flushed into the world.
 
-## 45. The sentences to remember
+## The sentences to remember
 
 When everything else is forgotten, remember these:
 

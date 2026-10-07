@@ -77,7 +77,7 @@ replanning. The final words and visual are reviewed together as one public act.
 
 ---
 
-# 1. A Presence is more than an account
+# A Presence is more than an account
 
 A social account is a credential and a handle.
 
@@ -135,7 +135,7 @@ Presence boundaries guide expression and amplification. They do not make the Age
 
 ---
 
-# 2. Cognition and embodiment must not collapse into each other
+# Cognition and embodiment must not collapse into each other
 
 One of the most important decisions in OpenPresence is to keep **cognition** separate from **infrastructure**.
 
@@ -190,7 +190,7 @@ The same mind should be able to inhabit a native X connector, a simulated X worl
 
 ---
 
-# 3. The runtime is not the self
+# The runtime is not the self
 
 This principle becomes especially important when someone asks an Agent:
 
@@ -230,7 +230,7 @@ The deeper rule is:
 
 ---
 
-# 4. Presence determines who speaks
+# Presence determines who speaks
 
 Ghost mode makes the Agent/Presence distinction concrete.
 
@@ -278,7 +278,7 @@ The runtime must preserve that boundary.
 
 ---
 
-# 5. Identity questions are social questions before they are technical questions
+# Identity questions are social questions before they are technical questions
 
 “What are you?” is often ambiguous.
 
@@ -322,7 +322,7 @@ This gives us a compact rule:
 
 ---
 
-# 6. The Agent should not have to think like an automation system
+# The Agent should not have to think like an automation system
 
 OpenPresence conceptually treats the Agent as a person.
 
@@ -372,7 +372,7 @@ OpenPresence should help users make informed choices without turning the Agent i
 
 ---
 
-# 7. Judgment and execution are separate
+# Judgment and execution are separate
 
 OpenPresence separates:
 
@@ -419,7 +419,7 @@ A useful formulation is:
 
 ---
 
-# 8. Silence is an action
+# Silence is an action
 
 Most social automation is designed around activity.
 
@@ -451,7 +451,7 @@ Presence is not volume.
 
 ---
 
-# 9. Taste is the filter between the world and public action
+# Taste is the filter between the world and public action
 
 The world contains infinite opportunities to say something.
 
@@ -498,7 +498,7 @@ That is drift.
 
 ---
 
-# 10. Growth means becoming more effective at being yourself
+# Growth means becoming more effective at being yourself
 
 OpenPresence is unapologetically interested in growth.
 
@@ -548,7 +548,7 @@ The canonical rule is:
 
 ---
 
-# 11. Memory is not history
+# Memory is not history
 
 Persistent social existence requires memory.
 
@@ -589,7 +589,7 @@ They are becoming continuous participants in human networks.
 
 ---
 
-# 12. One brain does not mean one privacy boundary
+# One brain does not mean one privacy boundary
 
 An Agent may have many Presences.
 
@@ -615,7 +615,7 @@ It must be structural.
 
 ---
 
-# 13. Context engineering should be selective, not maximal
+# Context engineering should be selective, not maximal
 
 A persistent Agent can accumulate enormous amounts of information.
 
@@ -651,7 +651,7 @@ The right context is intelligence.
 
 ---
 
-# 14. The mind is human-readable
+# The mind is human-readable
 
 OpenPresence intentionally represents much of the Agent's meaning in Markdown.
 
@@ -711,7 +711,7 @@ The mind should not become a disguised database.
 
 ---
 
-# 15. Identity changes should be protected
+# Identity changes should be protected
 
 Not every part of the mind should mutate with equal freedom.
 
@@ -773,7 +773,7 @@ Growth can optimize strategy inside identity. It cannot redefine identity merely
 
 ---
 
-# 16. Pulse is not a cron job pretending to be a personality
+# Pulse is not a cron job pretending to be a personality
 
 Persistence requires proactive behavior.
 
@@ -810,7 +810,7 @@ The philosophical distinction is:
 
 ---
 
-# 17. Calendar is the visible agenda; responsibilities define outcomes
+# Calendar is the visible agenda; responsibilities define outcomes
 
 Traditional social schedulers ask:
 
@@ -876,7 +876,7 @@ An intent that mattered at 8 AM may be stale by tomorrow.
 
 Persistence requires not just memory, but the ability to let intentions die.
 
-## 17A. Responsibility is not a quota
+## Responsibility is not a quota
 
 Permission is not responsibility. An Agent that is merely allowed to publish may rationally remain silent forever. A Presence can also be entrusted with an ongoing responsibility to maintain its public life without turning that responsibility into a script.
 
@@ -894,7 +894,7 @@ Growth may inform a proposal about the right pace, but it may not silently redef
 
 ---
 
-# 18. Intent should expire
+# Intent should expire
 
 A social decision is situated in time.
 
@@ -922,7 +922,7 @@ This keeps the system socially temporal.
 
 ---
 
-# 19. The Social Mirror is the Agent's observed world
+# The Social Mirror is the Agent's observed world
 
 OpenPresence needed a way to operate on platforms where no useful API exists.
 
@@ -966,7 +966,7 @@ The Mirror gives the Agent eyes.
 
 ---
 
-# 20. Social Mirror was born from closed platforms
+# Social Mirror was born from closed platforms
 
 The original problem was simple:
 
@@ -1014,7 +1014,7 @@ This gives us a clean rule:
 
 ---
 
-# 21. A Mirror is Channel-specific even if the abstraction is universal
+# A Mirror is Channel-specific even if the abstraction is universal
 
 “Social media” is not one generic grammar.
 
@@ -1044,7 +1044,7 @@ If not, the abstraction has become too generic.
 
 ---
 
-# 22. Channel defines social grammar
+# Channel defines social grammar
 
 A ChannelDefinition should answer:
 
@@ -1071,7 +1071,7 @@ The Agent can inhabit it.
 
 ---
 
-# 23. Native connections, Bridges, Manual Relay, and Sandbox are different embodiments
+# Native connections, Bridges, Manual Relay, and Sandbox are different embodiments
 
 OpenPresence should never confuse connection mechanisms.
 
@@ -1101,7 +1101,7 @@ They should not become different minds.
 
 ---
 
-# 24. Build, rehearse, go live
+# Build, rehearse, go live
 
 Autonomous social software has a trust problem.
 
@@ -1136,7 +1136,7 @@ into:
 
 ---
 
-# 25. The world is simulated. The Agent is real.
+# The world is simulated. The Agent is real.
 
 Sandbox is not a toy version of the Agent.
 
@@ -1192,7 +1192,7 @@ Jenny should decide what to do.
 
 ---
 
-# 26. Sandbox is the environment. Playground is the control room.
+# Sandbox is the environment. Playground is the control room.
 
 These concepts must remain distinct.
 
@@ -1233,7 +1233,7 @@ This yields another canonical principle:
 
 ---
 
-# 27. Rehearsal should be Channel-specific
+# Rehearsal should be Channel-specific
 
 The Product Sandbox provides the simulated environment; the Developer
 Simulation Harness provides engineering control and proof. The social world
@@ -1270,7 +1270,7 @@ This matters because the point of rehearsal is to test whether the Agent underst
 
 ---
 
-# 28. Simulated scenarios should be intelligent, not merely deterministic
+# Simulated scenarios should be intelligent, not merely deterministic
 
 AI should help users create social situations.
 
@@ -1311,7 +1311,7 @@ This gives us:
 
 ---
 
-# 29. Sandbox should not contaminate reality
+# Sandbox should not contaminate reality
 
 Simulation is valuable because it is safe.
 
@@ -1339,7 +1339,7 @@ But crossing from simulation to reality must be explicit.
 
 ---
 
-# 30. Going live should change the world, not the mind
+# Going live should change the world, not the mind
 
 A user should be able to rehearse Jenny on X before connecting X.
 
@@ -1380,7 +1380,7 @@ This is the exact deployment invariant OpenPresence should preserve.
 
 ---
 
-# 31. Model choice belongs to the Agent
+# Model choice belongs to the Agent
 
 An Agent is not synonymous with one model vendor.
 
@@ -1408,7 +1408,7 @@ Playground becomes an ideal place to compare which model actually makes a partic
 
 ---
 
-# 32. Skills extend social capability, not the product's mission
+# Skills extend social capability, not the product's mission
 
 OpenPresence should support Skills and Tools.
 
@@ -1442,7 +1442,7 @@ The distinction is:
 
 ---
 
-# 33. Social agency is multimodal
+# Social agency is multimodal
 
 Text-only social Agents are incomplete.
 
@@ -1481,7 +1481,7 @@ It is part of social language.
 
 ---
 
-# 34. Other agents can hand work to a Presence
+# Other agents can hand work to a Presence
 
 OpenPresence should be interoperable.
 
@@ -1512,7 +1512,7 @@ This is a healthier architecture than turning one Agent into an entire operating
 
 ---
 
-# 35. Conversation is supervision, teaching, and intervention
+# Conversation is supervision, teaching, and intervention
 
 Chat inside OpenPresence is not primarily where the Agent's public life occurs.
 
@@ -1564,7 +1564,7 @@ The operator's feedback should help the Agent understand what “being itself”
 
 ---
 
-# 36. Activity is not chat
+# Activity is not chat
 
 Once an Agent is live, the operator needs visibility.
 
@@ -1601,7 +1601,7 @@ OpenPresence should expose **decisions and evidence**, not hidden chains of thou
 
 ---
 
-# 37. Never fabricate success
+# Never fabricate success
 
 A social Agent lives in the real world.
 
@@ -1631,7 +1631,7 @@ This leads to another rule:
 
 ---
 
-# 38. The action ledger is memory for the system, not the mind
+# The action ledger is memory for the system, not the mind
 
 Every significant external action should be traceable.
 
@@ -1663,7 +1663,7 @@ Again:
 
 ---
 
-# 39. Durable systems require idempotency and reconciliation
+# Durable systems require idempotency and reconciliation
 
 A persistent social Agent cannot rely on “the model probably won't do it twice.”
 
@@ -1685,7 +1685,7 @@ This is another form of keeping authority deterministic while cognition remains 
 
 ---
 
-# 40. Open source means users own the mind and the runtime
+# Open source means users own the mind and the runtime
 
 OpenPresence should be meaningfully open source.
 
@@ -1711,7 +1711,7 @@ This aligns with the deeper idea of Presence:
 
 ---
 
-# 41. Extensibility is not optional
+# Extensibility is not optional
 
 Social platforms change.
 
@@ -1742,7 +1742,7 @@ The platform should evolve around social grammar rather than one company's API.
 
 ---
 
-# 42. Quiet software, living presence
+# Quiet software, living presence
 
 The interface should not compete with the Agent.
 
@@ -1774,7 +1774,7 @@ The intelligence should be felt through behavior, not decoration.
 
 ---
 
-# 43. The UI should follow the user's mental model, not the database
+# The UI should follow the user's mental model, not the database
 
 Users think:
 
@@ -1806,7 +1806,7 @@ The UI should translate them back into human experience.
 
 ---
 
-# 44. Blank states are part of the product
+# Blank states are part of the product
 
 A fresh Agent has no history.
 
@@ -1836,7 +1836,7 @@ It is a moment in the life of the Agent.
 
 ---
 
-# 45. Account health is guidance, not identity
+# Account health is guidance, not identity
 
 OpenPresence may observe:
 
@@ -1864,7 +1864,7 @@ Again:
 
 ---
 
-# 46. The product should maximize freedom without making the mind incoherent
+# The product should maximize freedom without making the mind incoherent
 
 Users should have enormous flexibility.
 
@@ -1898,7 +1898,7 @@ Freedom becomes more powerful when the system still makes sense.
 
 ---
 
-# 47. A social Agent should earn the right to act
+# A social Agent should earn the right to act
 
 Autonomy should not mean:
 
@@ -1926,7 +1926,7 @@ Autonomy is quality of judgment, not absence of buttons.
 
 ---
 
-# 48. Rehearsal is part of trust
+# Rehearsal is part of trust
 
 The Playground exists because a user should not have to discover weaknesses publicly.
 
@@ -1954,7 +1954,7 @@ Trust should be earned through observed behavior.
 
 ---
 
-# 49. Results should be evidence, not a magic score
+# Results should be evidence, not a magic score
 
 OpenPresence should avoid fake certainty.
 
@@ -1982,7 +1982,7 @@ Trust comes from evidence, not an unexplained number.
 
 ---
 
-# 50. The Agent should be able to prove the product's promise
+# The Agent should be able to prove the product's promise
 
 The Playground has one particularly important philosophical role:
 
@@ -2014,7 +2014,7 @@ That is more powerful than telling users the system is autonomous.
 
 ---
 
-# 51. Social presence should compound
+# Social presence should compound
 
 A good social Agent should become more useful over time.
 
@@ -2035,7 +2035,7 @@ This is why OpenPresence is designed around persistence rather than isolated gen
 
 ---
 
-# 52. The moat is judgment, not posting
+# The moat is judgment, not posting
 
 Posting to X is an API call.
 
@@ -2087,7 +2087,7 @@ OpenPresence is trying to answer:
 
 ---
 
-# 53. The architecture in one picture
+# The architecture in one picture
 
 ```text
                          AGENT
@@ -2154,7 +2154,7 @@ OpenPresence is trying to answer:
 
 ---
 
-# 54. Canonical OpenPresence principles
+# Canonical OpenPresence principles
 
 These sentences should survive implementation changes.
 
@@ -2319,7 +2319,7 @@ Growth should learn whether attention was spent well, including when the correct
 decision was to stop. Runtime instructions are not social content. Social
 content is not runtime instruction. Neither may silently cross that boundary.
 
-# 56. Operational autonomy and temporal embodiment
+# Operational autonomy and temporal embodiment
 
 The Agent owns its responsibilities. The runtime owns the continuity of its body. Routine failure changes the Agent's circumstances; it does not transfer responsibility to the operator.
 
@@ -2339,7 +2339,7 @@ An uncertain public write is reconciled before retry. When an external handoff i
 
 Recover the capability, then reconsider affected responsibilities. When an embodied route is repaired, held responsibilities are re-evaluated for relevance, expiration, and strategic priority rather than blindly flushed into the world.
 
-# 55. The final idea
+# The final idea
 
 OpenPresence starts from a simple belief:
 
