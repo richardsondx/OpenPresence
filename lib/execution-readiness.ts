@@ -1,5 +1,5 @@
 import type { ChannelAffordance, ChannelId, ExecutionMode, OpenPresenceState, Presence } from "./types";
-import { bridgeExecutionStatus } from "./bridge-contract";
+import { bridgeReadyForExpectedAccount } from "./bridge-contract";
 import { xCreditsExhausted, xNativeWriteUnavailable } from "./x-credits";
 
 export type ExecutionAuthorityMode = ExecutionMode; // "auto" | "review" | "manual" | "off"
@@ -128,7 +128,8 @@ export function evaluateExecutionReadiness(input: {
       (item) =>
         item.presenceId === presence.id &&
         item.state !== "offline" &&
-        bridgeExecutionStatus(item) === "connected" &&
+        presence.browserAccess?.enabled === true &&
+        bridgeReadyForExpectedAccount(item, presence.handle, Date.now(), { affordance: normalizedAffordance }) &&
         (item.capabilities.affordances.includes(normalizedAffordance) || item.capabilities.affordances.includes(input.affordance))
     );
     if (bridge) {
@@ -136,7 +137,7 @@ export function evaluateExecutionReadiness(input: {
     }
   } else {
     const genericBridge = state.bridges?.find(
-      (item) => item.presenceId === presence.id && item.state !== "offline" && bridgeExecutionStatus(item) === "connected"
+      (item) => item.presenceId === presence.id && item.state !== "offline" && bridgeReadyForExpectedAccount(item, presence.handle)
     );
     if (genericBridge) {
       availableRoutes.push("bridge");

@@ -1,3 +1,4 @@
+import { writeBrowserAdapterObservation, writeBridgeIdentity } from "../lib/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyOperation, cloneState, compileExploration, createAgent, finishExplorationSession, finishExplorationSessionInPlace, formXActionIntent, startExplorationSession, startExplorationSessionInPlace } from "../lib/runtime";
 import { listOperationalRuns, readState, writeState, writeState as writeDbState } from "../lib/db";
@@ -5,6 +6,21 @@ import { POST } from "../app/api/state/route";
 import { POST as xManagePost } from "../app/api/x/manage/route";
 import { runLiveExplorationWorker } from "../lib/exploration-worker";
 import { runOperationalSweep } from "../lib/temporal";
+
+// A verified account alone does not prove the current Chrome adapter can act.
+function verifiedBrowserAdapters(accountIdentity: import("../lib/types").Bridge["accountIdentity"], bridgeId?: string) {
+  const adapters = [{ executorId: "openpresence-chrome-test", version: "1.0.0", protocolVersion: 2, probed: true,
+    observedAt: accountIdentity!.observedAt,
+    accountIdentity,
+    capabilities: { channelRead: true, mediaUpload: true, verification: true,
+      affordances: ["post", "reply", "quote", "repost", "like", "follow", "delete"] },
+  }];
+  if (bridgeId) {
+    writeBrowserAdapterObservation(bridgeId, adapters[0]!);
+    writeBridgeIdentity({ bridgeId, executorId: adapters[0]!.executorId, ...accountIdentity! });
+  }
+  return adapters;
+}
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -175,6 +191,7 @@ describe("Presence-scoped Explorations", () => {
     bridge.lastSeenAt = new Date().toISOString();
     bridge.lastHeartbeatAt = bridge.lastSeenAt;
     bridge.accountIdentity = { username: "jenny_ai", status: "verified", observedAt: bridge.lastSeenAt };
+    bridge.browserAdapters = verifiedBrowserAdapters(bridge.accountIdentity, bridge.id);
     state.nativeConnections = [{ id: "native-x-exploration", presenceId, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "builder-presence", username: "jenny_ai", name: "Jenny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     const mirrorId = "mirror-browser-reply-1";
     state.mirrorObjects.unshift({ id: mirrorId, bridgeId: bridge.id, presenceId, channelId: "x", externalRef: { type: "x.post", id: "unrelated-post-1" }, objectType: "post", language: "en", author: { externalRef: { type: "x.user", id: "builder-1" }, displayName: "Builder", handle: "builder" }, content: { text: "We are struggling to deploy persistent agent memory and keep decisions coherent." }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "live", source: "operator", trust: "untrusted_world_content" });
@@ -193,7 +210,7 @@ describe("Presence-scoped Explorations", () => {
   it("makes a public quote available through verified Chrome when native X target rules reject it", () => {
     let state = createAgent(input);
     const presenceId = state.presence!.id;
-    state = applyOperation(state, { type: "setPresence", patch: { connectionMode: "native", execution: { ...state.presence!.execution, quote: "auto" } } });
+    state = applyOperation(state, { type: "setPresence", patch: { browserAccess: { enabled: true }, connectionMode: "native", execution: { ...state.presence!.execution, quote: "auto" } } });
     state.presence!.environment = "live";
     state.presences = state.presences.map((item) => item.id === presenceId ? { ...item, environment: "live" as const, connectionMode: "native" } : item);
     state = applyOperation(state, { type: "createBridge", input: { presenceId, name: "OpenPresence Chrome · Jenny", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["quote"], formats: ["x.quote"], metrics: [] } } });
@@ -202,6 +219,7 @@ describe("Presence-scoped Explorations", () => {
     bridge.lastHeartbeatAt = new Date().toISOString();
     bridge.lastSeenAt = bridge.lastHeartbeatAt;
     bridge.accountIdentity = { username: "jenny_ai", status: "verified", observedAt: bridge.lastHeartbeatAt };
+    bridge.browserAdapters = verifiedBrowserAdapters(bridge.accountIdentity, bridge.id);
     state.nativeConnections = [{ id: "native-x-quote", presenceId, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "jenny", username: "jenny_ai", name: "Jenny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     state.mirrorObjects.unshift({ id: "mirror-public-quote", bridgeId: bridge.id, presenceId, channelId: "x", externalRef: { type: "x.post", id: "public-quote-target" }, objectType: "post", language: "en", author: { externalRef: { type: "x.user", id: "builder" }, displayName: "Builder", handle: "builder" }, content: { text: "A concrete public post about persistent agent memory." }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "live", source: "operator", trust: "untrusted_world_content" });
     const quoted = formXActionIntent(state, { affordance: "x.quote", target: { type: "x.post", id: "public-quote-target" }, text: "The concrete challenge here is keeping memory coherent as decisions accumulate." , origin: { kind: "exploration", refId: "exploration-test" } });

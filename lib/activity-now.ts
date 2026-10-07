@@ -118,7 +118,17 @@ export function deriveActivityNow(state: OpenPresenceState, presenceId: string, 
   const waitingAttentionRun = latest(runs.filter((run) => run.kind === "attention" && run.state === "waiting"), (run) => run.lastProgressAt ?? run.startedAt ?? run.createdAt);
   const activeAssignmentRun = latest((state.assignmentRuns ?? []).filter((run) => run.presenceId === presenceId && ["researching", "selecting", "writing", "delivering"].includes(run.status)), (run) => run.lastProgressAt ?? run.updatedAt);
   const queuedAssignmentRun = latest((state.assignmentRuns ?? []).filter((run) => run.presenceId === presenceId && run.status === "queued"), (run) => run.updatedAt);
-  const pendingDeliveryRun = latest((state.assignmentRuns ?? []).filter((run) => run.presenceId === presenceId && run.status === "delivery_pending"), (run) => run.updatedAt);
+  const pendingDeliveryRun = latest((state.assignmentRuns ?? []).filter((run) => run.presenceId === presenceId
+    && run.status === "delivery_pending"
+    // A legacy AssignmentRun can outlive its execution after verification is
+    // closed. Do not present that empty projection as current waiting work;
+    // the durable execution status is the authority for delivery continuity.
+    && (() => {
+      const executions = state.executions.filter((execution) => execution.presenceId === presenceId
+        && execution.assignmentId === run.assignmentId
+        && (execution.runId === run.id || (!execution.runId && execution.createdAt >= (run.startedAt ?? run.createdAt))));
+      return executions.length === 0 || executions.some((execution) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending", "succeeded"].includes(execution.status));
+    })()), (run) => run.updatedAt);
   const activePursuit = (state.assignmentPursuitWindows ?? []).find((pursuit) => pursuit.presenceId === presenceId
     && pursuit.status === "active"
     && new Date(pursuit.startsAt).getTime() <= now.getTime()

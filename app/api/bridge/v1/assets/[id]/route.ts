@@ -4,6 +4,7 @@ import { BRIDGE_IDENTITY_MAX_AGE_MS, bridgeFromRequest } from "@/lib/bridge";
 import { readBridgeIdentityForExecutor, readStateForBridge } from "@/lib/db";
 import { readAssetBytes } from "@/lib/asset-store";
 import { assetIsEligibleForPresence, authorizeAssetSelection } from "@/lib/asset-library";
+import { verifyExecutionPermit } from "@/lib/publication-security";
 import { detectLibraryMedia } from "@/lib/asset-media";
 import { chromeBrowserBridgeSupportsImageMimeType } from "@/lib/bridge-contract";
 
@@ -39,11 +40,30 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     return NextResponse.json({ error: "The Chrome X Bridge supports PNG, JPEG, and GIF images only." }, { status: 415 });
   }
 
+  const executionId = request.headers.get("x-openpresence-execution-id")?.trim();
+  if (!executionId) return NextResponse.json({ error: "An active approved execution ID is required to retrieve publication media." }, { status: 409 });
+  let exactMediaApproval = false;
+  if (executionId) {
+    const execution = state.executions.find(candidate => candidate.id === executionId && candidate.bridgeId === bridge.id && candidate.presenceId === bridge.presenceId && candidate.environment === "live");
+    const lease = execution?.lease;
+    if (!execution || !lease || !["claimed", "executing"].includes(execution.status) || lease.executorId !== executorId || !(Date.parse(lease.expiresAt) > Date.now())
+      || !execution.publication?.assetIds.includes(asset.id) || !execution.publication.publicExpression?.mediaIds.includes(asset.id)) {
+      return NextResponse.json({ error: "The Asset request does not belong to this executor’s active publication." }, { status: 409 });
+    }
+    try { verifyExecutionPermit(execution); }
+    catch { return NextResponse.json({ error: "The active publication has no valid sealed execution permit." }, { status: 409 }); }
+    const approval = execution.publication.operatorAssetApproval;
+    if (approval?.assetHashes && approval.assetHashes[asset.id] !== (asset.storage?.exactHash ?? asset.checksum)) {
+      return NextResponse.json({ error: "The selected image changed after approval and needs fresh review." }, { status: 409 });
+    }
+    exactMediaApproval = Boolean(approval && approval.assetIds.length === execution.publication.assetIds.length && execution.publication.assetIds.every(assetId => approval.assetIds.includes(assetId)));
+  }
+
   try {
     // Repeat the same readiness and publication authorization used at claim
     // time. A Bridge cannot turn an observed or unresolved asset into a live
     // upload by guessing its ID.
-    authorizeAssetSelection(state, [asset.id], { presenceId: bridge.presenceId, requireReady: true });
+    authorizeAssetSelection(state, [asset.id], { presenceId: bridge.presenceId, requireReady: !exactMediaApproval, allowReviewable: exactMediaApproval });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "The selected Asset is not authorized for publication." }, { status: 409 });
   }

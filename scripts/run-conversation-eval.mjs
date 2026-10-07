@@ -34,6 +34,7 @@ const env = {
 };
 const caseFilter = option("--case", "");
 const surfaceFilter = option("--surface", "");
+if (surfaceFilter === "v2") env.OPENPRESENCE_V2_EVAL = "1";
 if (caseFilter) env.OPENPRESENCE_PROMPT_EVAL_CASE_FILTER = caseFilter;
 if (surfaceFilter) env.OPENPRESENCE_PROMPT_EVAL_SURFACE_FILTER = surfaceFilter;
 

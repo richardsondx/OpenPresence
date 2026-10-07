@@ -129,9 +129,9 @@ describe("Chrome extension composer and execution helpers", () => {
       ok: true,
       asset: { assetId: "asset-1", mimeType: "image/png", name: "asset-1.png", data: Buffer.from("png-bytes").toString("base64") },
     });
-    const assets = await mockWindow.OpenPresenceExecution.assetsForExecution({ publication: { assetIds: ["asset-1", "asset-1"] } });
+    const assets = await mockWindow.OpenPresenceExecution.assetsForExecution({ id: "approved-execution", publication: { assetIds: ["asset-1", "asset-1"] } });
     expect(mockWindow.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
-    expect(mockWindow.chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: "OPENPRESENCE_FETCH_ASSET", assetId: "asset-1" });
+    expect(mockWindow.chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: "OPENPRESENCE_FETCH_ASSET", assetId: "asset-1", executionId: "approved-execution" });
     expect(assets).toHaveLength(1);
     expect(assets[0].assetId).toBe("asset-1");
     expect(assets[0].file).toMatchObject({ name: "asset-1.png", type: "image/png" });
@@ -142,7 +142,14 @@ describe("Chrome extension composer and execution helpers", () => {
       ok: true,
       asset: { assetId: "asset-1", mimeType: "image/webp", name: "asset-1.webp", data: Buffer.from("webp-bytes").toString("base64") },
     });
-    await expect(mockWindow.OpenPresenceExecution.assetsForExecution({ publication: { assetIds: ["asset-1"] } })).rejects.toThrow("cannot upload image/webp");
+    await expect(mockWindow.OpenPresenceExecution.assetsForExecution({ id: "approved-execution", publication: { assetIds: ["asset-1"] } })).rejects.toThrow("cannot upload image/webp");
+  });
+
+  it("reports a stale or disconnected extension with a concrete recovery action", async () => {
+    mockWindow.chrome.runtime.sendMessage.mockResolvedValue({ ok: true });
+    await expect(mockWindow.OpenPresenceExecution.assetsForExecution({ id: "approved-execution", publication: { assetIds: ["asset-1"] } })).rejects.toThrow("Reload the OpenPresence extension");
+    mockWindow.chrome.runtime.sendMessage.mockRejectedValue(new Error("Extension context invalidated"));
+    await expect(mockWindow.OpenPresenceExecution.assetsForExecution({ id: "approved-execution", publication: { assetIds: ["asset-1"] } })).rejects.toThrow("Extension context invalidated");
   });
 
   it("sets the X media input before any public submit", async () => {
@@ -154,7 +161,7 @@ describe("Chrome extension composer and execution helpers", () => {
     const submit = createElement("button", { "data-testid": "tweetButton" });
     submit.matches = (selector: string) => selector.includes("tweetButton");
     scope.querySelector = (selector: string) => selector.includes('input[type="file"]') ? input : null;
-    scope.querySelectorAll = (selector: string) => selector.includes('input[type="file"]') ? [input] : selector.includes("mediaPreview") ? [preview] : selector.includes("Remove image") ? [remove] : selector.includes("button") ? [submit] : [];
+    scope.querySelectorAll = (selector: string) => selector.includes('input[type="file"]') ? [input] : !input.files?.length ? [] : selector.includes("mediaPreview") ? [preview] : selector.includes("Remove image") ? [remove] : selector.includes("button") ? [submit] : [];
     const composer = createElement("div", { "data-testid": "tweetTextarea_0" });
     composer.parentElement = scope;
     const file = new mockWindow.File([new Uint8Array([1, 2, 3])], "asset.png", { type: "image/png" });
@@ -174,7 +181,7 @@ describe("Chrome extension composer and execution helpers", () => {
     const submit = createElement("button", { "data-testid": "tweetButton" });
     submit.matches = (selector: string) => selector.includes("tweetButton");
     scope.querySelector = (selector: string) => selector.includes('input[type="file"]') ? input : null;
-    scope.querySelectorAll = (selector: string) => selector.includes('input[type="file"]') ? [input] : selector.includes("mediaPreview") ? [previewWrapper, previewChild] : selector.includes("Remove image") ? [remove] : selector.includes("button") ? [submit] : [];
+    scope.querySelectorAll = (selector: string) => selector.includes('input[type="file"]') ? [input] : !input.files?.length ? [] : selector.includes("mediaPreview") ? [previewWrapper, previewChild] : selector.includes("Remove image") ? [remove] : selector.includes("button") ? [submit] : [];
     const composer = createElement("div", { "data-testid": "tweetTextarea_0" });
     composer.parentElement = scope;
     const files = [
@@ -313,7 +320,7 @@ describe("Chrome extension composer and execution helpers", () => {
     expect(channelSource).toContain('window.location.href = "https://x.com/compose/post"');
     expect(channelSource).toContain('const composerUrl = window.location.pathname.includes("/compose/post")');
     expect(backgroundSource).toContain('const candidateExternalRef = result.publicProof?.externalRef');
-    expect(backgroundSource).toContain('candidateExternalRef, domProof: result.publicProof, observedAt');
+    expect(backgroundSource).toContain('candidateExternalRef, domProof: result.publicProof, browserEvidence, observedAt');
     expect(backgroundSource).toContain('affordance === "follow"');
     expect(backgroundSource).toContain('affordance === "post"');
     expect(backgroundSource).toContain('const composerIsOpen = affordance === "post"');

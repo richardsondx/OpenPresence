@@ -1,3 +1,4 @@
+import { chatExecutionContinuationCandidates } from "./chat-execution-progress";
 import { assignmentWindowState, expireAssignmentWindows } from "./assignment-timeframe";
 import {
   claimOperationalRunLease,
@@ -19,8 +20,10 @@ import {
   writeState,
 } from "./db";
 import { attentionRequestFromWake, attentionRunAcceptsSignal, mergeAttentionRequests, requestAttention } from "./attention-coordinator";
+import { chatRecoveryReady } from "./chat-tool-recovery";
+import { parseOperatorChatStep } from "./operator-chat-harness";
 import { settleAttentionResponsibility } from "./attention-responsibility";
-import { bridgeExecutionStatus } from "./bridge-contract";
+import { bridgeExecutionStatus, bridgeReadyForExpectedAccount } from "./bridge-contract";
 import { assignmentPursuitHasHardResourceCapacity, assignmentPursuitUsage, recordRuntimeEvent, scheduledAssignmentIsDue } from "./runtime";
 import { assignmentRunBlocksNewWork, assignmentRunIsActive, isAutonomousPreWriteDeliveryFailure, reconcileLiveAssignmentRuns } from "./live-assignment-run";
 import { reconcileOrphanedAttentionEpisodes } from "./attention-episodes";
@@ -297,12 +300,14 @@ export function closeStaleBridgeExecutions(source: OpenPresenceState, now = new 
   const nowMs = now.getTime();
   const pendingStatuses = new Set<Execution["status"]>(["awaiting-connector", "queued"]);
   const bridges = new Map((source.bridges ?? []).map((bridge) => [bridge.id, bridge]));
+  const presences = new Map((source.presences ?? []).map((presence) => [presence.id, presence]));
   const affectedAttentionRunIds = new Set<string>();
   let closed = 0;
   for (const execution of source.executions ?? []) {
     if (!execution.bridgeId || !pendingStatuses.has(execution.status)) continue;
     const bridge = bridges.get(execution.bridgeId);
-    if (!bridge || bridgeExecutionStatus(bridge, nowMs) === "connected") continue;
+    const presence = presences.get(execution.presenceId) ?? (source.presence?.id === execution.presenceId ? source.presence : undefined);
+    if (!bridge || presence && bridgeReadyForExpectedAccount(bridge, presence.handle, nowMs)) continue;
     const formedAt = new Date(execution.updatedAt ?? execution.createdAt).getTime();
     if (!Number.isFinite(formedAt) || nowMs - formedAt < claimWindowMs) continue;
     execution.status = "failed";
@@ -380,7 +385,7 @@ export function closeNonRetryableVerificationExecutions(source: OpenPresenceStat
     }
     if (execution.runId) affectedAttentionRunIds.add(execution.runId);
     cancelScheduledWake(`wake_verification_${execution.id}`);
-    recordRuntimeEvent(source, execution.presenceId, "Unverified delivery closed", "The channel marked this outcome non-retryable. OpenPresence closed the stale verifier without counting a public action as sent.", "warning", { executionId: execution.id, intentId: execution.socialIntentId });
+    Object.assign(source, recordRuntimeEvent(source, execution.presenceId, "Unverified delivery closed", "The channel marked this outcome non-retryable. OpenPresence closed the stale verifier without counting a public action as sent.", "warning", { executionId: execution.id, intentId: execution.socialIntentId }));
     closed += 1;
   }
   for (const runId of affectedAttentionRunIds) {
@@ -393,6 +398,33 @@ export function closeNonRetryableVerificationExecutions(source: OpenPresenceStat
   return closed;
 }
 
+/**
+ * Bound the lifetime of an ambiguous browser write. The browser and native
+ * verifier may both be unavailable, but a verification-pending execution
+ * must not keep an Assignment or the Activity surface in a permanent
+ * "waiting" state. Use creation age rather than updatedAt because each
+ * read-only retry refreshes the latter.
+ */
+export function markStaleBridgeVerificationsNonRetryable(source: OpenPresenceState, now = new Date(), maxAgeMs = 10 * 60_000): number {
+  const timestamp = now.toISOString();
+  let marked = 0;
+  for (const execution of source.executions ?? []) {
+    if (execution.connector !== "bridge" || execution.status !== "verification-pending" || execution.failure?.retryable === false) continue;
+    const createdAt = new Date(execution.createdAt).getTime();
+    if (!Number.isFinite(createdAt) || now.getTime() - createdAt < maxAgeMs) continue;
+    execution.failure = {
+      ...execution.failure,
+      code: execution.failure?.code ?? "X_API_VERIFICATION_TIMEOUT",
+      message: execution.failure?.message ?? "The browser reported submission, but OpenPresence could not prove the public X outcome within the bounded verification window.",
+      retryable: false,
+      reviewNote: "The verification window expired without authoritative evidence. Inspect X before attempting a new action; no public success was inferred.",
+    };
+    execution.updatedAt = timestamp;
+    marked += 1;
+  }
+  return marked;
+}
+
 // ============================================================================
 // Stage-Specific Expected Durations (Seconds)
 // ============================================================================
@@ -402,6 +434,7 @@ export const STAGE_EXPECTED_DURATIONS_SECONDS: Record<string, number> = {
   "browser.acquire_tab": 30,
   "browser.navigate": 45,
   "browser.inspect_dom": 45,
+  "browser.read": 75,
   "browser.composer_input": 60,
   "browser.submit": 45,
   "browser.verify_sent": 60,
@@ -420,6 +453,10 @@ export const STAGE_EXPECTED_DURATIONS_SECONDS: Record<string, number> = {
   "discovery.triage": 120,
   "discovery.decide": 120,
   "operator_chat.generating": 90,
+  "operator_chat.search_web": 90,
+  "operator_chat.read_web": 90,
+  "operator_chat.refresh_channel": 90,
+  "operator_chat.search_posts": 90,
   "woken_from_observation": 240,
   "woken_from_attention": 240,
   "woken_from_self_directed_discovery": 240,
@@ -571,6 +608,15 @@ export function scheduleProviderResetWake(
   presenceId?: string,
   payload?: Record<string, JsonValue>,
 ): ScheduledWake {
+  // Provider failures can be observed more than once while a run is settling.
+  // Keep one durable wake per waiting run; otherwise every sweep can add
+  // another identical wake and make the queue look busy without advancing.
+  const existing = listScheduledWakes(presenceId).find((wake) =>
+    wake.state === "pending"
+    && wake.kind === "provider_reset"
+    && wake.targetId === targetId,
+  );
+  if (existing) return existing;
   return scheduleWake("provider_reset", resetAtIso, presenceId, targetId, payload);
 }
 
@@ -726,6 +772,26 @@ export function isLiveTemporalPresence(presence: Pick<Presence, "status" | "envi
 }
 
 /**
+ * A waiting attention run is still live work when its own retry timer or a
+ * durable provider-reset wake will resume it. The recurring scheduler must
+ * not create a second attention pass around that waiting responsibility.
+ */
+export function attentionRunHasDurableRecoveryWake(
+  run: Pick<OperationalRun, "id" | "kind" | "state" | "nextWakeAt">,
+  wakes: ScheduledWake[],
+  now = new Date(),
+) {
+  if (run.kind !== "attention" || run.state !== "waiting") return false;
+  const nextWakeMs = run.nextWakeAt ? Date.parse(run.nextWakeAt) : NaN;
+  if (Number.isFinite(nextWakeMs) && nextWakeMs > now.getTime()) return true;
+  return wakes.some((wake) =>
+    wake.state === "pending"
+    && wake.kind === "provider_reset"
+    && wake.targetId === run.id,
+  );
+}
+
+/**
  * Whether an operator incident must stop new cognition for the Presence.
  *
  * Duplicate public outcomes are target-scoped delivery incidents. The
@@ -738,6 +804,29 @@ export function incidentBlocksAutonomousAttention(
 ) {
   if (incident.state !== "needs_operator" || !incident.operatorActionRequired) return false;
   return incident.rootCauseKey !== "runtime.duplicate_public_outcome";
+}
+
+/**
+ * A native connector incident should not freeze a Presence when an already
+ * verified browser route can continue observation and delivery. The native
+ * incident remains durable and visible; this only keeps it from becoming a
+ * Presence-wide cognition gate while another authorized route is healthy.
+ */
+export function incidentBlocksPresenceAttention(
+  incident: Pick<RecoveryIncident, "state" | "operatorActionRequired" | "rootCauseKey" | "safeSummary">,
+  options: { browserRouteAvailable?: boolean } = {},
+) {
+  if (!incidentBlocksAutonomousAttention(incident)) return false;
+  const isNativeXIncident = incident.rootCauseKey.startsWith("native_x.")
+    || incident.rootCauseKey === "runtime.credits_exhausted" && /\bX API\b/i.test(incident.safeSummary);
+  // A browser read timeout is a bounded connector delay, not proof that the
+  // model/runtime is unavailable. When the verified Chrome route is still
+  // online, let the next scheduled retry proceed and keep the timeout visible
+  // as recovery evidence instead of freezing the whole Presence.
+  const isBrowserReadIncident = /browser[._ ]read|browser read deadline/i.test(incident.safeSummary);
+  if (options.browserRouteAvailable && isBrowserReadIncident) return false;
+  if (options.browserRouteAvailable && isNativeXIncident) return false;
+  return true;
 }
 
 export function recoverInterruptedOperatorChat(run: OperationalRun, now: Date) {
@@ -756,14 +845,6 @@ export function recoverInterruptedOperatorChat(run: OperationalRun, now: Date) {
 export function runOperationalSweep(now = new Date()): SweepResult {
   const nowIso = now.toISOString();
 
-  // A Presence with an unresolved operator gate must not keep generating
-  // autonomous attention work. Without this check, every scheduler sweep
-  // can create another self-directed run while the same provider/runtime
-  // incident is waiting for repair, amplifying memory and provider usage.
-  const operatorGatedIncidents = listRecoveryIncidents(undefined, "needs_operator")
-    .filter(incidentBlocksAutonomousAttention);
-  const presenceRequiresOperator = (presenceId: string) => operatorGatedIncidents.some((incident) => !incident.presenceId || incident.presenceId === presenceId);
-
   // Repair the migration gap where self-directed attention had a persisted
   // nextEligibleAt but no durable wake. Without this repair, Auto can be
   // enabled forever while the temporal engine has nothing to dispatch.
@@ -774,6 +855,24 @@ export function runOperationalSweep(now = new Date()): SweepResult {
   // preflights are a browser-facing projection and recomputing them here on
   // every five-second sweep creates avoidable allocation and GC pressure.
   const stateView = readStateViewForContext({}, { skipAssignmentPreflights: true });
+  // A Presence with an unresolved operator gate must not keep generating
+  // autonomous attention work. Connector-specific native X failures are the
+  // exception when the verified Chrome route is alive: the incident stays
+  // visible for native recovery, while browser-backed cognition can continue.
+  const operatorGatedIncidents = listRecoveryIncidents(undefined, "needs_operator")
+    .filter(incidentBlocksAutonomousAttention);
+  const hasConnectedBrowserRoute = (presenceId: string) => {
+    const presence = stateView.presences.find((item) => item.id === presenceId);
+    return Boolean(presence?.browserAccess?.enabled === true && stateView.bridges.some((bridge) =>
+      bridge.presenceId === presenceId
+      && bridge.name.startsWith("OpenPresence Chrome")
+      && bridgeReadyForExpectedAccount(bridge, presence.handle, now.getTime())));
+  };
+  const presenceRequiresOperator = (presenceId: string) => operatorGatedIncidents.some((incident) => {
+    const scopedToPresence = !incident.presenceId || incident.presenceId === presenceId;
+    if (!scopedToPresence) return false;
+    return incidentBlocksPresenceAttention(incident, { browserRouteAvailable: hasConnectedBrowserRoute(presenceId) });
+  });
   const preDispatchStatuses = new Set<Execution["status"]>(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"]);
   const hasExpiredQueuedExecution = (stateView.executions ?? []).some((execution) => {
     if (!preDispatchStatuses.has(execution.status)) return false;
@@ -789,9 +888,21 @@ export function runOperationalSweep(now = new Date()): SweepResult {
     return Number.isFinite(formedAt) && now.getTime() - formedAt >= 120_000;
   });
   const hasNonRetryableVerification = (stateView.executions ?? []).some((execution) => execution.status === "verification-pending" && execution.failure?.retryable === false);
+  const hasStaleBridgeVerification = (stateView.executions ?? []).some((execution) => {
+    if (execution.connector !== "bridge" || execution.status !== "verification-pending" || execution.failure?.retryable === false) return false;
+    const createdAt = new Date(execution.createdAt).getTime();
+    return Number.isFinite(createdAt) && now.getTime() - createdAt >= 10 * 60_000;
+  });
   const hasAutonomousPreWriteFailure = (stateView.assignmentRuns ?? []).some((run) => {
     const execution = (stateView.executions ?? []).find((item) => item.assignmentId === run.assignmentId && item.presenceId === run.presenceId && (item.runId === run.id || (!item.runId && item.createdAt >= (run.startedAt ?? run.createdAt))));
     return Boolean(execution && isAutonomousPreWriteDeliveryFailure(execution));
+  });
+  const hasStaleAssignmentDeliveryRun = (stateView.assignmentRuns ?? []).some((run) => {
+    if (run.status !== "delivery_pending") return false;
+    const linked = (stateView.executions ?? []).filter((execution) => execution.assignmentId === run.assignmentId
+      && execution.presenceId === run.presenceId
+      && (execution.runId === run.id || (!execution.runId && execution.createdAt >= (run.startedAt ?? run.createdAt))));
+    return !linked.some((execution) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending", "succeeded"].includes(execution.status));
   });
   const hasOrphanedAttentionEpisode = (stateView.attentionEpisodes ?? []).some((episode) => {
     if (episode.status !== "running") return false;
@@ -802,17 +913,18 @@ export function runOperationalSweep(now = new Date()): SweepResult {
       && (run.attentionEpisodeId === episode.id || episode.runIds.includes(run.id)));
   });
   const hasEndedAssignmentWindow = stateView.assignments.some((assignment) => !["completed", "completed_with_adaptation", "cancelled", "expired_incomplete"].includes(assignment.status) && assignmentWindowState(assignment, now.getTime()) === "ended");
-  const state = hasEndedAssignmentWindow || hasExpiredQueuedExecution || hasStaleBridgeExecution || hasNonRetryableVerification || hasAutonomousPreWriteFailure || hasOrphanedAttentionEpisode ? readState() : stateView;
+  const state = hasEndedAssignmentWindow || hasExpiredQueuedExecution || hasStaleBridgeExecution || hasNonRetryableVerification || hasStaleBridgeVerification || hasAutonomousPreWriteFailure || hasStaleAssignmentDeliveryRun || hasOrphanedAttentionEpisode ? readState() : stateView;
   // A disconnected Bridge cannot perform claim-time expiry. Close stale
   // pre-dispatch intents here so the queue has a bounded lifetime and never
   // presents an undeliverable action as permanently in flight.
   const expiredQueuedExecutions = hasExpiredQueuedExecution ? expireQueuedDeliveryWindows(state, now) : 0;
   const staleBridgeExecutions = hasStaleBridgeExecution ? closeStaleBridgeExecutions(state, now) : 0;
-  const closedNonRetryableVerifications = hasNonRetryableVerification ? closeNonRetryableVerificationExecutions(state, now) : 0;
+  if (hasStaleBridgeVerification) markStaleBridgeVerificationsNonRetryable(state, now);
+  const closedNonRetryableVerifications = hasNonRetryableVerification || hasStaleBridgeVerification ? closeNonRetryableVerificationExecutions(state, now) : 0;
   const repairedAttentionEpisodes = hasOrphanedAttentionEpisode ? reconcileOrphanedAttentionEpisodes(state, now) : 0;
   const expiredAssignmentWindows = hasEndedAssignmentWindow ? expireAssignmentWindows(state, now.getTime()) : 0;
   const pausedExhaustedPursuits = pauseExhaustedAssignmentPursuits(state, now);
-  if (expiredAssignmentWindows > 0 || hasAutonomousPreWriteFailure || expiredQueuedExecutions > 0 || staleBridgeExecutions > 0 || closedNonRetryableVerifications > 0 || repairedAttentionEpisodes > 0 || pausedExhaustedPursuits > 0) {
+  if (expiredAssignmentWindows > 0 || hasAutonomousPreWriteFailure || hasStaleAssignmentDeliveryRun || expiredQueuedExecutions > 0 || staleBridgeExecutions > 0 || closedNonRetryableVerifications > 0 || repairedAttentionEpisodes > 0 || pausedExhaustedPursuits > 0) {
     reconcileLiveAssignmentRuns(state, now.getTime());
     writeState(state, { advanceWorkspaceRevision: false });
   }
@@ -844,9 +956,14 @@ export function runOperationalSweep(now = new Date()): SweepResult {
     }
     if (presenceRequiresOperator(presence.id)) continue;
     const nextEligibleAt = presence.selfDirectedAttention?.nextEligibleAt;
-    const hasPendingAttentionWake = listScheduledWakes(presence.id).some((wake) => wake.state === "pending" && (wake.kind === "attention" || wake.kind === "self_directed_discovery"));
-    const hasAttentionRun = listOperationalRuns(presence.id, ["queued", "running", "recovering", "delivery_uncertain", "reconciling"])
+    const presenceWakes = listScheduledWakes(presence.id);
+    const hasPendingAttentionWake = presenceWakes.some((wake) => wake.state === "pending" && (wake.kind === "attention" || wake.kind === "self_directed_discovery"));
+    const presenceRuns = listOperationalRuns(presence.id);
+    const hasAttentionRun = presenceRuns
+      .filter((run) => ["queued", "running", "recovering", "delivery_uncertain", "reconciling"].includes(run.state))
       .some((run) => run.kind === "attention");
+    const hasWaitingAttentionRecovery = presenceRuns
+      .some((run) => attentionRunHasDurableRecoveryWake(run, presenceWakes, now));
     const planCandidates = state.publishingPlans.filter((plan) => plan.presenceId === presence.id && plan.environment === (presence.environment === "sandbox" ? "sandbox" : "live") && plan.status !== "superseded");
     const activePlan = planCandidates.filter((plan) => plan.status === "active").sort((left, right) => right.revision - left.revision)[0];
     const planDue = Boolean(activePlan && ((activePlan.nextReassessmentAt && new Date(activePlan.nextReassessmentAt).getTime() <= now.getTime()) || (activePlan.horizonEnd && new Date(activePlan.horizonEnd).getTime() <= now.getTime())));
@@ -855,7 +972,7 @@ export function runOperationalSweep(now = new Date()): SweepResult {
       // Plan maintenance is due independently of the self-directed cadence.
       // Move the shared attention wake to now even when discovery is cooling
       // down, so a visible "Due now" state cannot wait behind that cooldown.
-      if (!hasAttentionRun) requestAttention(presence.id, "self_directed", nowIso, "broad");
+      if (!hasAttentionRun && !hasWaitingAttentionRecovery) requestAttention(presence.id, "self_directed", nowIso, "broad");
       continue;
     }
     const explorationDue = state.explorations.some((exploration) => exploration.presenceId === presence.id
@@ -864,21 +981,21 @@ export function runOperationalSweep(now = new Date()): SweepResult {
     const hasBroadAttentionRun = listOperationalRuns(presence.id, ["queued", "running", "recovering", "delivery_uncertain", "reconciling"])
       .some((run) => run.kind === "attention" && run.attention?.scope === "broad");
     if (growthReviewNeed) {
-      if (!hasBroadAttentionRun) requestAttention(presence.id, "self_directed", nowIso, "broad");
+      if (!hasBroadAttentionRun && !hasWaitingAttentionRecovery) requestAttention(presence.id, "self_directed", nowIso, "broad");
       continue;
     }
     if (explorationDue) {
       // Explorations are a first-class durable source of attention. They must
       // not wait behind the Presence-wide self-directed cooldown, and an
       // observe_inbound run must not suppress this broad work.
-      if (!hasBroadAttentionRun) requestAttention(presence.id, "self_directed", nowIso, "broad");
+      if (!hasBroadAttentionRun && !hasWaitingAttentionRecovery) requestAttention(presence.id, "self_directed", nowIso, "broad");
       continue;
     }
     if (nextEligibleAt && new Date(nextEligibleAt).getTime() > now.getTime()) {
-      if (!hasPendingAttentionWake && !hasAttentionRun) requestAttention(presence.id, "self_directed", nextEligibleAt, "broad");
+      if (!hasPendingAttentionWake && !hasAttentionRun && !hasWaitingAttentionRecovery) requestAttention(presence.id, "self_directed", nextEligibleAt, "broad");
       continue;
     }
-    if (!hasPendingAttentionWake && !hasAttentionRun) requestAttention(presence.id, "self_directed", nowIso, "broad");
+    if (!hasPendingAttentionWake && !hasAttentionRun && !hasWaitingAttentionRecovery) requestAttention(presence.id, "self_directed", nowIso, "broad");
   }
 
   // 1. Reclaim expired leases
@@ -975,6 +1092,33 @@ export function runOperationalSweep(now = new Date()): SweepResult {
   // neither active nor attached to a pending wake and the health panel stays
   // in RECOVERING forever. Dispatch only eligible queued work; the durable
   // lease remains the final duplicate-work guard.
+  // A user-action wait does not occupy Chat's FIFO. Rejoin it only when the
+  // precise missing capability is observed ready, without a retry chore.
+  for (const run of listOperationalRuns(undefined, ["blocked"])) {
+    if (run.kind !== "operator_chat" || run.stage !== "waiting.user_action" || typeof run.metadata?.recoveryStep !== "string") continue;
+    try {
+      const step = parseOperatorChatStep(run.metadata.recoveryStep);
+      const context = readStateViewForContext({ presenceId: run.presenceId }, { skipAssignmentPreflights: true });
+      if (!chatRecoveryReady(context, run.presenceId, step)) continue;
+      run.state = "queued";
+      run.stage = "operator_chat.queued";
+      run.retryReason = "Access is ready; continuing the saved request.";
+      const messageId = run.metadata?.operatorMessageId;
+      const failureReceiptStart = context.operatorConversations?.flatMap((thread) => thread.messages).filter((message) => message.role === "system" && message.replyToMessageId === messageId).length ?? 0;
+      run.metadata = { ...run.metadata, failureReceiptStart, pendingUserActionStep: null, pendingUserActionMessage: null };
+      run.lastProgressAt = nowIso;
+      delete run.blockedReason;
+      upsertOperationalRun(run);
+    } catch { /* Invalid legacy recovery metadata never dispatches a tool. */ }
+  }
+  // Late connector failures rejoin the same persisted Chat run. The ordinary
+  // queue and lease remain the only dispatch path across process restarts.
+  const lateFailureRuns = (stateView.executions ?? []).filter(execution => execution.status === "failed" && execution.runId
+    && ["ASSET_UPLOAD_FAILED", "UNSUPPORTED_ASSET", "BROWSER_CONNECTOR_UNAVAILABLE", "COMPOSER_INPUT_FAILED", "COMPOSER_UNAVAILABLE", "ACCOUNT_NOT_READY", "ACCOUNT_MISMATCH"].includes(execution.failure?.code ?? ""))
+    .slice(0, 60).flatMap(execution => { const run = getOperationalRun(execution.runId!); return run?.kind === "operator_chat" && ["succeeded", "failed"].includes(run.state) ? [run] : []; });
+  if (lateFailureRuns.length) {
+    for (const continuation of chatExecutionContinuationCandidates({ ...stateView, operationalRuns: lateFailureRuns }, nowIso)) upsertOperationalRun(continuation);
+  }
   for (const run of listOperationalRuns(undefined, ["queued"])) {
     if (run.kind === "attention" && presenceRequiresOperator(run.presenceId)) continue;
     if (run.eligibleAt && new Date(run.eligibleAt).getTime() > now.getTime()) continue;

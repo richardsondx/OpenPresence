@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { AssignmentRunStatus, AttentionEpisode, OpenPresenceState, OperatorConversation, OperatorNudge, PerceptionUncertainty, PresenceChatAttachment, SandboxAssetInput } from "./types";
+import { deriveActivityNow } from "./activity-now";
 import { assignmentPursuitVerifiedCounts } from "./runtime";
-import { assetIsEligibleForPresence, effectiveAssetObservation, ingestLibraryImages } from "./asset-library";
+import { assetIsEligibleForPresence, assetIsAvailableForPublication, assetSelectionFailure, assetPostingUnavailableUntil, liveAssetReuseReason, effectiveAssetObservation, ingestLibraryImages } from "./asset-library";
 import { detectLibraryMedia } from "./asset-media";
 import { putAssetBytes } from "./asset-store";
 import { createUninterpretedPerception } from "./perception";
@@ -25,6 +26,16 @@ function decodeOperatorDataUrl(dataUrl: string, name: string) {
   const bytes = Buffer.from(match[2]!, "base64");
   if (!bytes.length) throw new Error(`${name} is an empty media attachment.`);
   return { bytes, mimeType: match[1]! };
+}
+
+/** Refresh at decision time: private attachment history never grants posting availability. */
+export function projectOperatorChatAssetAvailability(state: OpenPresenceState, presenceId: string, assetId: string) {
+  const asset = state.assets.find(item => item.id === assetId);
+  if (!asset || !assetIsEligibleForPresence(state, asset, presenceId)) return { available: false, reason: "This media is not available to this Presence." };
+  const presence = state.presences.find(item => item.id === presenceId);
+  const reason = assetSelectionFailure(state, assetId, { presenceId, requireReady: false })
+    ?? (presence?.environment === "live" ? liveAssetReuseReason(state, presenceId, [assetId]) : undefined);
+  return { available: assetIsAvailableForPublication(state, asset, presenceId), reason, unavailableUntil: assetPostingUnavailableUntil(state, asset, presenceId) };
 }
 
 /**
@@ -154,6 +165,48 @@ export function operatorWorkspaceStatusReply(source: OpenPresenceState, presence
   if (/\b(?:stuck|blocked)\b/.test(normalized) || (asksNow && asksNext)) return `${nowSummary} ${nextSummary} ${blockedSummary}`;
   if (asksNext) return `${nowSummary} ${nextSummary}`;
   return `${nowSummary} ${blockedSummary}`;
+}
+
+/**
+ * Resolve simple runtime-status questions without spending a model call.
+ * Chat is private control-plane work: an X/API incident may explain why a
+ * Presence cannot read or publish, but it must not prevent the operator from
+ * asking what the runtime is doing.
+ */
+export function operatorRuntimeStatusReply(source: OpenPresenceState, presenceId: string, content: string, at = new Date()) {
+  const normalized = content.toLowerCase().replace(/[’]/g, "'").replace(/\s+/g, " ").trim();
+  // URLs such as /status/123 are evidence references, not status questions.
+  const questionText = normalized.replace(/https?:\/\/\S+/g, " ").replace(/\s+/g, " ").trim();
+  const asksStatus = /\b(?:are you|is it|what(?:'s| is)|how(?:'s| is)|can you tell me|status|progress)\b/.test(questionText)
+    && /\b(?:stuck|blocked|going on|happening|doing|working|progress|status)\b/.test(questionText);
+  if (!asksStatus) return undefined;
+
+  const activity = deriveActivityNow(source, presenceId, at);
+  const providerIncident = (source.recoveryIncidents ?? [])
+    .filter((incident) => incident.presenceId === presenceId && incident.rootCauseKey.startsWith("model_provider.") && incident.state !== "resolved")
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  const channelIncident = (source.recoveryIncidents ?? [])
+    .filter((incident) => incident.presenceId === presenceId
+      && incident.state !== "resolved"
+      && (incident.rootCauseKey.startsWith("native_x.") || incident.rootCauseKey === "runtime.credits_exhausted"))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+
+  const providerDetail = providerIncident
+    ? `The selected model provider is the current blocker: ${providerIncident.safeSummary}`
+    : undefined;
+  const channelDetail = channelIncident
+    ? `X access is a separate channel issue: ${channelIncident.safeSummary}`
+    : undefined;
+
+  if (activity.state === "working" || activity.state === "recovering" || activity.state === "stuck") {
+    const condition = activity.state === "stuck" ? "The current pass has exceeded its expected stage time" : "A live attention pass is running";
+    const details = [providerDetail, channelDetail].filter(Boolean).join(" ");
+    return `${condition}: ${activity.title.toLowerCase()}. ${details || activity.detail} Chat is separate from X delivery, so this status check does not require X API credits.`;
+  }
+  if (providerDetail || channelDetail) {
+    return `${providerDetail ?? "The private Chat runtime is available."} ${channelDetail ?? ""} No public action is being counted as complete.`.replace(/\s+/g, " ").trim();
+  }
+  return `Nothing is currently stuck. ${activity.detail}`;
 }
 
 /** Answer burst status from durable state, without asking the model to infer it. */
@@ -294,6 +347,7 @@ export function createOperatorNudge(source: OpenPresenceState, input: { presence
     return {
       id: `operator_attachment_${randomUUID()}`,
       existingAssetId: item.existingAssetId,
+      publicationAvailability: existingAsset ? projectOperatorChatAssetAvailability(state, presence.id, existingAsset.id) : undefined,
       name: item.name,
       kind: item.kind,
       mimeType: item.mimeType ?? existingAsset?.storage?.mimeType ?? existingAsset?.mimeType,

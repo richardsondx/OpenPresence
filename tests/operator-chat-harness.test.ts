@@ -1,4 +1,5 @@
 import { saveNativeXCredentials, upsertNativeXConnection } from "../lib/x";
+import { POST as statePost } from "../app/api/state/route";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateAgentReply, isAiRateLimitError, promptFor } from "../lib/ai";
@@ -7,9 +8,10 @@ import { getOperationalRun, readStateSnapshotForContext, resolvedDbPath, savePro
 import { legacyOperatorChatFailureMessage, operatorChatFailureMessage } from "../lib/chat-activity-presentation";
 import { parseOperatorChatStep } from "../lib/operator-chat-harness";
 import { recentChatItems } from "../lib/operator-chat-history";
-import { createOperatorNudge, linkOperatorChatAssignment, recordOperatorConversationMessage, settleNudgeFromAssignment, startQueuedNudge } from "../lib/operator-chat";
+import { createOperatorNudge, linkOperatorChatAssignment, operatorRuntimeStatusReply, recordOperatorConversationMessage, settleNudgeFromAssignment, startQueuedNudge } from "../lib/operator-chat";
 import { applyOperation, createAgent, normalizeState, startPlaygroundSession } from "../lib/runtime";
-import { repairMissingOperatorNudgeWakes, recoverInterruptedOperatorChat, queuedLiveAssignmentRunsWithoutWorkers } from "../lib/temporal";
+import { recordOperationalFailure } from "../lib/incident-engine";
+import { runOperationalSweep, repairMissingOperatorNudgeWakes, recoverInterruptedOperatorChat, queuedLiveAssignmentRunsWithoutWorkers } from "../lib/temporal";
 
 function fixture(content = "What should we focus on next?") {
   let state = createAgent({ name: "Chat Test", description: "Useful social judgment", mode: "agent", handle: "@chat_test", accent: "#777777" });
@@ -26,6 +28,43 @@ const modelResponse = (content: unknown) => new Response(JSON.stringify({ choice
 
 describe("private operator Chat harness", () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  it("dispatches a new reply after a persisted legacy user-action hold without resuming the held request", async () => {
+    const original = fixture("Read the post after I sign in.");
+    const held = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    held.state = "waiting";
+    held.stage = "waiting.user_action";
+    held.createdAt = "2026-01-01T00:00:00Z";
+    upsertOperationalRun(held);
+    let state = recordOperatorConversationMessage(readStateSnapshotForContext({ presenceId: original.presenceId }), { presenceId: original.presenceId, role: "presence", replyToMessageId: original.message.id, content: "Please sign in so I can read it." });
+    state = recordOperatorConversationMessage(state, { presenceId: original.presenceId, content: "Meanwhile, can we discuss the audience?", clientRequestId: "follow-up-hold" });
+    writeState(state);
+    const followup = state.operatorConversations!.flatMap((conversation) => conversation.messages).find((message) => message.clientRequestId === "follow-up-hold")!;
+    const next = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: followup.id } }).run;
+    vi.stubGlobal("fetch", vi.fn(async () => modelResponse({ kind: "answer", text: "We can focus on founders testing their first prototype." })));
+    await dispatchAutonomyWorker(next.id);
+    expect(getOperationalRun(next.id)?.state).toBe("succeeded");
+    expect(getOperationalRun(held.id)).toMatchObject({ state: "waiting", stage: "waiting.user_action" });
+    const replies = readStateSnapshotForContext({ presenceId: original.presenceId }).operatorConversations!.flatMap((conversation) => conversation.messages);
+    const followupReply = replies.find((message) => message.role === "presence" && message.replyToMessageId === followup.id);
+    expect(followupReply?.content.trim().length).toBeGreaterThan(0);
+  });
+
+  it("answers a stuck-status question from runtime evidence without a model call", () => {
+    const state = createAgent({ name: "Status Test", description: "Test", mode: "agent", handle: "@status_test", accent: "#777777" });
+    const presence = { ...state.presence!, status: "live" as const, environment: "live" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    const timestamp = new Date().toISOString();
+    state.operationalRuns = [{ id: "attention-status", runId: "attention-status", presenceId: presence.id, kind: "attention", state: "running", stage: "browser.read", createdAt: timestamp, lastProgressAt: timestamp, attemptCount: 1, recoveryCount: 0 }];
+    state.recoveryIncidents = [{ id: "provider-status", presenceId: presence.id, rootCauseKey: "model_provider.rate_limit", dependencyId: "provider", state: "waiting", openedAt: timestamp, lastObservedAt: timestamp, nextAttemptAt: new Date(Date.now() + 60_000).toISOString(), recoveryAttempts: 1, affectedRunIds: ["attention-status"], safeSummary: "AI Model Provider request rate limit reached. Waiting for quota reset.", operatorActionRequired: false, updatedAt: timestamp }];
+
+    const reply = operatorRuntimeStatusReply(state, presence.id, "are you stuck?");
+
+    expect(reply).toContain("model provider");
+    expect(reply).toContain("Chat is separate from X delivery");
+    expect(reply).not.toContain("I hear you");
+  });
 
   it("normalizes flattened bounded assignment windows from model output", () => {
     const parsed = parseOperatorChatStep(JSON.stringify({
@@ -167,17 +206,150 @@ describe("private operator Chat harness", () => {
     expect(saved.executions).toHaveLength(0);
     expect(saved.assignments).toHaveLength(0);
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    const invocations = saved.resourceUsageEvents.filter(item => item.runId === run.id && item.category === "model");
+    expect(invocations).toHaveLength(3);
+    expect(new Set(invocations.map(item => item.id)).size).toBe(3);
+    expect(invocations.every(item => item.usage.requests === 1 && item.presenceId === original.presenceId)).toBe(true);
+  });
+
+  it("recovers once from malformed structured model output without dispatching it", async () => {
+    const original = fixture("What should we focus on next?");
+    const responses: Response[] = [
+      new Response(JSON.stringify({ choices: [{ message: { content: '{"kind":"search_knowledge","query":' } }] }), { status: 200 }),
+      modelResponse({ kind: "answer", text: "Focus on the smallest useful experiment." }),
+      modelResponse({ kind: "answer", text: "Focus on the smallest useful experiment." }),
+    ];
+    const requestBodies: string[] = [];
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      requestBodies.push(String(init?.body));
+      return responses.shift()!;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+
+    const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
+    const messages = saved.operatorConversations!.flatMap((item) => item.messages);
+    expect(getOperationalRun(run.id)?.state).toBe("succeeded");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(requestBodies).toEqual(expect.arrayContaining([expect.stringContaining("invalid_step")]));
+    expect(messages).toContainEqual(expect.objectContaining({
+      role: "presence",
+      replyToMessageId: original.message.id,
+      content: "Focus on the smallest useful experiment.",
+    }));
+    expect(messages.some((item) => item.role === "system" && item.replyToMessageId === original.message.id && item.content.includes("search_knowledge"))).toBe(false);
   });
 
   it("does not report success when the model exhausts its tool budget", async () => {
     const original = fixture("Investigate the current runtime.");
     vi.stubGlobal("fetch", vi.fn(async () => modelResponse({ kind: "runtime_status" })));
     const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
-    await executeAutonomyRun(run.id);
+    for (let slice = 0; slice < 4; slice += 1) {
+      await executeAutonomyRun(run.id);
+      if (slice < 3) expect(getOperationalRun(run.id)).toMatchObject({ state: "waiting", stage: "operator_chat.continuing", metadata: { chatSteps: (slice + 1) * 12 } });
+    }
     expect(getOperationalRun(run.id)?.state).toBe("failed");
+    expect(getOperationalRun(run.id)?.metadata?.chatSteps).toBe(48);
     const messages = readStateSnapshotForContext({ presenceId: original.presenceId }).operatorConversations!.flatMap(item => item.messages);
     expect(messages.some(item => item.replyToMessageId === original.message.id && item.role === "presence")).toBe(false);
     expect(messages.some(item => item.content.includes("work limit"))).toBe(true);
+  });
+
+  it("gives an explicit user retry a new budget while retaining earlier receipts", async () => {
+    const original = fixture("Investigate the current runtime.");
+    vi.stubGlobal("fetch", vi.fn(async () => modelResponse({ kind: "runtime_status" })));
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    for (let slice = 0; slice < 4; slice += 1) await executeAutonomyRun(run.id);
+    const before = readStateSnapshotForContext({ presenceId: original.presenceId }).operatorConversations!.flatMap(item => item.messages).filter(item => item.role === "system" && item.replyToMessageId === original.message.id);
+    vi.stubGlobal("fetch", vi.fn(async () => modelResponse({ kind: "answer", text: "The saved runtime receipts are available; no public delivery was confirmed." })));
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "retryOperatorChat", presenceId: original.presenceId, messageId: original.message.id }) }));
+    expect(response.status).toBe(200);
+    expect(getOperationalRun(run.id)).toMatchObject({ state: "succeeded", metadata: { failureReceiptStart: before.length } });
+    expect(getOperationalRun(run.id)?.metadata?.chatSteps).toBeLessThan(3);
+    const after = readStateSnapshotForContext({ presenceId: original.presenceId }).operatorConversations!.flatMap(item => item.messages);
+    expect(after.filter(item => before.some(old => old.id === item.id))).toHaveLength(before.length);
+    expect(after.filter(item => item.role === "presence" && item.replyToMessageId === original.message.id)).toHaveLength(1);
+  });
+
+  it("rejects repeated unsupported promises instead of claiming background research", async () => {
+    const original = fixture("Find two public sources on prototype testing.");
+    const fetchMock = vi.fn(async () => modelResponse({ kind: "answer", text: "I'll find two sources. Just a moment! Starting the search now." }));
+    vi.stubGlobal("fetch", fetchMock);
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+    expect(getOperationalRun(run.id)?.state).toBe("failed");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const messages = readStateSnapshotForContext({ presenceId: original.presenceId }).operatorConversations!.flatMap(item => item.messages);
+    expect(messages.some(item => item.role === "presence" && item.replyToMessageId === original.message.id)).toBe(false);
+    expect(messages.some(item => item.content.includes("No background work was started"))).toBe(true);
+  });
+
+  it("continues a long request with persisted receipts beyond one execution slice", async () => {
+    const original = fixture("Privately research these fourteen topics before summarizing them.");
+    let calls = 0;
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(String(init?.body));
+      calls += 1;
+      return modelResponse(calls <= 14 ? { kind: "search_knowledge", query: `topic ${calls}` } : { kind: "answer", text: "I checked all fourteen topics. The saved library has no matching evidence." });
+    }));
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+    expect(getOperationalRun(run.id)).toMatchObject({ state: "waiting", stage: "operator_chat.continuing" });
+    expect(getOperationalRun(run.id)?.nextWakeAt).toBeDefined();
+    await executeAutonomyRun(run.id);
+    expect(getOperationalRun(run.id)?.state).toBe("succeeded");
+    const messages = readStateSnapshotForContext({ presenceId: original.presenceId }).operatorConversations!.flatMap(item => item.messages);
+    expect(messages.filter(item => item.role === "system" && item.content.includes('"tool":"search_knowledge"'))).toHaveLength(14);
+    expect(bodies[12]).toContain("topic 1");
+    expect(messages.filter(item => item.role === "presence" && item.replyToMessageId === original.message.id)).toHaveLength(1);
+  });
+
+  it("does not dispatch an unchanged failed tool a third time and persists a user-action wait", async () => {
+    const original = fixture("Read X for concrete posts about prototypes.");
+    vi.stubGlobal("fetch", vi.fn(async () => modelResponse({ kind: "search_posts", query: "prototype" })));
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+    expect(getOperationalRun(run.id)).toMatchObject({ state: "blocked", stage: "waiting.user_action" });
+    const messages = readStateSnapshotForContext({ presenceId: original.presenceId }).operatorConversations!.flatMap(item => item.messages);
+    const failures = messages.filter(item => item.role === "system" && item.content.includes('"tool":"search_posts"')).map(item => JSON.parse(item.content));
+    expect(failures).toHaveLength(2);
+    expect(failures[0].failure.requiresUserAction).toBe(true);
+    expect(messages.some(item => item.role === "presence" && item.content.includes("two attempts"))).toBe(true);
+  });
+
+  it("resumes the same user-action wait after provider access recovers without repeating old failures", async () => {
+    const original = fixture("Find public sources about prototype testing.");
+    let state = original.state;
+    state.toolBindings = state.toolBindings.map(binding => binding.toolId === "web.search" ? { ...binding, enabled: false } : binding);
+    writeState(state);
+    let recovered = false;
+    let webChecks = 0;
+    let modelChecksAfterRecovery = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: unknown) => {
+      if (String(url).includes("tavily.com")) { webChecks += 1; return new Response(JSON.stringify({ results: [{ title: "Prototype testing", url: "https://example.com/testing", content: "Public source evidence." }] }), { status: 200 }); }
+      if (!recovered) return modelResponse({ kind: "search_web", query: "prototype testing" });
+      modelChecksAfterRecovery += 1;
+      return modelResponse(modelChecksAfterRecovery === 1 ? { kind: "search_web", query: "prototype testing" } : { kind: "answer", text: "I found a public source about prototype testing." });
+    }));
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+    expect(getOperationalRun(run.id)?.state).toBe("blocked");
+    state = readStateSnapshotForContext({ presenceId: original.presenceId });
+    state.toolBindings = state.toolBindings.map(binding => binding.toolId === "web.search" ? { ...binding, enabled: true } : binding);
+    state.assetProviderConnections.push({ id: "recovered-tavily", provider: "tavily", label: "Research", status: "available", createdAt: new Date().toISOString() });
+    saveProviderSecret("recovered-tavily", "test-research-key");
+    writeState(state);
+    recovered = true;
+    runOperationalSweep();
+    await vi.waitFor(() => expect(getOperationalRun(run.id)?.state).toBe("succeeded"), { timeout: 5000 });
+    expect(webChecks).toBe(1);
+    const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
+    const replies = saved.operatorConversations!.flatMap(thread => thread.messages).filter(message => message.role === "presence" && message.replyToMessageId === original.message.id);
+    expect(replies).toHaveLength(2);
+    expect(replies.at(-1)?.content).toBe("I found a public source about prototype testing.");
   });
 
   it("uses a multi-tool turn to execute once and returns verified delivery evidence to cognition", async () => {
@@ -733,6 +905,17 @@ describe("private operator Chat harness", () => {
     expect(throttle).toMatchObject({ code: "rate_limited", retryAfterMs: 30_000 });
   });
 
+  it("does not call the selected provider again after quota is known to require operator action", async () => {
+    const { state, presenceId } = fixture();
+    recordOperationalFailure({ dependency: "model_provider", presenceId, error: "OpenAI has no model API quota available." });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(generateAgentReply(state, "Make a post with an image.", undefined, { operatorConversation: true, presence: state.presence! }))
+      .rejects.toThrow("no model API quota available");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects undeclared tools and keeps unrelated Presence telemetry out of cognition", () => {
     expect(parseOperatorChatStep("Here is a private draft we can refine together.")).toEqual({ kind: "answer", text: "Here is a private draft we can refine together." });
     expect(() => parseOperatorChatStep('{"kind":"publish","text":"hello"}')).toThrow();
@@ -740,5 +923,21 @@ describe("private operator Chat harness", () => {
     const { state } = fixture();
     state.events.unshift({ id: "private-other", type: "system", title: "OTHER_PRESENCE_SECRET", detail: "Do not retrieve", tone: "quiet", time: new Date().toISOString(), presenceId: "other" });
     expect(promptFor(state, undefined, "What next?", { operatorConversation: true }).system).not.toContain("OTHER_PRESENCE_SECRET");
+  });
+
+  it("rejects invented completed research and scheduling without receipts", async () => {
+    const original = fixture("Find sources about prototype testing and summarize what is established.");
+    const fetchMock = vi.fn(async () => modelResponse({ kind: "answer", text: "I researched three sources and scheduled your post." }));
+    vi.stubGlobal("fetch", fetchMock);
+    const run = queueAutonomyRun(original.presenceId, "operator_chat", { metadata: { operatorMessageId: original.message.id } }).run;
+    await executeAutonomyRun(run.id);
+    expect(getOperationalRun(run.id)?.state).toBe("failed");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const saved = readStateSnapshotForContext({ presenceId: original.presenceId });
+    const messages = saved.operatorConversations!.flatMap(item => item.messages);
+    expect(messages.some(item => item.role === "presence" && item.replyToMessageId === original.message.id)).toBe(false);
+    expect(saved.assignments).toHaveLength(0);
+    expect(saved.executions).toHaveLength(0);
+    expect(messages.some(item => item.content.includes("No background work was started"))).toBe(true);
   });
 });

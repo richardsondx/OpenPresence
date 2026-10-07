@@ -138,14 +138,14 @@ export function sealExecutionForDelivery(execution: Execution) {
   return { expression: sealed, permit };
 }
 
-export function verifyExecutionPermit(execution: Execution, expression: PublicExpression = execution.publication?.publicExpression as PublicExpression) {
+export function verifyExecutionPermit(execution: Execution, expression: PublicExpression = execution.publication?.publicExpression as PublicExpression, options: { allowExpiredForPreWriteRetry?: boolean } = {}) {
   const permit = execution.permit;
   if (!permit || !expression) throw new PublicationSecurityError("MISSING_PERMIT", "Live writer requires a signed execution permit and sealed Public Expression.");
   const publicExpressionReason = publicExpressionLeakageReason(expression.text);
   if (publicExpressionReason) throw new PublicationSecurityError("PUBLIC_TEXT_INTERNAL_MARKER", publicExpressionReason);
   if (expression.safetyStatus !== "sealed" || !expression.payloadHash || publicExpressionHash(expression) !== expression.payloadHash) throw new PublicationSecurityError("PAYLOAD_MUTATION", "Public Expression hash does not match its sealed payload.");
   if (permit.executionId !== execution.id || permit.publicExpressionId !== expression.id || permit.presenceId !== execution.presenceId || permit.environment !== "live" || permit.channel !== expression.channel || permit.affordance !== execution.affordance || permit.payloadHash !== expression.payloadHash) throw new PublicationSecurityError("PERMIT_SCOPE_MISMATCH", "Execution permit scope does not match the sealed publication.");
-  if (new Date(permit.expiresAt).getTime() <= Date.now()) throw new PublicationSecurityError("EXPIRED_PERMIT", "Execution permit has expired.");
+  if (!Number.isFinite(Date.parse(permit.expiresAt)) || (!options.allowExpiredForPreWriteRetry && Date.parse(permit.expiresAt) <= Date.now())) throw new PublicationSecurityError("EXPIRED_PERMIT", "Execution permit has expired.");
   const { signature, ...unsigned } = permit;
   if (signature !== signatureFor(unsigned)) throw new PublicationSecurityError("INVALID_PERMIT", "Execution permit signature is invalid.");
   return permit;

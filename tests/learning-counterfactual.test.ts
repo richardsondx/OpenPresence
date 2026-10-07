@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
 import { readStateSnapshot, writeState } from "../lib/db";
 import {
   LearningCounterfactualError,
@@ -106,6 +107,17 @@ describe("pure learning counterfactual", () => {
     expect(later.retrievalRun.relevantGrowthHypothesisIds).toContain(hypothesis?.id);
     expect(later.prompt).toContain("media evidence: media/relevant/proof/chart");
     expect(learningAdjustmentForPattern(state, presence, strategyId, session.id)).toBeGreaterThan(0);
+    // Rehearsal evidence must never influence live or sibling-session cognition.
+    expect(learningAdjustmentForPattern(state, presence, strategyId)).toBe(0);
+    expect(learningStateForPresence(state, presence).hypotheses).toEqual([]);
+    expect(compileSocialStrategyContext(state, presence, { invocation: "live scope", objective: "AI builder conversation", availableActions: ["reply"] }).retrievalRun.relevantGrowthHypothesisIds).not.toContain(hypothesis?.id);
+    expect(learningAdjustmentForPattern(state, presence, strategyId, "sibling-session")).toBe(0);
+    // Real persisted SocialDecision records use sessionId, not sandboxSessionId.
+    for (const decision of state.socialDecisions) delete (decision as typeof decision & { sandboxSessionId?: string }).sandboxSessionId;
+    for (const record of state.growthEvidenceRecords!) delete record.learningHypothesisIds;
+    expect(learningAdjustmentForPattern(state, presence, strategyId, session.id)).toBeGreaterThan(0);
+    expect(learningStateForPresence(state, presence, session.id).hypotheses).toHaveLength(1);
+
   });
 
   it("changes the later candidate allocation only when synthetic measured learning is retained", () => {
@@ -262,7 +274,7 @@ describe("pure learning counterfactual", () => {
     expect(hypothesis.status).toBe("weakened");
     expect(hypothesis.confidence).toBe("low");
     expect(hypothesis.contradictingEvidenceIds).toEqual(["evidence-0", "evidence-1"]);
-    expect(learningAdjustmentForPattern(state, presence, patterns[0]!, session.id)).toBe(0);
+    expect(learningAdjustmentForPattern(state, presence, patterns[0]!, session.id)).toBeLessThan(0);
     expect(learningStateForPresence(state, presence, session.id).hypotheses).toHaveLength(0);
 
     const zeroTie = structuredClone(state);
@@ -301,7 +313,7 @@ describe("pure learning counterfactual", () => {
     reconcileSandboxPerformanceLearning(state, presence.id, session.id, "2026-09-17T12:00:00.000Z");
     expect(state.growthHypotheses[0]?.status).toBe("retired");
     expect(state.growthHypotheses[0]?.confidence).toBe("low");
-    expect(learningAdjustmentForPattern(state, presence, "social.x.v1.proof-led-original", session.id)).toBe(0);
+    expect(learningAdjustmentForPattern(state, presence, "social.x.v1.proof-led-original", session.id)).toBeLessThan(0);
   });
 
   it("projects present, removed, and altered learning deterministically", () => {
@@ -438,6 +450,35 @@ describe("runtime learning boundary", () => {
     expect(candidates.map((candidate) => candidate.action)).toEqual(expect.arrayContaining(["repost", "quote", "follow"]));
   });
 
+  it("preserves source and inherited fork causal scopes in SQLite instead of overwriting shared IDs", () => {
+    let state = startPlaygroundSession(createAgent({ name: "Persisted fork", description: "Preserve source world", audience: "AI builders", mode: "agent", handle: "@persisted_fork", accent: "#777777" }));
+    const sourceId = state.playgroundSessions[0]!.id;
+    const at = new Date().toISOString();
+    const presenceId = state.presence!.id;
+    state.socialDecisions = [{ id: "source-decision", agentId: state.agent!.id, presenceId, environment: "sandbox", sessionId: sourceId, socialIntentId: "source-intent", decision: "original_post", summary: "Source decision", influences: [], focalMirrorObjectIds: [], createdAt: at }];
+    state.socialIntents = [{ id: "source-intent", agentId: state.agent!.id, presenceId, affordance: "x.post", priority: 1, validity: {}, state: "active", formedAt: at, updatedAt: at, environment: "sandbox", sessionId: sourceId }];
+    state.executions = [{ id: "source-execution", socialIntentId: "source-intent", presenceId, affordance: "x.post", mode: "auto", status: "succeeded", attempts: 1, idempotencyKey: "source-idempotency", createdAt: at, updatedAt: at, environment: "sandbox", sessionId: sourceId }];
+    state.outcomes = [{ id: "source-outcome", executionId: "source-execution", socialIntentId: "source-intent", presenceId, status: "succeeded", observedAt: at, metrics: {}, evidence: [], environment: "sandbox", sessionId: sourceId }];
+    state.mirrorObjects = [{ id: "source-mirror", presenceId, originExecutionId: "source-execution", environment: "sandbox", sessionId: sourceId, visibility: "public", objectType: "post", observedAt: at, occurredAt: at, externalRef: { id: "world-post", provider: "sandbox", type: "post" }, content: { text: "Source world" } } as never];
+    state = createSandboxCheckpoint(state, sourceId, "Source causal chain");
+    state = forkSandboxCheckpoint(state, sourceId, state.sandboxCheckpoints![0]!.id);
+    const forkId = state.playgroundSessions.find(item => item.id !== sourceId)!.id;
+    writeState(state, { syncNormalized: true });
+    const database = new Database(process.env.OPENPRESENCE_DB_PATH!, { readonly: true });
+    try {
+      for (const [table, id, pointer, target] of [["social_intents", "source-intent", undefined, undefined], ["executions", "source-execution", "socialIntentId", "source-intent"], ["outcomes", "source-outcome", "executionId", "source-execution"], ["mirror_objects", "source-mirror", "originExecutionId", "source-execution"]] as const) {
+        const records = (database.prepare(`SELECT payload FROM ${table} WHERE id IN (?, ?)`).all(id, `${id}:sandbox:${forkId}`) as Array<{ payload: string }>).map(row => JSON.parse(row.payload));
+        expect(records).toHaveLength(2);
+        expect(records.find(item => item.id === id)?.sessionId).toBe(sourceId);
+        const inherited = records.find(item => item.id !== id)!;
+        expect(inherited.sessionId).toBe(forkId);
+        expect(inherited.checkpointOriginId).toBe(id);
+        if (pointer) expect(inherited[pointer]).toBe(`${target}:sandbox:${forkId}`);
+        if (table === "mirror_objects") expect(inherited.externalRef.id).toBe("world-post");
+      }
+    } finally { database.close(); }
+  });
+
   it("replays a persisted Sandbox checkpoint with learning retained versus removed", () => {
     let state = startPlaygroundSession(createAgent({ name: "Sandbox learning replay", description: "A paired-world learning fixture.", audience: "AI builders", mode: "agent", handle: "@sandbox_learning_replay", accent: "#7c3aed" }));
     const source = state.playgroundSessions[0]!;
@@ -463,7 +504,7 @@ describe("runtime learning boundary", () => {
     expect(learningStateForPresence(removedLearningState, presence, removedFork.id).hypotheses).toEqual([]);
     expect((state.growthHypotheses ?? []).filter((item) => (item as typeof item & { sandboxSessionId?: string }).sandboxSessionId === fork.id)).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience." })]));
     const freshSourceSnapshot = captureSandboxWorld(state, source.id);
-    expect(freshSourceSnapshot.learning?.growthHypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ id: hypothesisId })]));
+    expect(freshSourceSnapshot.learning?.growthHypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience." })]));
     expect(freshSourceSnapshot.learning?.growthHypotheses?.some((item) => (item as { sandboxSessionId?: string }).sandboxSessionId)).toBe(false);
     const restoredSource = restoreSandboxCheckpoint(state, source.id, checkpoint.id);
     expect(learningStateForPresence(restoredSource, presence, fork.id).hypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience." })]));
@@ -480,7 +521,7 @@ describe("runtime learning boundary", () => {
     worldB.playgroundSessions = worldB.playgroundSessions.filter((item) => item.id === fork.id);
     const branchSnapshotA = captureSandboxWorld(worldA, fork.id);
     const branchSnapshotB = captureSandboxWorld(worldB, fork.id);
-    const branchLearning = learningStateForPresence(worldA, presence);
+    const branchLearning = learningStateForPresence(worldA, presence, fork.id);
     const learningSnapshotB = { ...structuredClone(branchSnapshotA), learning: { ...structuredClone(branchSnapshotA.learning!), growthHypotheses: [], growthEvidenceRecords: [], learningCheckpoints: [], learningCounterfactuals: [] } };
     learningSnapshotB.digest = sandboxWorldDigest(learningSnapshotB);
     const emptyLearningState = structuredClone(worldB);
@@ -490,16 +531,16 @@ describe("runtime learning boundary", () => {
     emptyLearningState.learningCounterfactuals = [];
     const restoredA = restoreSandboxWorld(emptyLearningState, JSON.parse(JSON.stringify(branchSnapshotA)), { restoreLearning: true });
     const restoredB = restoreSandboxWorld(emptyLearningState, JSON.parse(JSON.stringify(learningSnapshotB)), { restoreLearning: true });
-    const removedLearning = learningStateForPresence(restoredB, presence);
-    const learningCheckpoint = captureLearningCheckpoint(restoredA, presence, "2026-09-16T12:30:00.000Z").checkpoint;
+    const removedLearning = learningStateForPresence(restoredB, presence, fork.id);
+    const learningCheckpoint = captureLearningCheckpoint(restoredA, presence, "2026-09-16T12:30:00.000Z", undefined, fork.id).checkpoint;
     const situation: LearningDecisionSituation = { id: `paired:${fork.id}`, scope: presence.id, candidates: [{ id: "reply", action: "reply", baseScore: 1, strategyId }, { id: "repost", action: "repost", baseScore: 2, strategyId: "social.x.v1.selective-amplification" }] };
     const replay = projectLearningCounterfactual({ checkpoint: learningCheckpoint, situation, altered: { label: "World B without retained learning", hypotheses: removedLearning.hypotheses, evidence: removedLearning.evidence } });
-    const runtimeA = compileSocialStrategyContext(restoredA, presence, { invocation: "paired-world later decision", objective: "neutral situation", availableActions: ["reply"] });
-    const runtimeB = compileSocialStrategyContext(restoredB, presence, { invocation: "paired-world later decision", objective: "neutral situation", availableActions: ["reply"] });
+    const runtimeA = compileSocialStrategyContext(restoredA, presence, { invocation: "paired-world later decision", objective: "neutral situation", availableActions: ["reply"], sandboxSessionId: fork.id });
+    const runtimeB = compileSocialStrategyContext(restoredB, presence, { invocation: "paired-world later decision", objective: "neutral situation", availableActions: ["reply"], sandboxSessionId: fork.id });
 
     expect(fork).toBeDefined();
     expect(branchSnapshotB).toEqual(branchSnapshotA);
-    expect(branchLearning.hypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ id: hypothesisId })]));
+    expect(branchLearning.hypotheses).toEqual(expect.arrayContaining([expect.objectContaining({ statement: "Useful disagreement helps this audience." })]));
     expect(removedLearning).toEqual({ hypotheses: [], evidence: [] });
     expect(replay.learningClaim.status).toBe("demonstrated");
     expect(replay.projections.present.decision.action).toBe("reply");

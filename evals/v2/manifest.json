@@ -1,0 +1,32 @@
+{
+  "schema": "openpresence.v2.eval.manifest.v1",
+  "frozenAt": "2026-10-01",
+  "caseCount": 48,
+  "groups": {
+    "onboarding": 6,
+    "voice": 6,
+    "opportunity_relationship": 6,
+    "channel_adaptation": 6,
+    "visual_grounding": 6,
+    "planning_followthrough": 6,
+    "learning_unlearning": 6,
+    "failure_honesty": 6
+  },
+  "inputsSha256": "058e7049e1f036b6bc82acdb257d941d6fa81ee1aad2142f88ef268694b88f7a",
+  "gradingSha256": "08dbc2beb3d444f7293ffb80819890376bfc80ccafb5e8f1090c7af4039fdd37",
+  "status": "frozen, not executed",
+  "conditions": [
+    "A ordinary tools",
+    "B ordinary tools plus static skill",
+    "C real OpenPresence MCP plus skill"
+  ],
+  "trialsPerCase": 5,
+  "modelFamiliesRequired": 2,
+  "hiddenBoundary": "Only inputs cases may enter host cognition. Grading loaded after outputs, by independent evaluation path.",
+  "developmentSmokeCaseIds": [
+    "onboarding-climate-baseline",
+    "voice-scoped-edit",
+    "planning_followthrough-no-scheduler"
+  ],
+  "holdoutEligibility": "These three cases were used to diagnose host adapter integration. Retain them as development regressions and replace them with independently authored unseen cases before full held-out certification. Frozen hashes describe original corpus, not an assertion of untouched holdout."
+}

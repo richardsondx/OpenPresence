@@ -31,10 +31,13 @@ import {
   calculateStaleAt,
   closeStaleBridgeExecutions,
   evaluateOperationalRunProgress,
+  attentionRunHasDurableRecoveryWake,
   reconcileOrphanedWaitingRuns,
   incidentBlocksAutonomousAttention,
+  incidentBlocksPresenceAttention,
   isLiveTemporalPresence,
   runOperationalSweep,
+  scheduleProviderResetWake,
   scheduleRetryWake,
   scheduleWake,
 } from "../lib/temporal";
@@ -69,6 +72,27 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     };
     expect(incidentBlocksAutonomousAttention(incident)).toBe(false);
     expect(incidentBlocksAutonomousAttention({ ...incident, rootCauseKey: "model_provider.credentials_missing" })).toBe(true);
+  });
+
+  it("keeps autonomous Attention alive through a verified browser route during native X recovery", () => {
+    const nativeIncident = {
+      state: "needs_operator" as const,
+      operatorActionRequired: true,
+      rootCauseKey: "native_x.credits_exhausted",
+      safeSummary: "X API billing is blocking access.",
+    };
+
+    expect(incidentBlocksPresenceAttention(nativeIncident, { browserRouteAvailable: true })).toBe(false);
+    expect(incidentBlocksPresenceAttention(nativeIncident, { browserRouteAvailable: false })).toBe(true);
+    expect(incidentBlocksPresenceAttention({
+      ...nativeIncident,
+      rootCauseKey: "model_provider.credentials_missing",
+      safeSummary: "The selected AI provider is not configured.",
+    }, { browserRouteAvailable: true })).toBe(true);
+    expect(incidentBlocksPresenceAttention({
+      ...nativeIncident,
+      rootCauseKey: "runtime.credits_exhausted",
+    }, { browserRouteAvailable: true })).toBe(false);
   });
 
   it("does not erase duplicate-outcome review when unrelated runtime work succeeds", () => {
@@ -187,6 +211,27 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     const updated = getOperationalRun(run.id);
     expect(updated?.state).toBe("queued");
     expect(updated?.stage).toBe("woken_from_retry");
+  });
+
+  it("does not create another attention pass while a waiting run owns provider recovery", () => {
+    const waitingRun: OperationalRun = {
+      id: `run_provider_wait_${Date.now()}_${Math.random()}`,
+      presenceId,
+      kind: "attention",
+      state: "waiting",
+      stage: "incident_model_provider.rate_limit",
+      createdAt: new Date().toISOString(),
+      attemptCount: 1,
+      recoveryCount: 0,
+    };
+    const resetAt = new Date(Date.now() + 60_000).toISOString();
+    const firstWake = scheduleProviderResetWake(waitingRun.id, resetAt, presenceId, { incidentId: "incident_provider_wait" });
+    const secondWake = scheduleProviderResetWake(waitingRun.id, resetAt, presenceId, { incidentId: "incident_provider_wait" });
+
+    expect(secondWake.id).toBe(firstWake.id);
+    expect(attentionRunHasDurableRecoveryWake(waitingRun, [firstWake], new Date())).toBe(true);
+    expect(attentionRunHasDurableRecoveryWake({ ...waitingRun, id: "waiting_without_wake" }, [], new Date())).toBe(false);
+    expect(attentionRunHasDurableRecoveryWake({ ...waitingRun, nextWakeAt: resetAt }, [], new Date())).toBe(true);
   });
 
   it("Invariant: an unclaimed Bridge action closes truthfully instead of holding attention forever", () => {

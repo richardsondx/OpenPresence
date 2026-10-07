@@ -4,7 +4,7 @@ test.beforeEach(async ({ page, request }) => {
   expect((await request.post("/api/state", { data: { type: "reset" } })).ok()).toBeTruthy();
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Recovery Agent");
-  await page.getByRole("button", { name: /Create Agent \+ Presence|Create Agent + Presence/ }).click();
+  await page.getByRole("button", { name: "Meet my Agent", exact: true }).click();
   await page.goto("/chat");
 });
 
@@ -143,14 +143,20 @@ test("removing a queued turn deletes its browser recovery copy", async ({ page }
   await expect(page.getByTestId("operator-chat-queued-message-2")).toHaveCount(0);
 });
 
-test("selecting the current Agent from Schedule changes the URL and refreshes Chat", async ({ page }) => {
+test("returning to Chat from Schedule changes the URL and refreshes the conversation", async ({ page }) => {
+  const rejectedOperations: Array<{ operation: unknown; status: number }> = [];
+  page.on("response", response => {
+    if (response.status() >= 400 && response.request().method() === "POST" && /\/api\/state(?:\?|$)/.test(response.url())) rejectedOperations.push({ operation: response.request().postDataJSON()?.type, status: response.status() });
+  });
   await page.goto("/schedule");
-  await page.getByRole("button", { name: /Recovery Agent avatar X channel Recovery Agent/ }).click();
-  await expect(page).toHaveURL(/\/chat\?/);
+  await page.getByRole("button", { name: "Back to Chat", exact: true }).click();
+  await expect(page).toHaveURL(/\/chat(?:\?|$)/);
   await page.getByLabel("Message Recovery Agent").fill("Keep this navigation check private.");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page.locator(".operator-chat-message.is-presence")).not.toHaveCount(0);
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Chat", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Message Recovery Agent")).toBeVisible();
   await expect(page.getByText("Keep this navigation check private.", { exact: true })).toBeVisible();
+  await test.info().attach("rejected-state-operations", { body: JSON.stringify(rejectedOperations), contentType: "application/json" });
+  expect(rejectedOperations).toEqual([]);
 });

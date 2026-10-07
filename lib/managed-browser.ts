@@ -159,7 +159,8 @@ export async function launchManagedBrowser(
   // browser features and is trivially detectable. The new headless mode (Chrome 112+)
   // runs the full browser shell, just without a visible window.
   const launchOptions: Record<string, unknown> = {
-    headless: realChromePath && headless ? "new" : headless,
+    // Playwright requires a boolean; Chrome selects its supported headless mode.
+    headless,
     viewport: { width: 1280, height: 800 },
     // Let Chrome use its own authentic user-agent when we are driving the
     // real binary. Only override for the bundled Chromium fallback.

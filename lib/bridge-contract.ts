@@ -1,3 +1,4 @@
+import { browserAdapterForCapability, browserProbeIsFresh, isShippedChromeBridge, type BrowserCapabilityRequirement } from "./browser-readiness";
 import type { Bridge, BridgeAdapterStatus, ConnectorCapabilities, Presence } from "./types";
 
 export const BRIDGE_HEARTBEAT_INTERVAL_MS = 60_000;
@@ -52,6 +53,7 @@ export function bridgeAdapterStatus(bridge: Pick<Bridge, "state" | "lastHeartbea
   // heartbeat so stale browser sessions cannot look connected.
   if (!bridge.lastHeartbeatAt) return "waiting";
   const age = now - new Date(bridge.lastHeartbeatAt).getTime();
+  if (!Number.isFinite(age) || age < 0) return "waiting";
   if (age <= BRIDGE_CONNECTED_WINDOW_MS) return "connected";
   if (age <= BRIDGE_STALE_WINDOW_MS) return "stale";
   return "waiting";
@@ -68,14 +70,34 @@ export function bridgeIdentityReady(bridge: Pick<Bridge, "kind" | "accountIdenti
 
 /** The status users and schedulers should use when deciding whether work can run. */
 export function bridgeExecutionStatus(
-  bridge: Pick<Bridge, "kind" | "state" | "lastHeartbeatAt" | "lastSeenAt" | "accountIdentity">,
+  bridge: Pick<Bridge, "kind" | "state" | "lastHeartbeatAt" | "lastSeenAt" | "accountIdentity"> & Partial<Pick<Bridge, "name" | "browserAdapters">>,
   now = Date.now(),
 ): BridgeAdapterStatus {
   const liveness = bridgeAdapterStatus(bridge, now);
-  return liveness === "connected" && bridgeIdentityReady(bridge) ? "connected" : liveness === "connected" ? "waiting" : liveness;
+  return liveness === "connected" && bridgeIdentityReady(bridge) && (!isShippedChromeBridge(bridge) || bridge.browserAdapters?.some(adapter => browserProbeIsFresh(adapter, now) && adapter.capabilities.channelRead)) ? "connected" : liveness === "connected" ? "waiting" : liveness;
 }
 
-export function bridgeExecutionStatusLabel(bridge: Pick<Bridge, "kind" | "state" | "lastHeartbeatAt" | "lastSeenAt" | "accountIdentity">, now = Date.now()) {
+/** A verified browser identity must still match the account this Presence owns. */
+export function bridgeMatchesExpectedAccount(bridge: Pick<Bridge, "kind" | "accountIdentity"> & Partial<Pick<Bridge, "name" | "browserAdapters">>, expectedHandle: string): boolean {
+  if (bridge.kind !== "bridge") return true;
+  const normalize = (value: string | undefined) => (value ?? "").replace(/^@/, "").trim().toLowerCase();
+  return bridge.accountIdentity?.status === "verified"
+    && Boolean(normalize(expectedHandle))
+    && normalize(bridge.accountIdentity.username) === normalize(expectedHandle);
+}
+
+export function bridgeReadyForExpectedAccount(
+  bridge: Pick<Bridge, "kind" | "state" | "lastHeartbeatAt" | "lastSeenAt" | "accountIdentity"> & Partial<Pick<Bridge, "name" | "browserAdapters">>,
+  expectedHandle: string,
+  now = Date.now(),
+  requirement: BrowserCapabilityRequirement = "channelRead",
+): boolean {
+  if (isShippedChromeBridge(bridge)) return bridgeAdapterStatus(bridge, now) === "connected" && Boolean(browserAdapterForCapability(bridge, expectedHandle, requirement, now));
+  return bridgeExecutionStatus(bridge, now) === "connected" && bridgeMatchesExpectedAccount(bridge, expectedHandle);
+}
+
+export function bridgeExecutionStatusLabel(bridge: Pick<Bridge, "kind" | "state" | "lastHeartbeatAt" | "lastSeenAt" | "accountIdentity"> & Partial<Pick<Bridge, "name" | "browserAdapters">>, now = Date.now()) {
+  if (isShippedChromeBridge(bridge) && !bridge.browserAdapters?.some(adapter => browserProbeIsFresh(adapter, now) && adapter.capabilities.channelRead)) return "Browser capability check required";
   if (bridgeAdapterStatus(bridge, now) === "connected" && !bridgeIdentityReady(bridge)) return "Account verification required";
   return bridgeAdapterStatusLabel(bridgeExecutionStatus(bridge, now));
 }

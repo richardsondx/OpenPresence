@@ -1,9 +1,53 @@
 import { describe, expect, it } from "vitest";
-import { buildSupervisoryChatPrompt, supervisoryChatGuidance, formatSupervisoryChatState, projectSupervisoryChatState } from "../lib/supervisory-chat";
+import { buildSupervisoryChatPrompt, supervisoryChatGuidance, formatSupervisoryChatState, projectSupervisoryChatState, operatorProgressRecapReply } from "../lib/supervisory-chat";
 import { operatorChatHarnessInstructions, parseOperatorChatStep } from "../lib/operator-chat-harness";
 import { createAgent } from "../lib/runtime";
 
 describe("supervisory Chat contract", () => {
+  it("keeps failed attempts, recovery, and verified progress available for a follow-up", () => {
+    const state = createAgent({ name: "Genny", description: "Useful judgment", mode: "agent", handle: "@genny", accent: "#777777" });
+    const presenceId = state.presence!.id;
+    state.assignments = [
+      { id: "continuing", presenceId, title: "Study relevant founders", status: "working", progress: { verified: 1, required: 3 }, updatedAt: "2026-10-01T12:00:00Z" },
+      { id: "finished", presenceId, title: "Review launch post", status: "completed", progress: { verified: 1, required: 1 }, updatedAt: "2026-10-01T11:00:00Z", lastOutcome: { status: "completed", message: "Reviewed the launch post." } },
+      { id: "private-other", presenceId: "other", title: "Never expose", status: "working", progress: { verified: 0 }, updatedAt: "2026-10-01T13:00:00Z" },
+    ] as never;
+    // Storage order is deliberately different from causal recency.
+    state.assignmentRuns = [
+      { id: "first-attempt", assignmentId: "continuing", presenceId, status: "failed", updatedAt: "2026-10-01T10:00:00Z" },
+      { id: "retry", assignmentId: "continuing", presenceId, status: "researching", recoveryOf: "first-attempt", currentStage: "researching", lastProgressAt: "2026-10-01T12:00:00Z", updatedAt: "2026-10-01T12:00:00Z", leaseOwner: "private-worker" },
+      { id: "wrong-scope", assignmentId: "continuing", presenceId: "other", status: "published", updatedAt: "2026-10-01T13:00:00Z" },
+    ] as never;
+    const projected = projectSupervisoryChatState(state, presenceId);
+    expect(projected.runtime.recentWork.map((item) => item.assignmentId)).toEqual(["continuing", "finished"]);
+    expect(projected.runtime.recentWork[0]).toMatchObject({ status: "working", verified: 1, required: 3, latestRun: { id: "retry", status: "researching", recoveryOf: "first-attempt" } });
+    expect(projected.runtime.recentWork[1].lastOutcome?.message).toBe("Reviewed the launch post.");
+    expect(JSON.stringify(projected)).not.toMatch(/Never expose|wrong-scope|private-worker/);
+  });
+  it("grounds a weekly recap in scoped verified outcomes rather than transcript promises", () => {
+    const state = createAgent({ name: "Recap", description: "Useful judgment", mode: "agent", handle: "@recap", accent: "#777777" });
+    const presenceId = state.presence!.id;
+    state.executions = [
+      { id: "live", presenceId, status: "succeeded", environment: "live" },
+      { id: "rehearsal", presenceId, status: "succeeded", environment: "sandbox" },
+      { id: "pending", presenceId, status: "verification-pending", environment: "live" },
+      { id: "other", presenceId: "other-presence", status: "succeeded", environment: "live" },
+      { id: "old", presenceId, status: "succeeded", environment: "live" },
+    ] as never;
+    state.outcomes = [
+      { id: "live-outcome", executionId: "live", presenceId, status: "succeeded", environment: "live", observedAt: "2026-10-01T09:00:00Z" },
+      { id: "duplicate", executionId: "live", presenceId, status: "succeeded", environment: "live", observedAt: "2026-10-01T09:00:00Z" },
+      { id: "rehearsal-outcome", executionId: "rehearsal", presenceId, status: "succeeded", sessionId: "recap-session", observedAt: "2026-10-07T09:00:00Z" },
+      { id: "pending-outcome", executionId: "pending", presenceId, status: "succeeded", environment: "live", observedAt: "2026-10-01T09:00:00Z" },
+      { id: "other-outcome", executionId: "other", presenceId: "other-presence", status: "succeeded", environment: "live", observedAt: "2026-10-01T09:00:00Z" },
+      { id: "old-outcome", executionId: "old", presenceId, status: "succeeded", environment: "live", observedAt: "2026-09-01T09:00:00Z" },
+    ] as never;
+    state.playgroundSessions = [{ id: "recap-session", presenceId, status: "active", virtualNow: "2026-10-08T09:00:00Z" }] as never;
+    const recap = operatorProgressRecapReply(state, presenceId, "How’d we do this week?", new Date("2026-10-01T10:00:00Z"));
+    expect(recap).toContain("1 verified live outcome and 1 verified rehearsal outcome");
+    expect(recap).toContain("can’t claim they improved growth");
+    expect(operatorProgressRecapReply(state, presenceId, "Draft a recap to publish this week")).toBeUndefined();
+  });
   it("projects Growth, Calendar, and runtime facts for only the selected Presence", () => {
     const state = createAgent({ name: "Genny", description: "Useful social judgment", mode: "agent", handle: "@genny", accent: "#777777" });
     const presenceId = state.presence!.id;
@@ -100,6 +144,8 @@ describe("supervisory Chat contract", () => {
     expect(supervisoryChatGuidance).toContain("Meaning-file precedence remains in force");
 
     expect(operatorChatHarnessInstructions).toContain("Keep private supervisory replies short, direct, and action-first");
+    expect(operatorChatHarnessInstructions).toContain("you may still form the requested action with that exact asset ID");
+    expect(operatorChatHarnessInstructions).toContain("do not claim X rejects the image");
     expect(parseOperatorChatStep(JSON.stringify({ kind: "inspect_post", url: "https://x.com/example/status/123" }))).toEqual({ kind: "inspect_post", url: "https://x.com/example/status/123" });
     expect(parseOperatorChatStep(JSON.stringify({ kind: "social_action", action: "like", targetId: "post-123" }))).toEqual({ kind: "social_action", action: "like", targetId: "post-123" });
   });

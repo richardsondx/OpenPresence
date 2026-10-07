@@ -1,9 +1,12 @@
 import { z } from "zod";
-import { activeAssignmentPursuitWindow, applyOperation, assignmentIsSatisfied, blockExecutionForLanguage, blockExecutionForTargetLanguage, cancelExecutionForBlockedTarget, clearPersonBlockFromExecution, curateRelationshipFromMirror, ensureCapabilityRequests, existingPublicActionExecution, isPersonBlockingError, isWatchPausedForExecution, languageValidationForExecution, recordNativeMirrorDeletion, recordPersonBlockedFromExecution, recordVerifiedCapabilityTrial, recordVerifiedFollow, settleCapabilityTrialVerificationFailure, settlePromotionBurstProgress, targetIsBlockedByPerson, targetLanguageValidationForExecution } from "./runtime";
+import { resumeBrowserBlockedResponsibilities } from "./assignment-recovery";
+import { readBrowserAdapterObservations, writeBrowserAdapterObservation } from "./db";
+import { browserAdapterForCapability, isShippedChromeBridge } from "./browser-readiness";
+import { activeAssignmentPursuitWindow, applyOperation, assignmentIsSatisfied, blockExecutionForLanguage, blockExecutionForTargetLanguage, cancelExecutionForBlockedTarget, chooseXWriter, clearPersonBlockFromExecution, curateRelationshipFromMirror, ensureCapabilityRequests, existingPublicActionExecution, isPersonBlockingError, isWatchPausedForExecution, languageValidationForExecution, recordNativeMirrorDeletion, recordPersonBlockedFromExecution, recordVerifiedCapabilityTrial, recordVerifiedFollow, settleCapabilityTrialVerificationFailure, settlePromotionBurstProgress, targetIsBlockedByPerson, targetLanguageValidationForExecution } from "./runtime";
 import { appendMirrorEvents, authenticateBridgeKey, cancelScheduledWake, deleteBridgeCredential, deleteBridgeIdentity, issueBridgeKey, readBridgeById, readBridgeCredentialMetadata, readBridgeIdentity, readBridgeIdentityForExecutor, readPublicActionDeliverySlot, readStateForBridge, releasePublicActionDelivery, reservePublicActionDelivery, revokeBridgeKey, updatePublicActionDelivery, upsertScheduledWake, writeBridgeHeartbeat, writeBridgeIdentity, writeState } from "./db";
 import { readMirrorEventSourceIds } from "./db";
 import type { Asset, Bridge, Execution, LiveEvent, MirrorObject, OpenPresenceState, Outcome } from "./types";
-import { bridgeAdapterStatus, bridgeIdentityReady } from "./bridge-contract";
+import { bridgeAdapterStatus, bridgeIdentityReady, bridgeMatchesExpectedAccount } from "./bridge-contract";
 import { recordExecutionTransition } from "./trajectory";
 
 // Chrome refreshes the signed-in identity on its own cadence. Keep the
@@ -21,7 +24,7 @@ import { detectDuplicatePublicOutcomes, detectDuplicateVerifiedExecutionOutcomes
 import { hasObservedOwnReplyForTarget } from "./duplicate-public-outcome";
 import { authorizeAssetSelection, liveAssetReuseReason } from "./asset-library";
 import { isXCreditsError, xNativeWriteUnavailable } from "./x-credits";
-import { evaluateExecutionReadiness } from "./execution-readiness";
+import { browserDeliveryProofSchema, verifyBrowserDeliveryProof } from "./browser-delivery-proof";
 
 const entityRef = z.object({ type: z.string().min(1).max(80), id: z.string().min(1).max(240) });
 const author = z.object({ externalRef: entityRef.optional(), displayName: z.string().min(1).max(160), handle: z.string().max(160).optional(), avatarUrl: z.string().url().max(2_000).optional() }).optional();
@@ -29,11 +32,11 @@ export const mirrorObjectInput = z.object({ externalRef: entityRef, parentExtern
 export const inboundEventInput = z.object({ sourceEventId: z.string().min(1).max(240), event: z.enum(["created", "updated", "deleted"]), object: mirrorObjectInput });
 export const eventsInput = z.object({ events: z.array(inboundEventInput).min(1).max(500) });
 export const reconcileInput = z.object({ cursor: z.string().max(500).optional(), objects: z.array(mirrorObjectInput).max(2_000) });
-export const claimInput = z.object({ executorId: z.string().min(1).max(160), limit: z.number().int().min(1).max(50).default(10) });
-export const heartbeatInput = z.object({ executorId: z.string().min(1).max(160) });
+export const claimInput = z.object({ executorId: z.string().min(1).max(160), limit: z.number().int().min(1).max(50).default(10), mediaProtocol: z.number().int().min(0).max(100).optional() });
+export const heartbeatInput = z.object({ executorId: z.string().min(1).max(160), adapter: z.object({ version: z.string().min(1).max(80), protocolVersion: z.number().int().min(0).max(100), probed: z.boolean(), capabilities: z.object({ channelRead: z.boolean(), mediaUpload: z.boolean(), verification: z.boolean(), affordances: z.array(z.string().min(1).max(80)).max(30) }) }).optional() });
 export const identityInput = z.object({ executorId: z.string().min(1).max(160), username: z.string().trim().max(160).optional() });
 export const ackInput = z.object({ executorId: z.string().min(1).max(160), externalRef: entityRef, observedAt: z.string().datetime().optional() });
-export const failInput = z.object({ executorId: z.string().min(1).max(160), code: z.string().max(80).optional(), message: z.string().min(1).max(1_000), retryable: z.boolean().default(false) });
+export const failInput = z.object({ executorId: z.string().min(1).max(160), code: z.string().max(80).optional(), message: z.string().min(1).max(1_000), retryable: z.boolean().default(false), diagnostics: z.object({ stage: z.string().max(80), expectedFiles: z.number().int().min(0).max(4), previewCount: z.number().int().min(0).max(100), removeControlCount: z.number().int().min(0).max(100), pendingUploadCount: z.number().int().min(0).max(100), alerts: z.array(z.string().max(240)).max(3), beforeSubmission: z.boolean() }).optional() });
 const domProof = z.object({
   permalink: z.string().url().max(4_000),
   externalRef: entityRef,
@@ -44,7 +47,7 @@ const domProof = z.object({
   mediaCount: z.number().int().min(0).max(8),
   assetIds: z.array(z.string().min(1).max(240)).max(8).optional(),
 });
-export const verifyInput = z.object({ executorId: z.string().min(1).max(160), candidateExternalRef: entityRef.optional(), domProof: domProof.optional(), observedAt: z.string().datetime().optional() });
+export const verifyInput = z.object({ executorId: z.string().min(1).max(160), candidateExternalRef: entityRef.optional(), domProof: domProof.optional(), browserEvidence: browserDeliveryProofSchema.optional(), observedAt: z.string().datetime().optional() });
 export const closeVerificationInput = z.object({ executorId: z.string().min(1).max(160), note: z.string().trim().min(1).max(1_000) });
 export const outcomeInput = z.object({ executionId: z.string().min(1), status: z.enum(["succeeded", "failed", "unknown"]), metrics: z.record(z.number()).default({}), evidence: z.array(entityRef).default([]) });
 export const metricsInput = z.object({ audience: z.object({ followers: z.number().int().min(0), following: z.number().int().min(0).optional(), observedAt: z.string().datetime().optional() }).optional(), publications: z.array(z.object({ externalRef: entityRef, publicationAgeSeconds: z.number().int().min(0), metrics: z.object({ impressions: z.number().int().min(0).optional(), likes: z.number().int().min(0).optional(), replies: z.number().int().min(0).optional(), reposts: z.number().int().min(0).optional(), quotes: z.number().int().min(0).optional() }) })).max(100).default([]) });
@@ -165,6 +168,7 @@ export function reportBridgeIdentity(bridge: Bridge, input: z.infer<typeof ident
   if (previousExecutorIdentity
     && previousExecutorIdentity.status === status
     && normalizedHandle(previousExecutorIdentity.username) === actual
+    && Date.parse(previousExecutorIdentity.observedAt) <= Date.now()
     && Date.now() - new Date(previousExecutorIdentity.observedAt).getTime() <= BRIDGE_IDENTITY_MAX_AGE_MS) {
     // Chrome may probe the same signed-in account on every tab mount. The
     // executor identity is already durable and fresh; avoid rewriting the
@@ -193,81 +197,27 @@ export function reportBridgeIdentity(bridge: Bridge, input: z.infer<typeof ident
     current.state = "online";
     const sync = state.bridgeSync.find((item) => item.bridgeId === current.id);
     if (sync) { sync.status = "healthy"; sync.error = undefined; }
-    // Work held behind identity verification is not stale work. Re-open its
-    // delivery window when the expected account becomes available so the
-    // adapter can claim it without operator babysitting or a false expiry.
-    const renewal = new Date(Date.now() + 45 * 60 * 1000).toISOString();
-    let recoveredNativeFailures = 0;
+    current.browserAdapters = readBrowserAdapterObservations(current.id);
+    const resumedAssignments = resumeBrowserBlockedResponsibilities(state);
+    // Resolve valid queued route dependencies only. An identity report grants
+    // no retry authority and must never renew an expired Social Intent.
     for (const execution of state.executions) {
+      if (execution.presenceId !== current.presenceId || execution.environment !== "live" || !["queued", "awaiting-connector"].includes(execution.status)) continue;
+      const intent = state.socialIntents.find(item => item.id === execution.socialIntentId && item.presenceId === current.presenceId);
+      if (!intent || intent.state !== "active" || (intent.validity.expiresAt && !(Date.parse(intent.validity.expiresAt) > Date.now()))) { if (intent?.validity.expiresAt && Date.parse(intent.validity.expiresAt) <= Date.now()) expireIfNeeded(state, execution); continue; }
       const affordance = execution.affordance.replace(/^x\./, "");
-      const bridgeSupports = current.capabilities.affordances.some((item) => item === execution.affordance || item === affordance);
-      const recoverableNativeFailure = execution.presenceId === current.presenceId
-        && execution.environment === "live"
-        && execution.connector === "native"
-        && execution.status === "failed"
-        && !execution.externalRef
-        && !execution.failure?.reviewedAt
-        && xNativeWriteUnavailable({ deliveryError: execution.failure?.message });
-      if (recoverableNativeFailure && bridgeSupports) {
-        execution.connector = "bridge";
-        execution.bridgeId = current.id;
-        execution.status = "queued";
-        execution.failure = undefined;
-        execution.reviewReason = undefined;
-        const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
-        if (intent) {
-          if (intent.validity.expiresAt && new Date(intent.validity.expiresAt).getTime() <= Date.now()) intent.validity.expiresAt = renewal;
-          intent.state = "active";
-          intent.updatedAt = timestamp();
-        }
-        const action = state.actions.find((item) => item.executionId === execution.id);
-        if (action) { action.status = "queued"; action.reason = "Recovered through the verified browser capability after Native X became unavailable."; }
-        execution.updatedAt = timestamp();
-        recoveredNativeFailures += 1;
-        continue;
+      if (isShippedChromeBridge(current) && !browserAdapterForCapability(current, presence?.handle ?? "", { affordance, media: Boolean(execution.publication?.assetIds.length) })) continue;
+      if (!execution.bridgeId && presence?.browserAccess?.enabled === true) {
+        const selected = chooseXWriter(state, presence, affordance, intent.routePreference);
+        if (selected?.bridge?.id !== current.id) continue;
+        execution.bridgeId = current.id; execution.connector = "bridge";
       }
-      if (execution.bridgeId !== current.id || execution.environment !== "live" || !["queued", "awaiting-connector"].includes(execution.status)) continue;
-      const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
-      if (intent && execution.deliveryHold?.reason === "bridge_identity" && intent.validity.expiresAt && new Date(intent.validity.expiresAt).getTime() <= Date.now()) {
-        intent.validity.expiresAt = renewal;
-        intent.state = "active";
-      }
+      if (execution.bridgeId !== current.id || execution.failure?.code === "BROWSER_CONNECTOR_UPDATE_REQUIRED") continue;
       if (execution.status === "awaiting-connector") execution.status = "queued";
-      execution.connector = "bridge";
       delete execution.deliveryHold;
       execution.updatedAt = timestamp();
     }
-    if (recoveredNativeFailures > 0) {
-      state.events.unshift(bridgeEvent(state, "Recovered public work through Chrome", `${recoveredNativeFailures} public action${recoveredNativeFailures === 1 ? " is" : "s are"} queued for the verified browser capability after Native X became unavailable.`, "positive"));
-    }
-
-    // A connector blocker may have been recorded before the browser identity
-    // became available. Reopen that same Assignment when the verified
-    // capability recovers; do not make the operator restate the goal or
-    // create a duplicate responsibility.
-    let resumedAssignments = 0;
-    for (const assignment of state.assignments) {
-      if (assignment.presenceId !== current.presenceId || !["blocked", "needs_operator"].includes(assignment.status)) continue;
-      if (assignment.lastOutcome?.class !== "assignment_blocked" || !/X API billing|authorized browser route|No active delivery route/i.test(assignment.lastOutcome.message)) continue;
-      const affordance = assignment.deliverable.type === "reply"
-        ? "reply"
-        : ["post", "original_publication", "image_post", "video_post"].includes(assignment.deliverable.type)
-          ? "post"
-          : assignment.deliverable.type;
-      const readiness = evaluateExecutionReadiness({ presence: presence!, channel: presence?.channel, affordance, state, environment: "live" });
-      if (!readiness.executableNow || !["ready", "awaiting_review"].includes(readiness.disposition) || !readiness.availableRoutes.includes("bridge")) continue;
-      const resumedAt = timestamp();
-      assignment.status = "active";
-      assignment.work = { ...(assignment.work ?? { phase: "candidate_review", attempts: 0, maxAttempts: 4, storiesResearched: 0 }), phase: "candidate_review", blockedReason: undefined };
-      assignment.nextDueAt = resumedAt;
-      assignment.lastOutcome = { class: "incomplete", message: "The verified browser capability recovered this responsibility; the original Assignment is resuming.", at: resumedAt };
-      assignment.updatedAt = resumedAt;
-      resumedAssignments += 1;
-    }
-    if (resumedAssignments > 0) {
-      requestAttention(current.presenceId, "assignment_due", timestamp(), "assignment", "bridge");
-      state.events.unshift(bridgeEvent(state, "Resumed blocked work through Chrome", `${resumedAssignments} existing Assignment${resumedAssignments === 1 ? " is" : "s are"} back in the work queue after the expected browser account became available.`, "positive"));
-    }
+    if (resumedAssignments.length) requestAttention(current.presenceId, "assignment_due", timestamp(), "assignment", "bridge");
   }
   state.events.unshift(bridgeEvent(state, status === "verified" ? "Browser account verified" : "Browser account check failed", message ?? `The controlled channel account matches @${expected}.`, status === "verified" ? "positive" : "warning"));
   // Identity changes are infrequent security state, not heartbeat telemetry.
@@ -277,12 +227,11 @@ export function reportBridgeIdentity(bridge: Bridge, input: z.infer<typeof ident
   return { state, identity: reportedIdentity, expectedHandle: presence?.handle };
 }
 
-export function heartbeatBridge(bridge: Bridge, executorId: string) {
+export function heartbeatBridge(bridge: Bridge, executorId: string, adapter?: z.infer<typeof heartbeatInput>["adapter"]) {
   // Heartbeats identify the live connector but do not carry user-domain
   // changes. Persist only the small operational record; rewriting the full
   // Agent workspace here would turn a five-second liveness signal into a
   // multi-megabyte SQLite write and a new browser state revision.
-  void executorId;
   const now = timestamp();
   bridge.adapterStatus = "connected";
   bridge.lastHeartbeatAt = now;
@@ -292,6 +241,36 @@ export function heartbeatBridge(bridge: Bridge, executorId: string) {
   bridge.state = bridge.kind === "bridge" && bridge.state === "degraded" && !bridgeIdentityReady(bridge) ? "degraded" : "online";
   bridge.updatedAt = now;
   writeBridgeHeartbeat({ bridgeId: bridge.id, state: bridge.state, adapterStatus: bridge.adapterStatus, lastHeartbeatAt: now, lastSeenAt: now });
+  // Absence explicitly clears stale capability evidence for this executor.
+  if (executorId.startsWith("openpresence-chrome-") || isShippedChromeBridge(bridge)) {
+    writeBrowserAdapterObservation(bridge.id, { executorId, version: adapter?.version ?? "unknown", protocolVersion: adapter?.protocolVersion ?? 0, probed: adapter?.probed ?? false, capabilities: adapter?.capabilities ?? { channelRead: false, mediaUpload: false, verification: false, affordances: [] }, observedAt: now });
+    bridge.browserAdapters = readBrowserAdapterObservations(bridge.id);
+    if (adapter?.probed) {
+      let state = readStateForBridge(bridge.id);
+      let mediaRecovered = false;
+      for (const execution of [...state.executions]) {
+        if (execution.bridgeId !== bridge.id || execution.environment !== "live" || execution.status !== "failed" || execution.attempts >= 2
+          || !["BROWSER_CONNECTOR_UNAVAILABLE", "UNSUPPORTED_ASSET", "ASSET_UPLOAD_FAILED"].includes(execution.failure?.code ?? "")
+          || !execution.publication?.assetIds.length || execution.externalRef || execution.executedAt || execution.failure?.reviewedAt) continue;
+        if (execution.publication.operatorAssetApproval?.assetHashes && (!execution.browserClaim
+          || execution.browserClaim.executorId !== executorId || execution.browserClaim.permitNonce !== execution.permit?.nonce)) continue;
+        const presence = state.presences.find(item => item.id === execution.presenceId);
+        const current = state.bridges.find(item => item.id === bridge.id);
+        if (!presence || presence.status !== "live" || !presence.browserAccess?.enabled || !current
+          || !browserAdapterForCapability({ ...current, browserAdapters: current.browserAdapters?.filter(item => item.executorId === executorId) }, presence.handle, { affordance: execution.affordance, media: true })) continue;
+        // The existing retry boundary validates the original intent, signed
+        // text and exact approval hashes. Legacy approvals return to review.
+        const next = applyOperation(state, { type: "retryExecution", id: execution.id });
+        if (next.executions.find(item => item.id === execution.id)?.status !== "failed") {
+          const recoveryEvent = next.events.find(item => item.executionId === execution.id && item.title === "Retry requested");
+          if (recoveryEvent) { recoveryEvent.title = "Image delivery recovering"; recoveryEvent.detail = "The browser became ready. OpenPresence rechecked this saved action's original intent and approval; no new operator request or approval was inferred."; }
+          state = next; mediaRecovered = true;
+        }
+      }
+      const resumed = resumeBrowserBlockedResponsibilities(state);
+      if (resumed.length || mediaRecovered) { writeState(state); if (resumed.length) requestAttention(bridge.presenceId, "assignment_due", now, "assignment", "bridge"); }
+    }
+  }
   return { bridge, status: bridgeAdapterStatus(bridge) };
 }
 
@@ -482,7 +461,7 @@ export function reconcileBridge(bridge: Bridge, payload: z.infer<typeof reconcil
 
 function expireIfNeeded(state: OpenPresenceState, execution: Execution) {
   const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
-  if (intent?.validity.expiresAt && new Date(intent.validity.expiresAt).getTime() <= Date.now()) { intent.state = "expired"; execution.status = "expired"; execution.updatedAt = timestamp(); return true; }
+  if (intent?.validity.expiresAt && new Date(intent.validity.expiresAt).getTime() <= Date.now()) { intent.state = "expired"; intent.updatedAt = timestamp(); execution.status = "expired"; execution.updatedAt = timestamp(); return true; }
   return false;
 }
 
@@ -506,11 +485,26 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
     Object.assign(state, cancelExecutionForBlockedTarget(state, execution.id));
     expiredClaimedWork = true;
   }
+  let restoredProtocolWork = false;
+  const shippedChrome = isShippedChromeBridge(current) || input.executorId.startsWith("openpresence-chrome-");
+  if (shippedChrome && input.mediaProtocol === 2) {
+    for (const execution of state.executions) {
+      if (execution.bridgeId !== bridge.id || execution.environment !== "live" || execution.status !== "awaiting-connector" || execution.failure?.code !== "BROWSER_CONNECTOR_UPDATE_REQUIRED") continue;
+      execution.status = "queued";
+      execution.failure = undefined;
+      execution.reviewReason = undefined;
+      execution.updatedAt = timestamp();
+      restoredProtocolWork = true;
+    }
+  }
   const liveWork = state.executions.some((execution) => execution.bridgeId === bridge.id && execution.status === "queued" && execution.environment === "live");
   const executorIdentity = readBridgeIdentityForExecutor(bridge.id, input.executorId);
-  const identityFresh = executorIdentity?.status === "verified"
+  const presence = state.presences.find((item) => item.id === current.presenceId) ?? state.presence;
+  const identityReady = executorIdentity?.status === "verified"
+    && bridgeMatchesExpectedAccount({ kind: current.kind, accountIdentity: executorIdentity }, presence?.handle ?? "")
+    && Date.parse(executorIdentity.observedAt) <= Date.now()
     && Date.now() - new Date(executorIdentity.observedAt).getTime() <= BRIDGE_IDENTITY_MAX_AGE_MS;
-  if (liveWork && !identityFresh) {
+  if (liveWork && !identityReady) {
     let held = false;
     for (const execution of state.executions) {
       if (execution.bridgeId !== bridge.id || execution.status !== "queued" || execution.environment !== "live") continue;
@@ -520,7 +514,7 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
         held = true;
       }
     }
-    if (held) writeState(state, { advanceWorkspaceRevision: false, syncNormalized: false });
+    if (held || restoredProtocolWork) writeState(state, { advanceWorkspaceRevision: false, syncNormalized: false });
     return { state, executions: [], retryAfterIdentity: true };
   }
   for (const execution of state.executions) {
@@ -554,7 +548,7 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
   // handling would repeatedly inspect the same expired item and leave the rest
   // of the queue stranded.
   const candidates: Execution[] = [];
-  let expiredQueuedWork = false;
+  let expiredQueuedWork = restoredProtocolWork;
   const queuedExecutions = state.executions
     // A Bridge is a live delivery body. Sandbox executions use a simulated
     // connector and must never be visible to this claim surface, even when a
@@ -566,6 +560,22 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
       return state.executions.indexOf(right) - state.executions.indexOf(left);
     });
   for (const execution of queuedExecutions) {
+    if (shippedChrome && !browserAdapterForCapability({ ...current, browserAdapters: current.browserAdapters?.filter(adapter => adapter.executorId === input.executorId) }, presence?.handle ?? "", { affordance: execution.affordance, media: Boolean(execution.publication?.assetIds.length) })) {
+      execution.status = "awaiting-connector";
+      execution.failure = { code: "BROWSER_CONNECTOR_UPDATE_REQUIRED", message: "The browser has not proved it can deliver and verify this action. Reload the OpenPresence extension and refresh the X tab; the approved action is saved and has not been sent.", retryable: false };
+      execution.reviewReason = execution.failure.message;
+      execution.updatedAt = timestamp();
+      expiredQueuedWork = true;
+      continue;
+    }
+    if (shippedChrome && (execution.publication?.assetIds.length ?? 0) > 0 && input.mediaProtocol !== 2) {
+      execution.status = "awaiting-connector";
+      execution.failure = { code: "BROWSER_CONNECTOR_UPDATE_REQUIRED", message: "Reload the OpenPresence extension and refresh the X tab. Its installed image-delivery adapter is out of date; the approved post has not been sent.", retryable: false };
+      execution.reviewReason = execution.failure.message;
+      execution.updatedAt = timestamp();
+      expiredQueuedWork = true;
+      continue;
+    }
     // Re-check immediately before sealing/claiming as well. Another request
     // may have recorded the boundary after the first queue sweep above.
     if (targetIsBlockedByPerson(state, execution.presenceId, execution.target) && !execution.operatorDirectiveId) {
@@ -610,6 +620,10 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
   for (const execution of candidates) {
     if (execution.environment === "live" && execution.publication?.publicExpression) {
       try {
+        const approval = execution.publication.operatorAssetApproval;
+        if (approval?.assetHashes && execution.publication.assetIds.some(assetId => approval.assetHashes?.[assetId] !== (state.assets.find(asset => asset.id === assetId)?.storage?.exactHash ?? state.assets.find(asset => asset.id === assetId)?.checksum))) {
+          throw new Error("The selected image changed after approval and needs fresh review.");
+        }
         authorizeAssetSelection(state, execution.publication.assetIds ?? [], { presenceId: execution.presenceId, requireReady: !execution.publication.operatorOverride && !execution.publication.operatorAssetApproval, allowReviewable: Boolean(execution.publication.operatorAssetApproval) });
         const liveAssetRepeatReason = liveAssetReuseReason(state, execution.presenceId, execution.publication.assetIds ?? [], { excludePublicationId: execution.publication.id });
         if (liveAssetRepeatReason) {
@@ -661,6 +675,7 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
     execution.status = "claimed";
     execution.attempts += 1;
     execution.lease = { executorId: input.executorId, claimedAt: new Date(now).toISOString(), expiresAt };
+    if (execution.permit) execution.browserClaim = { executorId: input.executorId, claimedAt: execution.lease.claimedAt, permitNonce: execution.permit.nonce, assetHashes: Object.fromEntries((execution.publication?.assetIds ?? []).flatMap(assetId => { const asset = state.assets.find(item => item.id === assetId); const hash = asset?.storage?.exactHash ?? asset?.checksum; return hash ? [[assetId, hash]] : []; })) };
     execution.updatedAt = timestamp();
     recordExecutionTransition(state, execution, { eventType: "execution.attempted", actor: "worker", status: "DISPATCHING", payload: { executorId: input.executorId, attemptNo: execution.attempts } });
     updatePublicActionDelivery(execution.id, "handed_off");
@@ -678,10 +693,15 @@ function leasedExecution(state: OpenPresenceState, bridge: Bridge, executionId: 
   return execution;
 }
 
-export function acknowledgeExecution(bridge: Bridge, executionId: string, input: z.infer<typeof ackInput>, options: { apiVerified?: boolean } = {}) {
+export function acknowledgeExecution(bridge: Bridge, executionId: string, input: z.infer<typeof ackInput>, options: { apiVerified?: boolean; browserVerified?: boolean } = {}) {
   let state = readStateForBridge(bridge.id); const execution = state.executions.find((item) => item.id === executionId && item.bridgeId === bridge.id);
   if (!execution) throw new Error("Execution not found");
   if (execution.status === "succeeded") { if (execution.externalRef?.id !== input.externalRef.id || execution.externalRef?.type !== input.externalRef.type) throw new Error("Execution already acknowledged with a different external reference"); return { state, execution }; }
+  if (execution.environment === "live" && isShippedChromeBridge(state.bridges.find(item => item.id === bridge.id) ?? bridge)
+    && ["post", "x.post", "reply", "x.reply", "quote", "x.quote", "delete", "x.delete"].includes(execution.affordance)
+    && !options.apiVerified && !options.browserVerified) {
+    throw new Error("Browser publication requires independent delivery verification; an acknowledgement alone is not delivery evidence.");
+  }
   if (targetIsBlockedByPerson(state, execution.presenceId, execution.target) && !execution.operatorDirectiveId) {
     execution.status = "verification-closed";
     execution.failure = { ...execution.failure, code: "TARGET_BLOCKED_PRESENCE", message: "The target person has blocked this Presence. The browser reported an outcome after the relationship boundary was known; no delivery was counted.", retryable: false, reviewedAt: timestamp(), reviewDisposition: "operator_action_required", reviewNote: "The external outcome was unresolved when the durable relationship boundary was re-checked." };
@@ -696,13 +716,22 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
   }
   leasedExecution(state, bridge, executionId, input.executorId);
   const accountIdentity = readBridgeIdentityForExecutor(bridge.id, input.executorId);
-  const identityFresh = accountIdentity?.status === "verified"
+  const currentBridge = state.bridges.find((item) => item.id === bridge.id);
+  const presence = state.presences.find((item) => item.id === execution.presenceId) ?? state.presence;
+  const identityReady = accountIdentity?.status === "verified"
+    && bridgeMatchesExpectedAccount({ kind: currentBridge?.kind ?? bridge.kind, accountIdentity }, presence?.handle ?? "")
+    && Date.parse(accountIdentity.observedAt) <= Date.now()
     && Date.now() - new Date(accountIdentity.observedAt).getTime() <= BRIDGE_IDENTITY_MAX_AGE_MS;
   const apiVerifiedReply = options.apiVerified === true && input.externalRef.type === "x.reply" && ["reply", "x.reply"].includes(execution.affordance);
   const apiVerifiedDelete = options.apiVerified === true && input.externalRef.type === "x.post" && execution.affordance === "x.delete";
-  if (execution.environment === "live" && !identityFresh && !apiVerifiedReply && !apiVerifiedDelete) {
+  if (execution.environment === "live" && !identityReady && !apiVerifiedReply && !apiVerifiedDelete) {
     execution.status = "failed";
-    execution.failure = { code: "ACCOUNT_MISMATCH", message: "The Bridge account was not verified against the Presence before delivery.", retryable: false };
+    const expectedHandle = normalizedHandle(presence?.handle);
+    const actualHandle = normalizedHandle(accountIdentity?.username);
+    const message = accountIdentity?.status === "verified" && expectedHandle && actualHandle !== expectedHandle
+      ? `The Bridge account is @${actualHandle || "unknown"}, but this Presence currently expects @${expectedHandle}.`
+      : "The Bridge account was not freshly verified against the current Presence before delivery.";
+    execution.failure = { code: "ACCOUNT_MISMATCH", message, retryable: false };
     execution.lease = undefined;
     execution.updatedAt = timestamp();
     state.events.unshift(bridgeEvent(state, "Bridge acknowledgement blocked", execution.failure.message, "warning", execution.id));
@@ -738,7 +767,7 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
       writeState(state);
       return { state, execution };
     }
-    try { verifyExecutionPermit(execution); } catch (error) {
+    try { verifyExecutionPermit(execution, undefined, { allowExpiredForPreWriteRetry: options.browserVerified === true }); } catch (error) {
       execution.status = "blocked";
       execution.failure = { code: error instanceof PublicationSecurityError ? error.code : "PUBLICATION_SECURITY_BLOCKED", message: error instanceof Error ? error.message : "Live publication security validation failed.", retryable: false };
       execution.lease = undefined;
@@ -776,7 +805,7 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
   updatePublicActionDelivery(execution.id, "verified", input.externalRef);
   const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, attentionEpisodeId: execution.attentionEpisodeId, status: "succeeded", observedAt: timestamp(), metrics: {}, evidence: [input.externalRef] }; state.outcomes.unshift(outcome);
   recordExecutionTransition(state, execution, { eventType: "provider.result_received", actor: "connector", status: "PROVIDER_ACCEPTED_UNVERIFIED", verification: { rung: "provider", oracle: "bridge executor response", status: "passed", observedAt: outcome.observedAt, remoteObjectId: input.externalRef.id, evidenceRefs: [input.externalRef] }, payload: { externalRef: input.externalRef } });
-  recordExecutionTransition(state, execution, { eventType: "remote.verification_recorded", actor: "verifier", status: "EXTERNAL_VERIFIED", evidenceRefs: [input.externalRef], verification: { rung: "remote_object", oracle: options.apiVerified ? "provider read-back" : "bridge executor acknowledgement", status: "passed", observedAt: outcome.observedAt, remoteObjectId: input.externalRef.id, evidenceRefs: [input.externalRef] }, payload: { externalRef: input.externalRef } });
+  recordExecutionTransition(state, execution, { eventType: "remote.verification_recorded", actor: "verifier", status: "EXTERNAL_VERIFIED", evidenceRefs: [input.externalRef], verification: { rung: "remote_object", oracle: options.browserVerified ? "browser website read-back" : options.apiVerified ? "provider read-back" : "bridge executor acknowledgement", status: "passed", observedAt: outcome.observedAt, remoteObjectId: input.externalRef.id, evidenceRefs: [input.externalRef] }, payload: { externalRef: input.externalRef } });
   recordExecutionTransition(state, execution, { eventType: "measurement.scheduled", actor: "worker", status: "MEASUREMENT_PENDING", payload: { reason: "The verified external action is awaiting an outcome measurement window." } });
   state = settlePromotionBurstProgress(state, execution.assignmentId ?? "", execution.presenceId); recordVerifiedCapabilityTrial(state, execution, outcome);
   recordVerifiedBridgeAttention(state, bridge, execution, input.externalRef);
@@ -878,11 +907,21 @@ export function failExecution(bridge: Bridge, executionId: string, input: z.infe
     writeState(state);
     return { state, execution };
   }
+  const reportedCode = input.code;
+  const genericAssetId = /^The authorized Asset ([a-zA-Z0-9_-]+) could not be retrieved\.$/.exec(input.message)?.[1];
+  if (input.code === "UNSUPPORTED_ASSET" && genericAssetId && execution.publication?.assetIds.includes(genericAssetId)
+    && state.assets.some(asset => asset.id === genericAssetId && ["image/png", "image/jpeg", "image/gif"].includes(asset.storage?.mimeType ?? asset.mimeType ?? "") && Boolean(asset.storage?.exactHash ?? asset.checksum))) {
+    // Legacy content scripts erased missing transport replies. Retain their
+    // exact message/reported code while distinguishing absent connector
+    // evidence from a proven unsupported image format.
+    input = { ...input, code: "BROWSER_CONNECTOR_UNAVAILABLE", retryable: false };
+  }
   const identityBlocked = execution.environment === "live" && ["ACCOUNT_MISMATCH", "ACCOUNT_NOT_READY"].includes(input.code ?? "");
   const blockedByPerson = isPersonBlockingError(input.message, input.code);
-  execution.failure = { code: blockedByPerson ? "TARGET_BLOCKED_PRESENCE" : input.code, message: input.message, retryable: blockedByPerson ? false : identityBlocked ? true : input.retryable }; execution.lease = undefined;
-  const provenPreWriteFailure = identityBlocked || ["COMPOSER_INPUT_FAILED", "COMPOSER_UNAVAILABLE", "ACCOUNT_NOT_READY", "ACCOUNT_MISMATCH", "UNSUPPORTED_ASSET", "ASSET_UPLOAD_FAILED"].includes(input.code ?? "");
-  const retrying = !blockedByPerson && (identityBlocked || (provenPreWriteFailure && input.retryable)) && execution.attempts < 5;
+  execution.failure = { code: blockedByPerson ? "TARGET_BLOCKED_PRESENCE" : input.code, message: input.message, retryable: blockedByPerson ? false : identityBlocked ? true : input.retryable, diagnostics: input.diagnostics }; execution.lease = undefined;
+  const provenPreWriteFailure = identityBlocked || ["COMPOSER_INPUT_FAILED", "COMPOSER_UNAVAILABLE", "ACCOUNT_NOT_READY", "ACCOUNT_MISMATCH", "UNSUPPORTED_ASSET", "BROWSER_CONNECTOR_UNAVAILABLE", "ASSET_UPLOAD_FAILED"].includes(input.code ?? "");
+  const mediaTransferFailure = Boolean(execution.publication?.assetIds.length) && ["UNSUPPORTED_ASSET", "BROWSER_CONNECTOR_UNAVAILABLE", "ASSET_UPLOAD_FAILED"].includes(input.code ?? "");
+  const retrying = !blockedByPerson && !mediaTransferFailure && (identityBlocked || (provenPreWriteFailure && input.retryable)) && execution.attempts < 5;
   if (provenPreWriteFailure) releasePublicActionDelivery(execution.id);
   else updatePublicActionDelivery(execution.id, "uncertain");
   if (retrying) {
@@ -901,7 +940,7 @@ export function failExecution(bridge: Bridge, executionId: string, input: z.infe
     eventType: execution.status === "verification-pending" ? "provider.result_received" : "execution.failed",
     actor: "connector",
     status: execution.status === "verification-pending" ? "EXTERNAL_STATE_UNKNOWN" : execution.status === "queued" ? "DEFERRED" : blockedByPerson ? "POLICY_DENIED" : providerRejected ? "PROVIDER_REJECTED" : "EXECUTION_FAILED",
-    payload: { code: input.code, message: input.message, retryable: input.retryable },
+    payload: { code: input.code, reportedCode, message: input.message, retryable: input.retryable, diagnostics: input.diagnostics },
   });
   if (blockedByPerson) state = recordPersonBlockedFromExecution(state, execution.id, input.message, "browser_delivery");
   const settledExecution = state.executions.find((item) => item.id === execution.id) ?? execution;
@@ -979,6 +1018,34 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
     && ["connected", "needs-attention"].includes(item.status)
   );
   const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
+  const apiUnavailable = !credentials || Boolean(connection && xNativeWriteUnavailable(connection)) || state.dependencyHealth?.some(health => health.presenceId === execution.presenceId && health.dependency === "native_x" && health.state === "requires_operator");
+  if (input.browserEvidence) {
+    const claim = execution.browserClaim;
+    const currentBridge = state.bridges.find(item => item.id === bridge.id) ?? bridge;
+    const readyAdapter = browserAdapterForCapability({ ...currentBridge, browserAdapters: currentBridge.browserAdapters?.filter(adapter => adapter.executorId === input.executorId) }, presence?.handle ?? "", "verification");
+    const candidateId = input.candidateExternalRef?.id;
+    if (!claim || claim.executorId !== input.executorId || claim.permitNonce !== execution.permit?.nonce || !readyAdapter || (candidateId && candidateId !== input.browserEvidence.post.externalRef.id)) {
+      return leaveExecutionVerificationPending(bridge, state, execution, "Browser verification is waiting for the same claimed executor, fresh account readiness and matching public object. The action will not be sent again.", input, { code: "BROWSER_READBACK_REQUIRED" });
+    }
+    const result = verifyBrowserDeliveryProof(input.browserEvidence, {
+      execution, bridge: currentBridge, executorId: input.executorId, expectedHandle: presence?.handle ?? "",
+      identity: readBridgeIdentityForExecutor(bridge.id, input.executorId), claimedAt: claim.claimedAt,
+      assetHashes: claim.assetHashes,
+      currentAssetHashes: Object.fromEntries((execution.publication?.assetIds ?? []).flatMap(assetId => { const asset = state.assets.find(item => item.id === assetId); const hash = asset?.storage?.exactHash ?? asset?.checksum; return hash ? [[assetId, hash]] : []; })),
+      previouslyAttributedPostIds: state.executions.filter(item => item.id !== execution.id && item.presenceId === execution.presenceId && item.environment === "live" && item.externalRef && ["x.post", "x.reply", "x.quote"].includes(item.externalRef.type)).map(item => item.externalRef!.id),
+    });
+    if (!result.verified) return leaveExecutionVerificationPending(bridge, state, execution, `Browser verification has not established the approved public result: ${result.reason}. The action will not be sent again.`, input, { code: "BROWSER_EVIDENCE_INCOMPLETE" });
+    recordExecutionTransition(state, execution, { eventType: "provider.result_received", actor: "connector", status: "EXTERNAL_STATE_UNKNOWN", payload: { browserEvidence: result.proof } });
+    if (execution.status !== "claimed") {
+      execution.status = "claimed";
+      execution.lease = { executorId: input.executorId, claimedAt: timestamp(), expiresAt: new Date(Date.now() + 30_000).toISOString() };
+      execution.updatedAt = timestamp();
+    }
+    writeState(state);
+    const externalRef = { type: action === "reply" ? "x.reply" : "x.post", id: result.proof.post.externalRef.id };
+    const completed = acknowledgeExecution(bridge, executionId, { executorId: input.executorId, externalRef, observedAt: result.proof.observedAt }, { browserVerified: true });
+    return { ...completed, verified: completed.execution.status === "succeeded", nextAttemptAt: undefined };
+  }
   if (action === "post") {
     const payload = execution.publication?.payload;
     const payloadText = payload && typeof payload === "object" && !Array.isArray(payload) && typeof payload.text === "string" ? payload.text : undefined;
@@ -1011,7 +1078,7 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
       && permalinkParts[1] === "status"
       && permalinkParts[2] === domProof.externalRef.id
     );
-    if (domProofMatchesTextPost && domProof) {
+    if (domProofMatchesTextPost && domProof && !isShippedChromeBridge(state.bridges.find(item => item.id === bridge.id) ?? bridge)) {
       state = readStateForBridge(bridge.id);
       const latest = state.executions.find((item) => item.id === executionId && item.bridgeId === bridge.id);
       if (!latest) throw new Error("Execution not found");
@@ -1021,9 +1088,10 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
         latest.updatedAt = timestamp();
         writeState(state);
       }
-      const result = acknowledgeExecution(bridge, executionId, { executorId: input.executorId, externalRef: domProof.externalRef, observedAt: input.observedAt ?? timestamp() });
-      return { ...result, verified: true, nextAttemptAt: undefined };
+    const result = acknowledgeExecution(bridge, executionId, { executorId: input.executorId, externalRef: domProof.externalRef, observedAt: input.observedAt ?? timestamp() }, { browserVerified: true });
+      return { ...result, verified: result.execution.status === "succeeded", nextAttemptAt: undefined };
     }
+    if (apiUnavailable) return leaveExecutionVerificationPending(bridge, state, execution, "The public result needs browser read-back evidence. X API access is unavailable; this action will not be sent again while verification is pending.", input, { code: "BROWSER_READBACK_REQUIRED" });
     // The X API does not expose a stable mapping from a returned media key to
     // OpenPresence's sealed Asset ID. Keep image posts unresolved until a
     // provider receipt can prove that linkage; text-only originals can use a
@@ -1064,9 +1132,10 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
       writeState(state);
     }
     const result = acknowledgeExecution(bridge, executionId, { executorId: input.executorId, externalRef: { type: "x.post", id: candidate.id }, observedAt: input.observedAt ?? timestamp() }, { apiVerified: true });
-    return { ...result, verified: true, nextAttemptAt: undefined };
+    return { ...result, verified: result.execution.status === "succeeded", nextAttemptAt: undefined };
   }
   if (execution.target?.type !== "x.post" || !execution.target.id) throw new Error(`The Chrome ${action} has no target X post`);
+  if (action !== "delete" && apiUnavailable) return leaveExecutionVerificationPending(bridge, state, execution, "The public reply or quote needs browser read-back evidence. X API access is unavailable; this action will not be sent again while verification is pending.", input, { code: "BROWSER_READBACK_REQUIRED" });
   if (action === "delete") {
     const targetMirror = state.mirrorObjects.find((item) => item.presenceId === execution.presenceId
       && item.channelId === "x"
@@ -1098,7 +1167,7 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
       writeState(state);
     }
     const result = acknowledgeExecution(bridge, executionId, { executorId: input.executorId, externalRef: { type: "x.post", id: execution.target.id }, observedAt: input.observedAt ?? timestamp() }, { apiVerified: true });
-    return { ...result, verified: true, nextAttemptAt: undefined };
+    return { ...result, verified: result.execution.status === "succeeded", nextAttemptAt: undefined };
   }
   const payload = execution.publication?.payload;
   const payloadText = payload && typeof payload === "object" && !Array.isArray(payload) && typeof payload.text === "string" ? payload.text : undefined;
@@ -1185,7 +1254,7 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
     writeState(state);
   }
   const result = acknowledgeExecution(bridge, executionId, { executorId: input.executorId, externalRef: { type: action === "quote" ? "x.post" : "x.reply", id: verifiedPost.id }, observedAt: input.observedAt ?? timestamp() }, { apiVerified: true });
-  return { ...result, verified: true, nextAttemptAt: undefined };
+  return { ...result, verified: result.execution.status === "succeeded", nextAttemptAt: undefined };
 }
 
 /**

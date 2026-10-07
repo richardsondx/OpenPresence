@@ -74,10 +74,39 @@ function base64FromBytes(bytes) {
   return btoa(value);
 }
 
-async function bridgeAssetRequest(session, assetId) {
+async function ensureAdapterProtocol(session) {
+  const probe = () => chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_ADAPTER_CAPABILITIES" }).catch(() => undefined);
+  const remember = (result) => {
+    const adapter = result?.adapter;
+    session.adapterProbe = adapter?.protocolVersion === 2 && adapter.probed === true
+      && typeof adapter.version === "string" && ["channelRead", "mediaUpload", "verification"].every(key => typeof adapter.capabilities?.[key] === "boolean")
+      && Array.isArray(adapter.capabilities?.affordances) ? adapter : undefined;
+    session.mediaProtocol = 2; session.adapterProtocolError = undefined;
+    return true;
+  };
+  let result = await probe();
+  if (result?.mediaProtocol === 2) return remember(result);
+  // Refresh only an idle controlled document. Never destroy a composer or
+  // verification window whose public result could still be uncertain.
+  if (!session.activeExecutionId && !session.adapterRefreshAttempted) {
+    session.adapterRefreshAttempted = true;
+    await chrome.tabs.reload(session.tabId);
+    await waitForTabComplete(session.tabId);
+    await sendSessionContext(session);
+    result = await probe();
+  }
+  if (result?.mediaProtocol === 2) return remember(result);
+  session.mediaProtocol = undefined;
+  session.adapterProbe = undefined;
+  session.adapterProtocolError = "Reload the OpenPresence extension and refresh the X tab. Its installed image-delivery adapter is out of date.";
+  sendSessionStatus(session);
+  return false;
+}
+
+async function bridgeAssetRequest(session, assetId, executionId) {
   const origin = await appOrigin();
   const response = await fetch(`${origin}/api/bridge/v1/assets/${encodeURIComponent(assetId)}`, {
-    headers: { authorization: `Bearer ${session.bridgeKey}`, "x-openpresence-executor-id": session.executorId },
+    headers: { authorization: `Bearer ${session.bridgeKey}`, "x-openpresence-executor-id": session.executorId, "x-openpresence-execution-id": executionId },
     cache: "no-store",
   });
   if (!response.ok) {
@@ -110,7 +139,7 @@ function publicSessionStatus(session) {
   const heartbeatFresh = session.lastHeartbeatAt && Date.now() - session.lastHeartbeatAt <= bridgeHeartbeatFreshMs && session.lastHeartbeatOk !== false;
   const identityReady = session.lastIdentityStatus === "verified";
   return {
-    state: heartbeatFresh ? (identityReady ? "connected" : "identity_required") : "stale",
+    state: session.adapterProtocolError ? "update_required" : heartbeatFresh ? (identityReady ? "connected" : "identity_required") : "stale",
     presenceId: session.presence.id,
     presenceName: session.presence.name,
     presenceHandle: session.presence.handle,
@@ -118,13 +147,13 @@ function publicSessionStatus(session) {
     windowId: session.windowId,
     identityStatus: session.lastIdentityStatus,
     heartbeatAt: session.lastHeartbeatAt,
-    message: !heartbeatFresh
+    message: session.adapterProtocolError || (!heartbeatFresh
       ? (session.lastHeartbeatError || "The OpenPresence app has not acknowledged the Bridge heartbeat recently.")
       : identityReady
         ? undefined
         : session.lastIdentityStatus === "mismatch"
           ? `Sign in to X as ${session.presence.handle} before delivery.`
-          : `Verify the signed-in X account as ${session.presence.handle} before delivery.`,
+          : `Verify the signed-in X account as ${session.presence.handle} before delivery.`),
   };
 }
 
@@ -528,7 +557,8 @@ async function heartbeat(session) {
       session.activeExecution = undefined;
       await persistSessions();
     }
-    await bridgeRequest(session, "/api/bridge/v1/heartbeat", { method: "POST", body: JSON.stringify({ executorId: session.executorId }) });
+    await ensureAdapterProtocol(session);
+    await bridgeRequest(session, "/api/bridge/v1/heartbeat", { method: "POST", body: JSON.stringify({ executorId: session.executorId, ...(session.adapterProbe ? { adapter: session.adapterProbe } : {}) }) });
     session.lastHeartbeatAt = Date.now();
     session.lastHeartbeatOk = true;
     session.lastHeartbeatError = undefined;
@@ -546,33 +576,65 @@ async function heartbeat(session) {
 }
 
 const browserReadRuns = new Map();
+function browserReadTargetMatches(url, target) {
+  try {
+    const actual = new URL(url);
+    const expected = new URL(target);
+    return actual.origin === expected.origin
+      && actual.pathname === expected.pathname
+      && actual.searchParams.get("q") === expected.searchParams.get("q");
+  } catch {
+    return false;
+  }
+}
+
 async function readChannel(session) {
-  if (session.activeExecutionId || claimRuns.has(session.presence.id) || browserReadRuns.has(session.presence.id)) return;
+  // A submitted public action can remain verification-pending while the X API
+  // is unavailable. Its write must stay fenced, but the tab is still a valid
+  // read body: blocking reads here makes the autonomous Presence go blind
+  // until billing/verification recovers. Never let a fresh claimed action
+  // share the tab; only the bounded, already-submitted verification queue may
+  // coexist with a read.
+  const verificationPending = Boolean(session.activeExecutionId && verificationJobs.has(session.activeExecutionId));
+  if ((session.activeExecutionId && !verificationPending) || claimRuns.has(session.presence.id) || browserReadRuns.has(session.presence.id)) return;
   const work = (async () => {
     const response = await bridgeRequest(session, "/api/bridge/v1/reads", { method: "POST", body: "{}" });
     const read = response.read;
     if (!read) return;
+    if (typeof read.leaseToken !== "string") throw new Error("OpenPresence did not issue a browser-read lease.");
+    const lease = { action: "renew", id: read.id, leaseToken: read.leaseToken };
     let previousUrl;
     try {
       const target = new URL(read.url);
       if (target.origin !== "https://x.com" || !["/home", "/search"].includes(target.pathname)) throw new Error("Unsupported browser read URL.");
-      previousUrl = (await chrome.tabs.get(session.tabId)).url;
-      await chrome.tabs.update(session.tabId, { url: read.url });
+      const currentTab = await chrome.tabs.get(session.tabId);
+      previousUrl = currentTab.url;
+      const alreadyAtTarget = browserReadTargetMatches(currentTab.url, read.url);
+      // Reuse a loaded X page instead of reloading it for every observation.
+      // This is especially important after an MV3 service-worker restart: the
+      // restored worker can resume the same durable read on the tab that was
+      // already navigated, rather than starting a second slow page load.
+      if (!alreadyAtTarget) await chrome.tabs.update(session.tabId, { url: read.url });
       let result;
-      const deadline = Date.now() + 18000;
+      const requestedDeadline = Date.parse(read.deadlineAt || "");
+      const deadline = Number.isFinite(requestedDeadline) ? Math.min(Date.now() + 60000, requestedDeadline - 1000) : Date.now() + 60000;
+      let renewAt = Date.now() + 4000;
       while (Date.now() < deadline) {
+        if (Date.now() >= renewAt) {
+          await bridgeRequest(session, "/api/bridge/v1/reads", { method: "POST", body: JSON.stringify(lease) });
+          renewAt = Date.now() + 4000;
+        }
         const tab = await chrome.tabs.get(session.tabId);
-        const loaded = tab.url ? new URL(tab.url) : undefined;
-        if (tab.status === "complete" && loaded?.origin === target.origin && loaded.pathname === target.pathname && loaded.searchParams.get("q") === target.searchParams.get("q")) {
+        if (tab.status === "complete" && browserReadTargetMatches(tab.url, target.href)) {
           try { result = await chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_READ", expectedHandle: read.expectedHandle }); if (result) break; } catch { /* X is still mounting. */ }
         }
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
-      await bridgeRequest(session, "/api/bridge/v1/reads", { method: "POST", body: JSON.stringify({ id: read.id, ...(result || { error: "The browser read timed out." }) }) });
+      await bridgeRequest(session, "/api/bridge/v1/reads", { method: "POST", body: JSON.stringify({ action: "complete", id: read.id, leaseToken: read.leaseToken, ...(result || { error: "The browser read timed out." }) }) });
     } catch (error) {
-      await bridgeRequest(session, "/api/bridge/v1/reads", { method: "POST", body: JSON.stringify({ id: read.id, error: error.message }) }).catch(() => {});
+      await bridgeRequest(session, "/api/bridge/v1/reads", { method: "POST", body: JSON.stringify({ action: "complete", id: read.id, leaseToken: read.leaseToken, error: error.message }) }).catch(() => {});
     } finally {
-      if (previousUrl?.startsWith("https://x.com/")) {
+      if (previousUrl?.startsWith("https://x.com/") && !browserReadTargetMatches(previousUrl, read.url)) {
         await chrome.tabs.update(session.tabId, { url: previousUrl }).catch(() => {});
         await waitForTabComplete(session.tabId, 8000).catch(() => {});
       }
@@ -611,7 +673,8 @@ async function claim(session) {
     try {
       // A controlled tab is a single foreground executor. Claim one execution
       // at a time so concurrent target navigations cannot race each other.
-      const result = await bridgeRequest(session, "/api/bridge/v1/executions/claim", { method: "POST", body: JSON.stringify({ executorId: session.executorId, limit: 1 }) });
+      const adapterReady = await ensureAdapterProtocol(session);
+      const result = await bridgeRequest(session, "/api/bridge/v1/executions/claim", { method: "POST", body: JSON.stringify({ executorId: session.executorId, limit: 1, ...(adapterReady ? { mediaProtocol: session.mediaProtocol } : {}) }) });
       const claimed = result.executions || [];
       for (const execution of claimed) {
         session.activeExecutionId = execution.id;
@@ -779,10 +842,14 @@ async function verifySubmittedExecution(session, result, attempt = 0) {
     // results used x.post for the reply target, so keep that legacy fallback
     // unset unless the result includes the new receipt evidence.
     const candidateExternalRef = result.publicProof?.externalRef
+      || result.browserEvidence?.post?.externalRef
       || (result.externalRef?.type === "x.post" ? undefined : result.externalRef);
+    const rawEvidence = result.browserEvidence;
+    const browserEvidence = rawEvidence?.readback === true && rawEvidence.executionId === result.executionId
+      ? { ...rawEvidence, executorId: session.executorId, bridgeId: session.bridgeId, presenceId: session.presence.id } : undefined;
     const response = await bridgeRequest(session, executionPath, {
       method: "POST",
-      body: JSON.stringify({ executorId: session.executorId, candidateExternalRef, domProof: result.publicProof, observedAt: new Date().toISOString() })
+      body: JSON.stringify({ executorId: session.executorId, candidateExternalRef, domProof: result.publicProof, browserEvidence, observedAt: new Date().toISOString() })
     });
     if (response.verified || response.execution?.status === "succeeded") {
       await clearVerificationJob(result.executionId);
@@ -852,7 +919,7 @@ async function finishExecution(session, result) {
       acknowledged = true;
     }
     else {
-      await bridgeRequest(session, `/api/bridge/v1/executions/${encodeURIComponent(result.executionId)}/fail`, { method: "POST", body: JSON.stringify({ executorId: session.executorId, code: result.code || "BROWSER_EXECUTION_FAILED", message: result.message || "The controlled tab could not verify the result.", retryable: Boolean(result.retryable) }) });
+      await bridgeRequest(session, `/api/bridge/v1/executions/${encodeURIComponent(result.executionId)}/fail`, { method: "POST", body: JSON.stringify({ executorId: session.executorId, code: result.code || "BROWSER_EXECUTION_FAILED", message: result.message || "The controlled tab could not verify the result.", retryable: Boolean(result.retryable), diagnostics: result.diagnostics }) });
       acknowledged = true;
     }
   } catch (error) { sendStatus({ state: "error", presenceId: session.presence.id, message: error.message }); }
@@ -921,8 +988,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: false, error: "The requested Asset ID is missing." });
           return;
         }
+        if (typeof message.executionId !== "string" || !message.executionId.trim()) {
+          sendResponse({ ok: false, error: "The approved execution ID is missing. Reload the OpenPresence extension and refresh the X tab." });
+          return;
+        }
         try {
-          sendResponse({ ok: true, asset: await bridgeAssetRequest(session, message.assetId.trim()) });
+          sendResponse({ ok: true, asset: await bridgeAssetRequest(session, message.assetId.trim(), message.executionId.trim()) });
         } catch (error) {
           sendResponse({ ok: false, error: error instanceof Error ? error.message : "The authorized Asset could not be retrieved." });
         }

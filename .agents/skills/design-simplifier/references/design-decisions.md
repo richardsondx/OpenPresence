@@ -164,3 +164,27 @@ People uses compact rows with one useful context line. Watching keeps watch plan
 ### Calendar clarification (same change)
 
 The user explicitly requested that Calendar contain only a simplified calendar. Replace the old compact/full-hours modes and unscheduled list with one dated week, previous/next/Today, and a mobile day selection. Timed tasks and deadline-only work retain dates; plan windows are labelled Opportunity. Undated work remains visible in List. This supersedes the earlier recommendation to retain a “No fixed start time” panel inside Calendar.
+
+
+## 2026-10-01 — Chat pending approval is a static decision card
+
+- **User job:** Inspect the proposed post and approve or cancel immediately.
+- **Evidence:** Operator screenshots and explicit rejection of collapsed pending review.
+- **Decision:** One permanently expanded Review post card; combine duplicate pending receipts, simplify media, retain two primary choices. Technical evidence stays secondary.
+- **Before → after:** Expand receipt and decode repeated review/metadata labels → inspect text and image, then decide.
+- **Tenet:** Remove duplicate concepts; inline necessary user action.
+- **Tradeoff:** Pending review occupies space until resolved; unrelated technical activity retains progressive disclosure.
+- **Protected behavior:** UX-004 / AUT-011 retain exact approved expression, scoped media, cancellation, durable receipts, and verified-outcome boundaries. Six desktop/mobile journeys pass; actual Genny Chrome shows a non-collapsible pending review. See qa-learnings/chat-approval-followthrough-2026-10-01.md.
+- **Reopen when:** Several concurrent reviews prevent clear prioritization or required context is missing from the decision.
+
+
+## 2026-10-01 — V2 connects through the user's existing conversation
+
+- **User job:** Connect a personal agent and understand audience-building without technical setup.
+- **Evidence:** User explicitly rejected verbose connection instructions, Muse-specific copy, a globally applied personal handle and unrealistic simultaneous chat choices.
+- **Decision:** Remove deployment instructions, endpoint input, staged navigation, account/settings inspector and multi-panel choices. Use three short steps, one server-configured copy button, and a chronological chat with one active question. Replace abstract social media with an illustrative weeknight dinner post.
+- **Before → after:** Read infrastructure instructions and decode six staged panels → copy/paste/approve sign-in, then reply naturally one turn at a time.
+- **Tradeoff:** Operator setup stays in docs/v2-connection.md; an unconfigured deployment truthfully disables copying. The demo is scripted and does not connect accounts or execute actions.
+- **Protected behavior:** V2-002/003/005 retain scoped voice correction, account confirmation, per-action approval and honest learning uncertainty. Instagram captions without media stay drafts.
+- **Evidence:** qa-learnings/v2-simplification-2026-10-01.md and desktop/mobile browser captures.
+- **Reopen when:** Real nontechnical onboarding exposes connection friction or host-specific limits need one short recovery step.

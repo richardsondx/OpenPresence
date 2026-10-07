@@ -850,8 +850,8 @@ describe("native X connection", () => {
       headers: { "content-type": "application/json" },
     }));
     const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
     const connection = body.nativeConnections.find((item: { presenceId: string; kind: string }) => item.presenceId === presenceId && item.kind === "x");
-    expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(connection.observation.status).toBe("stale");
     expect(xCreditsExhausted(connection)).toBe(false);

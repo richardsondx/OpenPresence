@@ -1,4 +1,4 @@
-import { bridgeExecutionStatus } from "@/lib/bridge-contract";
+import { bridgeReadyForExpectedAccount } from "@/lib/bridge-contract";
 import type { MirrorObject, OpenPresenceState, Operation, Presence } from "@/lib/types";
 
 export type BridgeDiscoveryCandidate = { id: string; authorName: string; text: string };
@@ -72,7 +72,8 @@ export function shouldRunAttentionWorker(state: OpenPresenceState, presence: Pre
   if (presence.status !== "live") return false;
   if (presence.channel !== "x" && presence.connectionMode === "bridge") return true;
   const bridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline" && (presence.channel !== "x" || item.name.startsWith("OpenPresence Chrome")));
-  return Boolean(bridge && bridgeExecutionStatus(bridge) === "connected");
+  if (presence.channel === "x" && presence.browserAccess?.enabled !== true) return false;
+  return Boolean(bridge && bridgeReadyForExpectedAccount(bridge, presence.handle));
 }
 
 export function recurringAttentionOperation(state: OpenPresenceState, presence: Presence): Extract<Operation, { type: "runAttentionWorker" }> | Extract<Operation, { type: "runPulse" }> {

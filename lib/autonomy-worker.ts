@@ -1,3 +1,6 @@
+import { operatorProgressRecapReply } from "./supervisory-chat";
+import { classifyChatToolFailure, unsupportedChatContinuationPromise, unsupportedChatCompletionClaim } from "./chat-tool-recovery";
+import { chatResearchCapabilities } from "./browser-research";
 import { readChannelThroughBrowser, recordBrowserReadMirrors, readyBrowserForRead } from "./browser-channel-read";
 import { compileSocialStrategyContext } from "./social-strategy";
 import { randomUUID } from "node:crypto";
@@ -142,9 +145,9 @@ import {
 } from "./ai";
 import { hydrateNativeXThreadContext, nextObservationAt, reconcileNativeX } from "./native-x";
 import { compileSocialThreadContext } from "./thread-context";
-import { bridgeExecutionStatus } from "./bridge-contract";
+import { bridgeReadyForExpectedAccount } from "./bridge-contract";
 import { verifyChromeExecution } from "./bridge";
-import { readNativeXCredentials, readPublicXPostByUrl, readXPostsByIds, searchRecentXPosts, xPostIdFromUrl } from "./x";
+import { readNativeXCredentials, readPublicXPostByUrl, readXPostsByIds, searchRecentXPosts, xPostIdFromUrl, type XRecentPost } from "./x";
 import { nextSelfDirectedAttentionAt, selectBridgeDiscoveryCandidates, selectGrowthDiscoverySource } from "./growth-scheduler";
 import { createAttentionEpisode, recordAttentionStepInPlace, summarizeAttentionEpisode, updateAttentionEpisode } from "./attention-episodes";
 import { deliverNativeExecutions } from "./native-execution-delivery";
@@ -153,10 +156,10 @@ import { requestAttention } from "./attention-coordinator";
 import { settleAttentionResponsibility } from "./attention-responsibility";
 import { executeChatRuntimeTool, chatExecutionReceipt, deliverChatSandboxActions } from "./operator-chat-tools";
 import { orderedOperatorChatMessages } from "./operator-chat-history";
-import { operatorChatHarnessInstructions, operatorChatReactions, parseOperatorChatStep } from "./operator-chat-harness";
+import { operatorChatHarnessInstructions, operatorChatReactions, operatorChatStepValidationHint, parseOperatorChatStep, type OperatorChatStep } from "./operator-chat-harness";
 import { operatorChatFailureMessage } from "./chat-activity-presentation";
 import { isAiMockEnabled } from "./test-runtime";
-import { linkOperatorChatAssignment, operatorRequestsWatch, recordOperatorConversationMessage, settleNudgeForEpisode, startQueuedNudge } from "./operator-chat";
+import { projectOperatorChatAssetAvailability, linkOperatorChatAssignment, operatorRequestsWatch, operatorRuntimeStatusReply, recordOperatorConversationMessage, settleNudgeForEpisode, startQueuedNudge } from "./operator-chat";
 import { canonicalUsageEvents, operatorUsageReply } from "./usage";
 import { reassessPublishingPlan } from "./publishing-plan-reassessment";
 import { runModelGrowthReview } from "./growth-review-worker";
@@ -254,11 +257,29 @@ export function autonomyRunHasPriority(run: Pick<OperationalRun, "kind" | "atten
     && (run.attention?.source === "bridge" || run.attention?.triggers.includes("inbound_event") === true);
 }
 
+/** Older saved user-action holds used waiting rather than blocked. An
+ * answered hold must let the operator supply the very input it requested,
+ * but a stage label alone cannot authorize concurrent turn execution. */
+export function operatorChatHasAnsweredUserActionHold(run: OperationalRun, source: Pick<OpenPresenceState, "operatorConversations">, workerActive = false) {
+  if (workerActive || run.leaseOwner && run.leaseExpiresAt && Date.parse(run.leaseExpiresAt) > Date.now()
+    || run.kind !== "operator_chat" || run.state !== "waiting" || run.stage !== "waiting.user_action") return false;
+  const messageId = run.metadata?.operatorMessageId;
+  if (typeof messageId !== "string") return false;
+  return (source.operatorConversations ?? []).some((conversation) => conversation.presenceId === run.presenceId
+    && conversation.messages.some((message) => message.id === messageId && message.role === "operator")
+    && conversation.messages.some((message) => message.role === "presence" && message.replyToMessageId === messageId && message.content.trim().length > 0));
+}
+
 function canDispatchAutonomyRun(runId: string) {
   const limit = autonomyWorkerConcurrencyLimit();
   const candidate = getOperationalRun(runId);
   if (candidate?.kind === "operator_chat") {
-    const earlierTurn = listOperationalRuns(candidate.presenceId, ["queued", "running", "waiting", "recovering", "reconciling"]).some((run) => run.id !== candidate.id && run.kind === "operator_chat" && (run.state === "running" || run.createdAt < candidate.createdAt || run.createdAt === candidate.createdAt && run.id < candidate.id));
+    const earlierTurn = listOperationalRuns(candidate.presenceId, ["queued", "running", "waiting", "recovering", "reconciling"]).some((run) => {
+      if (run.id === candidate.id || run.kind !== "operator_chat") return false;
+      if (run.state === "waiting" && run.stage === "waiting.user_action"
+        && operatorChatHasAnsweredUserActionHold(run, readStateSnapshotForContext({ presenceId: candidate.presenceId }), activeAutonomyWorkers.has(run.id))) return false;
+      return run.state === "running" || run.createdAt < candidate.createdAt || run.createdAt === candidate.createdAt && run.id < candidate.id;
+    });
     if (earlierTurn) return false;
     if ([...activeAutonomyWorkers.keys()].some((id) => { const run = getOperationalRun(id); return run?.kind === "operator_chat" && run.presenceId === candidate.presenceId; })) return false;
     // One reserved Chat lane keeps conversation responsive during background work.
@@ -290,7 +311,7 @@ async function withWatchJudgmentLock<T>(presenceId: string, work: () => Promise<
   }
 }
 
-type AutonomousSocialAct = { action: string; text: string; rationale?: string };
+type AutonomousSocialAct = { action: string; text: string; rationale?: string; routePreference?: "api" | "browser" };
 
 /** Preserve selected library Assets through reply/quote execution. Runtime
  * authorization remains the final authority for each ID. */
@@ -571,6 +592,7 @@ async function runAutonomousVerification(run: OperationalRun): Promise<OpenPrese
     if (result.verified || verifiedExecution.status === "succeeded" || verifiedExecution.status !== "verification-pending") {
       run.state = "succeeded";
       run.stage = "completed";
+      run.metadata = { ...run.metadata, deliveryContinuationActive: false };
       delete run.nextWakeAt;
     } else {
       run.state = "waiting";
@@ -600,7 +622,20 @@ async function runAutonomousVerification(run: OperationalRun): Promise<OpenPrese
  */
 async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> {
   let base = readStateSnapshotForContext({ presenceId: run.presenceId });
-  const wasCancelled = () => { const current = getOperationalRun(run.id); return !current || current.state === "cancelled" || current.leaseOwner !== run.leaseOwner; };
+  const wasCancelled = () => {
+    const current = getOperationalRun(run.id);
+    if (!current || current.state === "cancelled" || current.leaseOwner !== run.leaseOwner) return true;
+    if (run.metadata?.deliveryContinuationActive === true) {
+      const latest = readStateSnapshotForContext({ presenceId: run.presenceId });
+      const thread = latest.operatorConversations?.find(item => item.messages.some(message => message.id === run.metadata?.operatorMessageId));
+      const index = thread?.messages.findIndex(message => message.id === run.metadata?.operatorMessageId) ?? -1;
+      if (index < 0 || thread?.messages.slice(index + 1).some(message => message.role === "operator")) {
+        current.state = "cancelled"; current.stage = "superseded_by_operator"; upsertOperationalRun(current);
+        return true;
+      }
+    }
+    return false;
+  };
   if (wasCancelled()) return base;
   const messageId = typeof run.metadata?.operatorMessageId === "string" ? run.metadata.operatorMessageId : undefined;
   // Operator message ids are globally unique across conversations. Resolve
@@ -643,6 +678,7 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
         operatorSupplied: true,
         assetStatus: asset?.status,
         metadataReview: asset?.metadataReview?.status,
+        publicationAvailability: asset ? projectOperatorChatAssetAvailability(base, run.presenceId, asset.id) : undefined,
         perception: attachment.perception,
       };
     }), null, 2)}\nWhen a social_action uses attached media, assetIds must contain the exact durable assetId, never attachmentId. If assetId is missing, do not publish with that media. The operator supplied these attachments for this explicit one-time request: unknown rights metadata or pending visual metadata is informational and must not block the request. Restricted, reference-only, blocked, unavailable, or cross-Presence assets remain blocked.`
@@ -653,10 +689,10 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
   const scopedAssignmentContext = scopedAssignment
     ? `\nCalendar supervisory context: this turn is about Agent-owned Assignment ${scopedAssignment.id}. Current projection: ${JSON.stringify({ id: scopedAssignment.id, title: scopedAssignment.title, description: scopedAssignment.description, status: scopedAssignment.status, schedule: scopedAssignment.schedule, nextDueAt: scopedAssignment.nextDueAt, instruction: scopedAssignment.instruction, revision: scopedAssignment.revision })}. If the operator is changing, constraining, postponing, cancelling, or reprioritizing this item, use plan_intervention; do not ask them to edit fields or activate it.`
     : "";
-  let next = base;
+  let next = structuredClone(base);
   try {
     if (wasCancelled()) return readStateSnapshotForContext({ presenceId: run.presenceId });
-    const knowledge = compileKnowledgeContext(base, { presenceId: run.presenceId, query: operatorMessage.content, purpose: "operator_chat" });
+    const knowledge = compileKnowledgeContext(next, { presenceId: run.presenceId, query: operatorMessage.content, purpose: "operator_chat" });
     next = knowledge.state;
     next = applyGrowthContextAnswer(next, conversation, operatorMessage, run.presenceId);
     presence = next.presences.find((item) => item.id === run.presenceId) ?? next.presence ?? presence;
@@ -665,7 +701,8 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
     // Every tool result is persisted on this exact turn. Restarting after a
     // tool succeeds must not repeat its mutation or lose its receipt.
     const receipts = conversation.messages.filter((item) => item.role === "system" && item.replyToMessageId === operatorMessage.id);
-    const completed = conversation.messages.find((item) => item.role === "presence" && item.replyToMessageId === operatorMessage.id);
+    const ignoredContinuationAnswers = Array.isArray(run.metadata?.deliveryContinuationIgnoredAnswerIds) ? run.metadata.deliveryContinuationIgnoredAnswerIds : [];
+    const completed = conversation.messages.find((item) => item.role === "presence" && !item.id.startsWith("execution-progress:") && !ignoredContinuationAnswers.includes(item.id) && item.replyToMessageId === operatorMessage.id && !(Array.isArray(run.metadata?.userActionNoticeIds) ? run.metadata.userActionNoticeIds : [run.metadata?.userActionNoticeId]).includes(item.id));
     const usageWorkspaces = [...readUsageWorkspaces(), {
       agent: next.agent,
       presences: next.presences,
@@ -681,8 +718,18 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
     let presentedAttachments: import("./types").PresenceChatAttachment[] | undefined;
     let completionCandidate: string | undefined;
     let completionReviewed = false;
-    let finalReply = completed?.content ?? operatorUsageReply(next, operatorMessage.content, usageEvents);
-    for (let stepIndex = 0; !finalReply && stepIndex < 12; stepIndex += 1) {
+    let stepValidationRecoveries = 0;
+    const stepRecoveryNotes: Array<{ request: string; result: string }> = [];
+    const deterministicStatusReply = operatorRuntimeStatusReply(next, run.presenceId, operatorMessage.content);
+    let finalReply = completed?.content ?? operatorUsageReply(next, operatorMessage.content, usageEvents) ?? deterministicStatusReply ?? operatorProgressRecapReply(next, run.presenceId, operatorMessage.content);
+    let totalSteps = typeof run.metadata?.chatSteps === "number" ? run.metadata.chatSteps : 0;
+    let pendingUserAction: { step: OperatorChatStep; message: string } | undefined;
+    if (typeof run.metadata?.pendingUserActionStep === "string" && typeof run.metadata.pendingUserActionMessage === "string") {
+      pendingUserAction = { step: parseOperatorChatStep(run.metadata.pendingUserActionStep), message: run.metadata.pendingUserActionMessage };
+    }
+    for (let stepIndex = 0; !finalReply && stepIndex < 12 && totalSteps < 48; stepIndex += 1) {
+      totalSteps += 1;
+      run.metadata = { ...run.metadata, chatSteps: totalSteps };
       if (wasCancelled()) return readStateSnapshotForContext({ presenceId: run.presenceId });
       run.stage = "operator_chat.generating";
       run.lastProgressAt = new Date().toISOString();
@@ -690,12 +737,12 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
       const onboardingQuestion = missingGrowthContextQuestion(next, operatorMessage.content, stepIndex);
       const raw = onboardingQuestion ?? await generateAgentReply(next, operatorMessage.content, undefined, {
         operatorConversation: true,
-        operatorHarness: `${operatorChatHarnessInstructions}\n${strategy.prompt}\nOperator message timestamp: ${operatorMessage.timestamp}. Current time: ${new Date().toISOString()}.${operatorAttachmentContext}${scopedAssignmentContext}\nCurrent social capabilities: ${JSON.stringify(derivePresenceCapabilityManifest(next, run.presenceId))}\nEnabled Agent tools: ${JSON.stringify(next.toolBindings.filter((item) => item.agentId === next.agent?.id && item.enabled !== false).map((item) => item.toolId))}\n${stepIndex === 11 ? "Tool budget reached. Return an answer from the evidence already available." : ""}`,
+        operatorHarness: `${operatorChatHarnessInstructions}\n${strategy.prompt}\nOperator message timestamp: ${operatorMessage.timestamp}. Current time: ${new Date().toISOString()}.${operatorAttachmentContext}${scopedAssignmentContext}\nCurrent research capabilities: ${JSON.stringify(chatResearchCapabilities(next, run.presenceId))}\nCurrent social capabilities: ${JSON.stringify(derivePresenceCapabilityManifest(next, run.presenceId))}\nLate delivery continuation: ${run.metadata?.deliveryContinuationActive === true ? `The earlier reply preceded a connector failure. Inspect execution ${run.metadata.deliveryContinuationExecutionId} and actual delivery_failure receipt. Pursue the same request using available diagnostics and the exact existing retry_action boundary if still eligible. Do not create a new social_action or assignment, change media, transfer approval, claim platform rejection without a visible reason, or promise background work without a saved run.` : "none"}\nEnabled Agent tools: ${JSON.stringify(next.toolBindings.filter((item) => item.agentId === next.agent?.id && item.enabled !== false).map((item) => item.toolId))}\n${totalSteps === 48 ? "Total work budget reached. Return an honest answer from the evidence already available; identify unfinished work." : ""}`,
         operatorHistory,
         operatorToolHistory: [...receipts.map((item) => {
           try { const receipt = JSON.parse(item.content); return { request: JSON.stringify(receipt.request ?? { kind: receipt.tool }), result: item.content }; }
           catch { return { request: "Read the saved runtime result.", result: item.content }; }
-        }), ...(completionCandidate ? [{ request: "Review proposed terminal answer", result: JSON.stringify({ proposedAnswer: completionCandidate, instruction: "Completion checkpoint: compare this proposed answer with the actual operator request and tool receipts. If it merely promises work that has not been performed or durably queued, invoke the next available tool now. Otherwise return a complete answer with any choices. Keep explicit draft-only constraints. A blocker should include useful private work possible now. Do not invent background activity or public authority." }) }] : [])],
+        }), ...stepRecoveryNotes, ...(completionCandidate ? [{ request: "Review proposed terminal answer", result: JSON.stringify({ proposedAnswer: completionCandidate, instruction: "Completion checkpoint: compare this proposed answer with the actual operator request and tool receipts. If it merely promises work that has not been performed or durably queued, invoke the next available tool now. Otherwise return a complete answer with any choices. Keep explicit draft-only constraints. A blocker should include useful private work possible now. Do not invent background activity or public authority." }) }] : [])],
         presence,
         knowledgeContext: knowledge.packet,
         presenceId: run.presenceId,
@@ -704,13 +751,37 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
         operational: true,
       });
       if (wasCancelled()) return readStateSnapshotForContext({ presenceId: run.presenceId });
-      let step = isAiMockEnabled() && !raw.trim().startsWith("{") && !raw.trim().startsWith("[")
-        ? { kind: "answer" as const, text: raw }
-        : parseOperatorChatStep(raw);
+      let step: OperatorChatStep;
+      try {
+        step = isAiMockEnabled() && !raw.trim().startsWith("{") && !raw.trim().startsWith("[")
+          ? { kind: "answer" as const, text: raw }
+          : parseOperatorChatStep(raw);
+      } catch (error) {
+        run.metadata = { ...run.metadata, lastChatValidationIssue: operatorChatStepValidationHint(error) };
+        upsertOperationalRun(run);
+        if (stepValidationRecoveries >= 1 || totalSteps >= 48) {
+          throw new Error("The model returned an invalid Chat step twice. No tool ran for the invalid responses. Retry the saved response to continue.");
+        }
+        stepValidationRecoveries += 1;
+        stepRecoveryNotes.push({
+          request: "Correct the invalid Chat step",
+          result: JSON.stringify({
+            status: "invalid_step",
+            issue: operatorChatStepValidationHint(error),
+            instruction: "The previous response did not run. Return one valid JSON object matching an available step, or use kind=answer. Do not repeat the malformed response.",
+          }),
+        });
+        run.stage = "operator_chat.recovering_step";
+        run.lastProgressAt = new Date().toISOString();
+        upsertOperationalRun(run);
+        continue;
+      }
       if (onboardingQuestion) {
         finalReply = onboardingQuestion;
         break;
       }
+      run.metadata = { ...run.metadata, lastChatStepKind: step.kind, lastChatStepEncoding: raw.trim().startsWith("{") ? "json" : "prose" };
+      upsertOperationalRun(run);
       // A clear outcome-ownership request must not degrade into ordinary
       // conversation just because a provider returned prose instead of the
       // structured assignment tool call. This fallback is deliberately
@@ -718,12 +789,40 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
       // remain private answers, while an unambiguous ongoing responsibility
       // becomes the same durable Assignment the tool path would create.
       if (step.kind === "answer"
+        && run.metadata?.deliveryContinuationActive !== true
         && shouldMaterializeAutonomousResponsibility(operatorMessage.content)
         && !receipts.some((item) => item.content.includes('"tool":"assignment"'))) {
         step = autonomousResponsibilityFallback(operatorMessage.content);
       }
       if (step.kind === "answer") {
-        if (!isAiMockEnabled() && !completionReviewed && stepIndex < 11) {
+        if (run.metadata?.deliveryContinuationActive === true
+          && /\b(?:X|Twitter|the platform)\s+(?:has\s+)?rejected\b|\b(?:image|attachment|upload)\s+was\s+rejected\b/i.test(step.text)) {
+          const failed = next.executions.find(item => item.id === run.metadata?.deliveryContinuationExecutionId && item.presenceId === run.presenceId);
+          if (!failed?.failure?.diagnostics?.alerts?.length) {
+            const rejected = Number(run.metadata?.unobservedPlatformRejectionClaims ?? 0);
+            run.metadata = { ...run.metadata, unobservedPlatformRejectionClaims: rejected + 1 };
+            upsertOperationalRun(run);
+            if (rejected >= 1) { finalReply = `The browser could not confirm this action: ${failed?.failure?.message ?? "No platform rejection reason was observed."} The saved action has no verified completion.`; break; }
+            stepRecoveryNotes.push({ request: "Check claimed platform rejection", result: "No observed platform rejection alert supports that claim. The adapter only failed to confirm attachment acceptance. Continue with the actual diagnostics or give a grounded explanation; do not attribute a reason to X." });
+            continue;
+          }
+        }
+        const unsupportedClaim = unsupportedChatCompletionClaim(step.text, receipts, operatorMessage.content);
+        if (unsupportedClaim || unsupportedChatContinuationPromise(step.text, receipts, operatorMessage.content)) {
+          const rejected = typeof run.metadata?.unbackedPromiseRecoveries === "number" ? run.metadata.unbackedPromiseRecoveries : 0;
+          if (rejected >= 2 || totalSteps >= 48) {
+            const queuedWork = receipts.some(item => { try { const receipt = JSON.parse(item.content); return !receipt.error && (receipt.assignmentId || receipt.watchId); } catch { return false; } });
+            throw new Error(queuedWork
+              ? "I couldn’t verify the claimed result. Your request, recorded work, and gathered evidence are saved; no unverified completion is being claimed."
+              : "I couldn’t complete the requested work. No background work was started; your request and gathered evidence are saved.");
+          }
+          run.metadata = { ...run.metadata, unbackedPromiseRecoveries: rejected + 1 };
+          completionReviewed = true;
+          upsertOperationalRun(run);
+          stepRecoveryNotes.push({ request: "Complete work before answering", result: JSON.stringify({ status: "unsupported_completion", proposedAnswer: step.text, instruction: `Completion checkpoint: this answer was rejected. ${unsupportedClaim ?? "Answering ends the turn and no durable work exists to fulfill this promise."} Invoke an available tool now to do the requested work. If access is unavailable, attempt the tool to obtain a concrete failure and explain that dependency; do not promise background work.` }) });
+          continue;
+        }
+        if (!isAiMockEnabled() && !completionReviewed && totalSteps < 48) {
           completionCandidate = JSON.stringify(step);
           completionReviewed = true;
           continue;
@@ -737,12 +836,26 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
         break;
       }
       completionCandidate = undefined;
-      if (stepIndex === 11) break;
+      if (totalSteps === 48) break;
+      if (run.metadata?.deliveryContinuationActive === true && (["social_action", "assignment", "retry_assignment", "plan_intervention", "watch"].includes(step.kind)
+        || (step.kind === "retry_action" && step.executionId !== run.metadata.deliveryContinuationExecutionId))) {
+        stepRecoveryNotes.push({ request: JSON.stringify(step), result: JSON.stringify({ status: "permission_boundary", instruction: "This continuation owns only the existing saved execution. Inspect or retry that exact execution; do not create another public action, responsibility or approval." }) });
+        continue;
+      }
       run.stage = `operator_chat.${step.kind}`;
       run.lastProgressAt = new Date().toISOString();
       upsertOperationalRun(run);
       let receipt: string;
       let deliveryExecutionIds: string[] = [];
+      const previousFailures = receipts.slice(typeof run.metadata?.failureReceiptStart === "number" ? run.metadata.failureReceiptStart : 0).flatMap((item) => {
+        try { const saved = JSON.parse(item.content); return saved.error && JSON.stringify(saved.request) === JSON.stringify(step) ? [saved] : []; } catch { return []; }
+      });
+      if (previousFailures.length >= 2) {
+        finalReply = `I couldn’t finish this part after two attempts: ${previousFailures.at(-1).failure?.userAction ?? previousFailures.at(-1).error}. Work already recorded is saved; no additional action was attempted.`;
+        const priorFailure = previousFailures.at(-1).failure;
+        if (priorFailure?.requiresUserAction) pendingUserAction = { step, message: priorFailure.userAction ?? priorFailure.message };
+        break;
+      }
       try {
         if (step.kind === "inspect_post") {
           const postId = xPostIdFromUrl(step.url);
@@ -830,13 +943,18 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
           }
         }
       } catch (error) {
-        receipt = JSON.stringify({ tool: step.kind, request: step, error: error instanceof Error ? error.message : "Tool failed", delivered: false });
+        const failure = classifyChatToolFailure(error);
+        receipt = JSON.stringify({ tool: step.kind, request: step, error: failure.message, failure, delivered: false });
+        if (failure.requiresUserAction && ["refresh_channel", "search_posts", "search_web", "read_web"].includes(step.kind)) pendingUserAction = { step, message: failure.userAction ?? failure.message };
       }
       if (wasCancelled()) return readStateSnapshotForContext({ presenceId: run.presenceId });
+      if (!JSON.parse(receipt).error && pendingUserAction && (pendingUserAction.step.kind === step.kind || ["search_web", "read_web"].includes(pendingUserAction.step.kind) && ["search_web", "read_web"].includes(step.kind))) pendingUserAction = undefined;
+      run.metadata = { ...run.metadata, ...(!JSON.parse(receipt).error ? { unbackedPromiseRecoveries: 0 } : {}), pendingUserActionStep: pendingUserAction ? JSON.stringify(pendingUserAction.step) : null, pendingUserActionMessage: pendingUserAction?.message ?? null };
+      upsertOperationalRun(run);
       next = recordOperatorConversationMessage(next, { presenceId: run.presenceId, threadId: conversation.threadId ?? conversation.id, content: receipt, role: "system", replyToMessageId: operatorMessage.id });
       await writeStateWithRetry(base, mergeAutonomyState(base, next, readStateSnapshotForContext({ presenceId: run.presenceId })));
       base = readStateSnapshotForContext({ presenceId: run.presenceId });
-      next = base;
+      next = structuredClone(base);
       const savedReceipt = next.operatorConversations?.find((item) => item.id === conversation.id)?.messages.find((item) => item.role === "system" && item.replyToMessageId === operatorMessage.id && item.content === receipt && !receipts.some((saved) => saved.id === item.id));
       if (savedReceipt) receipts.push(savedReceipt);
       if (step.kind === "retry_assignment" && savedReceipt) scheduleOperationalSweep();
@@ -851,13 +969,23 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
         next = recordOperatorConversationMessage(next, { presenceId: run.presenceId, threadId: conversation.threadId ?? conversation.id, role: "system", replyToMessageId: operatorMessage.id, content: deliveryReceipt });
         await writeStateWithRetry(base, mergeAutonomyState(base, next, readStateSnapshotForContext({ presenceId: run.presenceId })));
         base = readStateSnapshotForContext({ presenceId: run.presenceId });
-        next = base;
+        next = structuredClone(base);
         const delivered = next.operatorConversations?.find((item) => item.id === conversation.id)?.messages.find((item) => item.content === deliveryReceipt && item.replyToMessageId === operatorMessage.id);
         if (delivered) receipts.push(delivered);
       }
     }
     if (wasCancelled()) return readStateSnapshotForContext({ presenceId: run.presenceId });
-    if (!finalReply) throw new Error("This attempt reached its work limit before producing a complete answer. Recorded work is saved; retry the response to continue.");
+    if (!finalReply && totalSteps < 48) {
+      run.state = "waiting";
+      run.stage = "operator_chat.continuing";
+      run.nextWakeAt = scheduleOperatorChatRateLimitRetry(run, totalSteps, 1_000);
+      run.retryReason = "Continuing the saved request with the evidence gathered so far.";
+      run.lastProgressAt = new Date().toISOString();
+      upsertOperationalRun(run);
+      scheduleOperationalSweep();
+      return next;
+    }
+    if (!finalReply) throw new Error("I reached the work limit before finishing. The evidence and recorded work are saved; no unverified result is being claimed.");
     if (!completed) {
       presentedAttachments = receipts.flatMap((item) => {
         try {
@@ -871,8 +999,19 @@ async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> 
       await writeStateWithRetry(base, mergeAutonomyState(base, next, readStateSnapshotForContext({ presenceId: run.presenceId })));
     }
     if (wasCancelled()) return readStateSnapshotForContext({ presenceId: run.presenceId });
-    run.state = "succeeded";
-    run.stage = "completed";
+    if (pendingUserAction) {
+      const notice = next.operatorConversations?.find((item) => item.id === conversation.id)?.messages.filter((item) => item.role === "presence" && item.replyToMessageId === operatorMessage.id).at(-1);
+      run.state = "blocked";
+      run.stage = "waiting.user_action";
+      run.blockedReason = pendingUserAction.message;
+      run.metadata = { ...run.metadata, recoveryStep: JSON.stringify(pendingUserAction.step), userActionNoticeIds: [...(Array.isArray(run.metadata?.userActionNoticeIds) ? run.metadata.userActionNoticeIds : []), notice?.id ?? ""] };
+    } else {
+      run.state = "succeeded";
+      run.stage = "completed";
+      run.metadata = { ...run.metadata, deliveryContinuationActive: false };
+      delete run.blockedReason;
+      delete run.nextWakeAt;
+    }
     run.lastProgressAt = new Date().toISOString();
     delete run.lastErrorCode;
     upsertOperationalRun(run);
@@ -1180,21 +1319,35 @@ export async function runAutonomousObservation(
     // still valid evidence, but a scheduled look should not require a native
     // X connection when the browser can read the public conversation itself.
     if (readyBrowserForRead(current, presenceId)) {
-      const browserPosts = await readChannelThroughBrowser(current, presenceId);
-      let next = recordBrowserReadMirrors(current, presenceId, browserPosts);
-      const browserObservation = { status: "up-to-date" as const, lastObservedAt: new Date().toISOString(), nextObservationAt: nextObservationAt(presence) };
+      let browserPosts: XRecentPost[] = [];
+      let browserReadError: string | undefined;
+      let next = current;
+      touchAutonomyRun(options?.runId, "browser.read");
+      try {
+        browserPosts = await readChannelThroughBrowser(current, presenceId);
+        next = recordBrowserReadMirrors(current, presenceId, browserPosts);
+      } catch (error) {
+        browserReadError = error instanceof Error ? error.message : "The authorized browser did not finish the read.";
+        next = recordRuntimeEvent(current, presenceId, "Browser observation delayed", `${browserReadError} Existing Social Mirror evidence remains available; no public action was attempted.`, "quiet", { runId: options?.runId, attentionEpisodeId: options?.attentionEpisodeId, communicationDedupeKey: "browser-observation-delayed" });
+      }
+      const browserObservation = { status: browserReadError ? "degraded" as const : "up-to-date" as const, lastObservedAt: browserReadError ? undefined : new Date().toISOString(), nextObservationAt: browserReadError ? new Date(Date.now() + 60_000).toISOString() : nextObservationAt(presence) };
       let withObservation = next;
       if (options?.attentionEpisodeId) {
         const observedMirrors = withObservation.mirrorObjects.filter((item) => item.presenceId === presenceId && browserPosts.some((post) => post.id === item.externalRef.id));
         const newMirrors = observedMirrors.filter((item) => !current.mirrorObjects.some((prior) => prior.externalRef.id === item.externalRef.id));
         withObservation = updateAttentionEpisode(withObservation, options.attentionEpisodeId, { stage: "choosing", fetchedCount: browserPosts.length, newCount: newMirrors.length, changedCount: 0, knownCount: Math.max(0, browserPosts.length - newMirrors.length), currentMirrorObjectId: observedMirrors[0]?.id });
-        withObservation = recordAttentionStepInPlace(withObservation, options.attentionEpisodeId, "observing", { label: "Checked the live social world", detail: newMirrors.length ? `${newMirrors.length} new social item${newMirrors.length === 1 ? "" : "s"} found through the authorized browser.` : "No new eligible social item was found.", current: browserPosts.length, total: browserPosts.length, status: "completed" });
+        withObservation = recordAttentionStepInPlace(withObservation, options.attentionEpisodeId, "observing", { label: "Checked the live social world", detail: browserReadError ? "The browser read did not finish. Existing Social Mirror evidence remains available; no public action was attempted." : newMirrors.length ? `${newMirrors.length} new social item${newMirrors.length === 1 ? "" : "s"} found through the authorized browser.` : "No new eligible social item was found.", current: browserPosts.length, total: browserPosts.length, status: "completed" });
         withObservation = summarizeAttentionEpisode(withObservation, options.attentionEpisodeId);
       }
       const browserWake = browserObservation.nextObservationAt;
       if (browserWake) requestAttention(presenceId, "scheduled_observation", browserWake, "observe_inbound");
+      // The browser handoff is bounded, but the rest of this attention pass
+      // may still include the Pulse and self-directed discovery. Mark that
+      // transition explicitly so Activity does not keep reporting the read
+      // stage while the worker is doing the next piece of work.
+      touchAutonomyRun(options?.runId, "runtime.pulse");
       next = await runAutonomousPulse(presenceId, { ...options, persist: false }, withObservation);
-      next = recordRuntimeEvent(next, presenceId, "X activity available through browser", `Observed ${browserPosts.length} public item${browserPosts.length === 1 ? "" : "s"} through the authorized browser while Native X access is unavailable.`, "positive", { communicationDedupeKey: "browser-x-observation" });
+      if (!browserReadError) next = recordRuntimeEvent(next, presenceId, "X activity available through browser", `Observed ${browserPosts.length} public item${browserPosts.length === 1 ? "" : "s"} through the authorized browser while Native X access is unavailable.`, "positive", { communicationDedupeKey: "browser-x-observation" });
       await writeStateWithRetry(current, next);
       return next;
     }
@@ -1211,28 +1364,104 @@ export async function runAutonomousObservation(
     let next: OpenPresenceState;
     let observation: OpenPresenceState["nativeConnections"][number]["observation"];
     let browserReadPostIds = new Set<string>();
+    let browserReadError: string | undefined;
+    let observationHoldReason: string | undefined;
+    let usedNativeApi = false;
     const browserAvailable = Boolean(readyBrowserForRead(observing, presenceId));
     const nativeCredentialsAvailable = Boolean(readNativeXCredentials(connection.id));
-    if ((!nativeCredentialsAvailable || xNativeWriteUnavailable(connection)) && browserAvailable) {
-      const browserPosts = await readChannelThroughBrowser(observing, presenceId);
-      next = recordBrowserReadMirrors(observing, presenceId, browserPosts);
-      browserReadPostIds = new Set(browserPosts.map((post) => post.id));
-      observation = { status: "up-to-date", lastObservedAt: new Date().toISOString(), nextObservationAt: nextObservationAt(presence), ownPostCount: 0, mentionCount: 0, conversationCount: 0 };
-    } else {
+    const nativeHealth = (observing.dependencyHealth ?? []).find((item) => item.dependency === "native_x" && item.presenceId === presenceId);
+    const nativeFailure = `${connection.healthMessage ?? ""} ${connection.deliveryError ?? ""} ${connection.observation?.error ?? ""}`;
+    const expiredRateLimit = nativeHealth?.state === "waiting"
+      && Boolean(nativeHealth.circuitUntil && Date.parse(nativeHealth.circuitUntil) <= Date.now());
+    const rateLimited = nativeHealth?.state === "waiting"
+      && Boolean(nativeHealth.circuitUntil && Date.parse(nativeHealth.circuitUntil) > Date.now())
+      || /rate limit|429|too many requests/i.test(nativeFailure) && !expiredRateLimit;
+    const apiRouteUnavailable = !nativeCredentialsAvailable
+      || xNativeWriteUnavailable(connection)
+      || Boolean(nativeHealth && nativeHealth.state !== "healthy" && !expiredRateLimit);
+    if (rateLimited || apiRouteUnavailable && !browserAvailable) {
+      observationHoldReason = rateLimited
+        ? `The X API is rate-limited${nativeHealth?.circuitUntil ? ` until ${nativeHealth.circuitUntil}` : ""}. The browser will not be used to bypass that limit.`
+        : "Saved X API health says not to retry this read, and the signed-in browser tool is not currently ready.";
+      const retryAt = rateLimited && nativeHealth?.circuitUntil && Date.parse(nativeHealth.circuitUntil) > Date.now()
+        ? nativeHealth.circuitUntil
+        : new Date(Date.now() + 30 * 60_000).toISOString();
+      observation = { ...(connection.observation ?? {}), status: "stale", error: observationHoldReason, nextObservationAt: retryAt };
+      next = structuredClone(observing);
+      next.nativeConnections = next.nativeConnections.map((item) => item.id === connection.id ? { ...item, observation, updatedAt: new Date().toISOString() } : item);
+      next = recordRuntimeEvent(next, presenceId, rateLimited ? "X observation waiting for rate limit" : "X observation waiting for an available tool", `${observationHoldReason} Existing Social Mirror evidence remains available; no public action was attempted.`, "quiet", { runId: options?.runId, attentionEpisodeId: options?.attentionEpisodeId, communicationDedupeKey: rateLimited ? "x-observation-rate-limit" : "x-observation-route-held" });
+    } else if ((apiRouteUnavailable || presence.connectionMode === "bridge") && browserAvailable) {
+      touchAutonomyRun(options?.runId, "browser.read");
       try {
-        next = await reconcileNativeX(observing, presenceId, options);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (!browserAvailable || !xNativeWriteUnavailable({ deliveryError: message })) throw error;
         const browserPosts = await readChannelThroughBrowser(observing, presenceId);
         next = recordBrowserReadMirrors(observing, presenceId, browserPosts);
         browserReadPostIds = new Set(browserPosts.map((post) => post.id));
         observation = { status: "up-to-date", lastObservedAt: new Date().toISOString(), nextObservationAt: nextObservationAt(presence), ownPostCount: 0, mentionCount: 0, conversationCount: 0 };
+      } catch (error) {
+        browserReadError = error instanceof Error ? error.message : "The authorized browser did not finish the read.";
+        next = recordRuntimeEvent(observing, presenceId, "Browser observation delayed", `${browserReadError} Existing Social Mirror evidence remains available; no public action was attempted.`, "quiet", { runId: options?.runId, attentionEpisodeId: options?.attentionEpisodeId, communicationDedupeKey: "browser-observation-delayed" });
+        observation = { status: "degraded", nextObservationAt: new Date(Date.now() + 60_000).toISOString(), ownPostCount: 0, mentionCount: 0, conversationCount: 0, error: browserReadError };
+      }
+    } else {
+      try {
+        next = await reconcileNativeX(observing, presenceId, options);
+        usedNativeApi = true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/rate limit|429|too many requests/i.test(message)) {
+          recordOperationalFailure({ dependency: "native_x", presenceId, runId: options?.runId, error: message });
+          throw error;
+        }
+        if (!browserAvailable) throw error;
+        recordOperationalFailure({ dependency: "native_x", presenceId, runId: options?.runId, error: message });
+        touchAutonomyRun(options?.runId, "browser.read");
+        try {
+          const browserPosts = await readChannelThroughBrowser(observing, presenceId);
+          next = recordBrowserReadMirrors(observing, presenceId, browserPosts);
+          browserReadPostIds = new Set(browserPosts.map((post) => post.id));
+          observation = { status: "up-to-date", lastObservedAt: new Date().toISOString(), nextObservationAt: nextObservationAt(presence), ownPostCount: 0, mentionCount: 0, conversationCount: 0 };
+        } catch (browserError) {
+          browserReadError = browserError instanceof Error ? browserError.message : "The authorized browser did not finish the read.";
+          next = recordRuntimeEvent(observing, presenceId, "Browser observation delayed", `${browserReadError} Existing Social Mirror evidence remains available; no public action was attempted.`, "quiet", { runId: options?.runId, attentionEpisodeId: options?.attentionEpisodeId, communicationDedupeKey: "browser-observation-delayed" });
+          observation = { status: "degraded", nextObservationAt: new Date(Date.now() + 60_000).toISOString(), ownPostCount: 0, mentionCount: 0, conversationCount: 0, error: browserReadError };
+        }
       }
       observation ??= next.nativeConnections.find((c) => c.presenceId === presenceId && c.channelId === "x")?.observation;
     }
     if (observation?.status === "error") {
-      throw new Error(observation.error ?? "The native X observer could not complete.");
+      const message = observation.error ?? "The X API read did not complete.";
+      if (browserAvailable && !/rate limit|429|too many requests/i.test(message)) {
+        usedNativeApi = false;
+        recordOperationalFailure({ dependency: "native_x", presenceId, runId: options?.runId, error: message });
+        touchAutonomyRun(options?.runId, "browser.read");
+        try {
+          const browserPosts = await readChannelThroughBrowser(next, presenceId);
+          next = recordBrowserReadMirrors(next, presenceId, browserPosts);
+          browserReadPostIds = new Set(browserPosts.map((post) => post.id));
+          observation = { status: "up-to-date", lastObservedAt: new Date().toISOString(), nextObservationAt: nextObservationAt(presence), ownPostCount: 0, mentionCount: 0, conversationCount: 0 };
+        } catch (error) {
+          browserReadError = error instanceof Error ? error.message : "The authorized browser did not finish the read.";
+          observation = { status: "degraded", nextObservationAt: new Date(Date.now() + 60_000).toISOString(), ownPostCount: 0, mentionCount: 0, conversationCount: 0, error: browserReadError };
+          next = recordRuntimeEvent(next, presenceId, "Browser observation delayed", `${browserReadError} Existing Social Mirror evidence remains available; no public action was attempted.`, "quiet", { runId: options?.runId, attentionEpisodeId: options?.attentionEpisodeId, communicationDedupeKey: "browser-observation-delayed" });
+        }
+      } else if (/rate limit|429|too many requests/i.test(message)) {
+        usedNativeApi = false;
+        observationHoldReason = `The X API is rate-limited. The browser will not be used to bypass that limit. ${message}`;
+        const rateLimitResetAt = new Date(Date.now() + 15 * 60_000).toISOString();
+        recordOperationalFailure({ dependency: "native_x", presenceId, runId: options?.runId, error: message, resetAt: rateLimitResetAt });
+        observation = { ...(connection.observation ?? {}), status: "stale", error: observationHoldReason, nextObservationAt: nativeHealth?.circuitUntil && Date.parse(nativeHealth.circuitUntil) > Date.now() ? nativeHealth.circuitUntil : rateLimitResetAt };
+        next.nativeConnections = next.nativeConnections.map((item) => item.id === connection.id ? { ...item, observation, updatedAt: new Date().toISOString() } : item);
+        next = recordRuntimeEvent(next, presenceId, "X observation waiting for rate limit", `${observationHoldReason} Existing Social Mirror evidence remains available; no public action was attempted.`, "quiet", { runId: options?.runId, attentionEpisodeId: options?.attentionEpisodeId, communicationDedupeKey: "x-observation-rate-limit" });
+      } else {
+        usedNativeApi = false;
+        recordOperationalFailure({ dependency: "native_x", presenceId, runId: options?.runId, error: message });
+        throw new Error(message);
+      }
+    }
+    if (!usedNativeApi && observation && !observationHoldReason) {
+      next.nativeConnections = next.nativeConnections.map((item) => item.id === connection.id
+        ? { ...item, observation, updatedAt: new Date().toISOString() }
+        : item);
     }
     if (options?.attentionEpisodeId) {
       const observedMirrors = next.mirrorObjects.filter((item) => item.presenceId === presenceId && item.channelId === "x" && (item.attentionEpisodeId === options.attentionEpisodeId || browserReadPostIds.has(item.externalRef.id)));
@@ -1251,14 +1480,18 @@ export async function runAutonomousObservation(
       });
       next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "observing", {
         label: "Checked the live social world",
-        detail: newMirrors.length ? `${newMirrors.length} new social item${newMirrors.length === 1 ? "" : "s"} found.` : "No new eligible social item was found.",
+        detail: observationHoldReason ? `${observationHoldReason} Existing Social Mirror evidence remains available.` : browserReadError ? "The browser read did not finish. Existing Social Mirror evidence remains available; no public action was attempted." : newMirrors.length ? `${newMirrors.length} new social item${newMirrors.length === 1 ? "" : "s"} found.` : "No new eligible social item was found.",
         current: (observation?.ownPostCount ?? 0) + (observation?.mentionCount ?? 0),
         total: (observation?.ownPostCount ?? 0) + (observation?.mentionCount ?? 0),
         status: "completed",
       });
       next = summarizeAttentionEpisode(next, options.attentionEpisodeId);
     }
-    recordOperationalSuccess("native_x", presenceId);
+    // A browser read proves browser continuity, not that the exhausted native
+    // X API recovered. Keep the native incident visible until a native read
+    // actually succeeds; otherwise the UI reports the wrong dependency as
+    // healthy while the Presence is still using Chrome.
+    if (usedNativeApi && !browserReadError && !observationHoldReason) recordOperationalSuccess("native_x", presenceId);
 
     // Schedule canonical observation wake from nextObservationAt
     const updatedConn = next.nativeConnections.find((c) => c.presenceId === presenceId && c.channelId === "x");
@@ -1337,6 +1570,21 @@ export async function runAutonomousPulse(
     const liveCapabilities = derivePresenceCapabilityManifest(next, presenceId, { target: inbound.externalRef }).items;
     const allowedActions = ["reply", "like", "repost", "quote", "follow", "no_op"].filter((action) => action === "no_op" || ((presence.execution[action] ?? "off") !== "off" && liveCapabilities.some((item) => item.capability === action && item.canExecute)));
 
+    // Persist the cognition boundary before the provider call. A long model
+    // request must look like judgment in Activity, not like a generic stale
+    // browser pass with no visible work.
+    touchAutonomyRun(options?.runId, "runtime.pulse");
+    if (options?.attentionEpisodeId) {
+      next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "judging", {
+        label: "Judging the newest conversation",
+        detail: `Reviewing ${focalAuthor.startsWith("@") ? focalAuthor : `@${focalAuthor}`} before choosing whether to act.`,
+        current: 0,
+        total: 1,
+        evidenceRefs: [inbound.externalRef],
+      });
+      await writeStateWithRetry(current, next);
+    }
+
     let decision: AgentSocialDecision;
     try {
       decision = await generateAgentSocialDecision(
@@ -1355,15 +1603,39 @@ export async function runAutonomousPulse(
         },
       );
     } catch (error) {
-      recordOperationalFailure({
-        dependency: "model_provider",
-        presenceId,
-        runId: options?.runId,
-        error: error instanceof Error ? error : String(error),
-      });
-      next = deferInboundJudgment(next, presenceId, inbound.externalRef.id, new Date(Date.now() + 60_000).toISOString());
+     recordOperationalFailure({
+       dependency: "model_provider",
+       presenceId,
+       runId: options?.runId,
+       error: error instanceof Error ? error : String(error),
+     });
+      const providerQuotaExhausted = error instanceof AiRuntimeError && error.code === "quota_exhausted";
+      next = deferInboundJudgment(next, presenceId, inbound.externalRef.id, new Date(Date.now() + (providerQuotaExhausted ? 24 * 60 * 60_000 : 60_000)).toISOString());
+      if (options?.attentionEpisodeId) {
+        next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "judging", {
+          label: "Judgment deferred",
+          detail: providerQuotaExhausted
+            ? "The model provider has no available quota. No public action was taken; this judgment is paused until provider access is restored."
+            : "The model did not finish this decision, so no public action was taken. It will be retried after a short backoff.",
+          current: 1,
+          total: 1,
+          status: "completed",
+          evidenceRefs: [inbound.externalRef],
+        });
+      }
       if (options?.persist !== false) await writeStateWithRetry(current, next);
       return next;
+    }
+
+    if (options?.attentionEpisodeId) {
+      next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "judging", {
+        label: "Judgment recorded",
+        detail: decision.rationale?.trim() || "The newest conversation was reviewed.",
+        current: 1,
+        total: 1,
+        status: "completed",
+        evidenceRefs: [inbound.externalRef],
+      });
     }
 
     const runId = options?.runId;
@@ -1412,7 +1684,8 @@ export async function runAutonomousPulse(
           influences: ["Mission", "Taste", "Current social context"],
           confidence: "medium" as const,
           conversationDisposition: decisionDisposition,
-          acts: bundledActs.map((item) => ({ decision: item.action as "reply" | "like" | "repost" | "quote" | "follow", text: item.text, rationale: item.rationale })),
+          acts: bundledActs.map((item) => ({ decision: item.action as "reply" | "like" | "repost" | "quote" | "follow", text: item.text, rationale: item.rationale, routePreference: item.routePreference })),
+          routePreference: act.routePreference,
           runId,
           invocationId,
           plannerRunId: runId,
@@ -1422,9 +1695,9 @@ export async function runAutonomousPulse(
           socialStrategy: decision.socialStrategy,
         };
         const recordedDecision = bundleRecorded ? undefined : decisionInput;
-        if (act.action === "reply") next = formXReplyIntent(next, act.text.trim(), focalPostId, undefined, undefined, assetIdsForSocialDecision(decision), recordedDecision);
+        if (act.action === "reply") next = formXReplyIntent(next, act.text.trim(), focalPostId, undefined, undefined, assetIdsForSocialDecision(decision), recordedDecision, [], act.routePreference);
         else {
-          next = formXActionIntent(next, { affordance: `x.${act.action}` as "x.like" | "x.repost" | "x.quote" | "x.follow", target, text: act.action === "quote" ? act.text.trim() : undefined, assetIds: act.action === "quote" ? assetIdsForSocialDecision(decision) : undefined, decision: recordedDecision, runId, invocationId, attentionEpisodeId: options?.attentionEpisodeId });
+          next = formXActionIntent(next, { affordance: `x.${act.action}` as "x.like" | "x.repost" | "x.quote" | "x.follow", target, text: act.action === "quote" ? act.text.trim() : undefined, assetIds: act.action === "quote" ? assetIdsForSocialDecision(decision) : undefined, decision: recordedDecision, routePreference: act.routePreference, runId, invocationId, attentionEpisodeId: options?.attentionEpisodeId });
         }
         bundleRecorded = true;
       }
@@ -1517,7 +1790,7 @@ async function judgeAutonomousWatchSignals(
       break;
     }
     const acts = filterAutonomousSocialActs(
-      (decision.acts ?? [{ action: decision.action, text: decision.text, rationale: decision.rationale }]).map((act) => ({ action: act.action, text: act.text ?? "", rationale: act.rationale })),
+      (decision.acts ?? [{ action: decision.action, text: decision.text, rationale: decision.rationale, routePreference: decision.routePreference }]).map((act) => ({ action: act.action, text: act.text ?? "", rationale: act.rationale, routePreference: act.routePreference })),
       decision.conversationDisposition,
     ).filter((act) => allowedActions.includes(act.action) && act.action !== "no_op" && (act.action !== "reply" || Boolean(act.text?.trim())));
     const autobiographicalDecisionInput = { ...decisionInput, autobiographicalEventIds: decision.autobiographicalEventIds, socialStrategy: decision.socialStrategy };
@@ -1538,14 +1811,14 @@ async function judgeAutonomousWatchSignals(
     signal.updatedAt = new Date().toISOString();
     next = applyAutonomousConversationDisposition(next, mirror, presenceId, { ...decision, conversationDisposition: decisionDisposition });
     const decisionIds = new Set(next.socialDecisions.map((item) => item.id));
-    const recordedDecision = { ...autobiographicalDecisionInput, decision: acts[0]!.action as "reply" | "like" | "follow" | "quote" | "repost", conversationDisposition: decisionDisposition, summary: decision.rationale, acts: acts.map((act) => ({ decision: act.action as "reply" | "like" | "follow" | "quote" | "repost", text: act.text, rationale: act.rationale })) };
+    const recordedDecision = { ...autobiographicalDecisionInput, decision: acts[0]!.action as "reply" | "like" | "follow" | "quote" | "repost", conversationDisposition: decisionDisposition, summary: decision.rationale, acts: acts.map((act) => ({ decision: act.action as "reply" | "like" | "follow" | "quote" | "repost", text: act.text, rationale: act.rationale, routePreference: act.routePreference })) };
     let recorded = false;
     for (const act of acts) {
       const target = act.action === "follow" ? mirror.author?.externalRef : mirror.externalRef;
       if (!target) continue;
       const actionDecision = recorded ? undefined : recordedDecision;
-      if (act.action === "reply") next = formXReplyIntent(next, act.text!.trim(), mirror.externalRef.id, undefined, undefined, assetIdsForSocialDecision(decision), actionDecision);
-      else next = formXActionIntent(next, { affordance: `x.${act.action}` as "x.like" | "x.repost" | "x.quote" | "x.follow", target, text: act.action === "quote" ? act.text?.trim() : undefined, assetIds: act.action === "quote" ? assetIdsForSocialDecision(decision) : undefined, decision: actionDecision, runId: options?.runId, invocationId, attentionEpisodeId: options?.attentionEpisodeId });
+      if (act.action === "reply") next = formXReplyIntent(next, act.text!.trim(), mirror.externalRef.id, undefined, undefined, assetIdsForSocialDecision(decision), actionDecision, [], act.routePreference);
+      else next = formXActionIntent(next, { affordance: `x.${act.action}` as "x.like" | "x.repost" | "x.quote" | "x.follow", target, text: act.action === "quote" ? act.text?.trim() : undefined, assetIds: act.action === "quote" ? assetIdsForSocialDecision(decision) : undefined, decision: actionDecision, routePreference: act.routePreference, runId: options?.runId, invocationId, attentionEpisodeId: options?.attentionEpisodeId });
       recorded = true;
     }
     const persistedDecision = next.socialDecisions.find((item) => !decisionIds.has(item.id) && item.origin?.refId === watch.id && item.focalMirrorObjectIds.includes(mirror.id));
@@ -1686,10 +1959,18 @@ export async function runAutonomousSelfDirectedDiscovery(
   const connection = current.nativeConnections.find((c) => c.presenceId === presence.id && c.channelId === "x" && nativeConnectionCanObserve(c, presence.handle));
   const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
   const bridge = current.bridges.find((item) => {
-    if (item.presenceId !== presence.id || bridgeExecutionStatus(item) !== "connected") return false;
-    const account = item.accountIdentity?.username?.replace(/^@/, "").toLowerCase();
-    return !account || account === presence.handle.replace(/^@/, "").toLowerCase();
+    return item.presenceId === presence.id && presence.browserAccess?.enabled === true && bridgeReadyForExpectedAccount(item, presence.handle);
   });
+  // Observation and discovery share the same authorized browser body. If the
+  // observation already attempted that body during this attention pass, do
+  // not immediately issue a second read when the first one timed out. That
+  // turns one connector problem into a bounded retry instead of a parent run
+  // that never leaves the browser.read stage.
+  const browserReadAlreadyAttempted = Boolean(options?.runId && current.events.some((item) =>
+    item.presenceId === presence.id
+    && item.runId === options.runId
+    && (item.title === "Browser observation delayed" || item.title === "X activity available through browser")
+  ));
   let discoverySource = selectGrowthDiscoverySource({
     nativeReadable: Boolean(connection),
     nativeStatus: connection?.status,
@@ -1700,9 +1981,15 @@ export async function runAutonomousSelfDirectedDiscovery(
 
   const plan = deriveSelfDirectedDiscoveryPlan(current, presence.id);
   if (!plan) return deferDiscovery(current, 30 * 60_000);
+
+  if (browserReadAlreadyAttempted) {
+    touchAutonomyRun(options?.runId, "discovery.search");
+    return deferDiscovery(current, 60_000);
+  }
   const activeNudge = (current.operatorNudges ?? []).find((item) => !item.privateConversation && item.presenceId === presence.id && item.status === "working" && (!options?.attentionEpisodeId || item.attentionEpisodeIds.includes(options.attentionEpisodeId)));
 
   let next = current;
+  touchAutonomyRun(options?.runId, "discovery.search");
   const responsibility = current.assignments.find((assignment) => assignment.presenceId === presence.id && assignment.origin === "publishing_initiative" && !["cancelled", "failed"].includes(assignment.status));
   next.discoveryPlans = [plan, ...next.discoveryPlans.filter((item) => !(item.presenceId === presence.id && item.origin === "self_directed_discovery"))].slice(0, 100);
 
@@ -1863,14 +2150,15 @@ export async function runAutonomousSelfDirectedDiscovery(
     );
     if (options?.attentionEpisodeId) next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "judging", { label: "Judging the shortlist", detail: decision.rationale?.trim() || "A social judgment was recorded.", current: candidateIndex + 1, total: promising.length, status: candidateIndex + 1 >= promising.length ? "completed" : "active", evidenceRefs: [mirror.externalRef] });
 
-    const acts = (decision.acts ?? [{ action: decision.action, text: decision.text, rationale: decision.rationale }]).filter((act) => allowedActions.includes(act.action) && act.action !== "no_op");
+    const acts = (decision.acts ?? [{ action: decision.action, text: decision.text, rationale: decision.rationale, routePreference: decision.routePreference }]).filter((act) => allowedActions.includes(act.action) && act.action !== "no_op");
     const decisionInput = {
       focalMirrorObjectIds: [mirror.id],
       origin: { kind: "self_directed_discovery" as const, refId: plan.id, planId: plan.id, planRevision: plan.revision },
       influences: ["Brain", "Mission", "Taste", "Presence brief", "Recent Growth"],
       confidence: "medium" as const,
       summary: decision.rationale,
-      acts: (decision.acts ?? []).filter((act) => act.action !== "no_op").map((act) => ({ decision: act.action as "reply" | "like" | "follow" | "quote" | "repost", text: act.text, rationale: act.rationale })),
+      acts: (decision.acts ?? []).filter((act) => act.action !== "no_op").map((act) => ({ decision: act.action as "reply" | "like" | "follow" | "quote" | "repost", text: act.text, rationale: act.rationale, routePreference: act.routePreference })),
+      routePreference: decision.routePreference,
       runId,
       invocationId,
       plannerRunId: runId,
@@ -1892,9 +2180,9 @@ export async function runAutonomousSelfDirectedDiscovery(
     for (const act of acts) {
       const target = act.action === "follow" ? mirror.author?.externalRef : mirror.externalRef;
       if (!target) continue;
-      const actionDecision = bundleRecorded ? undefined : { ...decisionInput, decision: act.action as "reply" | "like" | "follow" | "quote" | "repost" };
-      if (act.action === "reply") next = formXReplyIntent(next, act.text.trim(), mirror.externalRef.id, undefined, responsibility?.id, assetIdsForSocialDecision(decision), actionDecision);
-      else if (["like", "repost", "quote", "follow"].includes(act.action)) next = formXActionIntent(next, { affordance: `x.${act.action}` as "x.like" | "x.repost" | "x.quote" | "x.follow", target, text: act.action === "quote" ? act.text.trim() : undefined, assetIds: act.action === "quote" ? assetIdsForSocialDecision(decision) : undefined, assignmentId: responsibility?.id, decision: actionDecision, runId, invocationId, attentionEpisodeId: options?.attentionEpisodeId });
+      const actionDecision = bundleRecorded ? undefined : { ...decisionInput, decision: act.action as "reply" | "like" | "follow" | "quote" | "repost", routePreference: act.routePreference };
+      if (act.action === "reply") next = formXReplyIntent(next, act.text.trim(), mirror.externalRef.id, undefined, responsibility?.id, assetIdsForSocialDecision(decision), actionDecision, [], act.routePreference);
+      else if (["like", "repost", "quote", "follow"].includes(act.action)) next = formXActionIntent(next, { affordance: `x.${act.action}` as "x.like" | "x.repost" | "x.quote" | "x.follow", target, text: act.action === "quote" ? act.text.trim() : undefined, assetIds: act.action === "quote" ? assetIdsForSocialDecision(decision) : undefined, assignmentId: responsibility?.id, decision: actionDecision, routePreference: act.routePreference, runId, invocationId, attentionEpisodeId: options?.attentionEpisodeId });
       bundleRecorded = true;
     }
   }
@@ -2073,7 +2361,7 @@ export async function runAutonomousAttention(
           state = recordRuntimeEvent(state, presenceId, "Launch held", "The Presence found no first move worth publishing yet and chose silence.", "quiet", { runId: options?.runId, invocationId: options?.invocationId, attentionEpisodeId: options?.attentionEpisodeId });
         } else if (draft.length <= 280) {
           const beforeExecutions = new Set(state.executions.map((execution) => execution.id));
-          state = formChatPostIntent(state, draft, undefined, "agent", [], { decision: "original_post", summary: launchDecision.rationale, origin: { kind: "publishing_initiative" }, influences: ["Mission", "Taste", "Current channel context"], confidence: "medium", autobiographicalEventIds: launchDecision.autobiographicalEventIds, socialStrategy: launchDecision.socialStrategy, runId: options?.runId, invocationId: options?.invocationId, plannerRunId: options?.runId, presenceId, attentionEpisodeId: options?.attentionEpisodeId }, options?.runId, launchPresence);
+          state = formChatPostIntent(state, draft, undefined, "agent", [], { decision: "original_post", summary: launchDecision.rationale, routePreference: launchDecision.routePreference, origin: { kind: "publishing_initiative" }, influences: ["Mission", "Taste", "Current channel context"], confidence: "medium", autobiographicalEventIds: launchDecision.autobiographicalEventIds, socialStrategy: launchDecision.socialStrategy, runId: options?.runId, invocationId: options?.invocationId, plannerRunId: options?.runId, presenceId, attentionEpisodeId: options?.attentionEpisodeId }, options?.runId, launchPresence);
           const executionIds = state.executions.filter((execution) => !beforeExecutions.has(execution.id)).map((execution) => execution.id);
           state = recordRuntimeEvent(state, presenceId, executionIds.length ? "First public move queued" : "Launch held", executionIds.length ? "The Presence chose a first point of view and handed it to the configured execution envelope." : "The first public move did not enter the execution envelope.", executionIds.length ? "positive" : "warning", { executionId: executionIds[0], runId: options?.runId, invocationId: options?.invocationId, attentionEpisodeId: options?.attentionEpisodeId });
         } else {
@@ -2222,14 +2510,14 @@ export async function judgeOperatorNudgeTargets(
       operatorConversation: true,
     });
     if (options?.attentionEpisodeId) next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "judging", { label: "Judged the post you shared", detail: decision.rationale?.trim() || "A targeted judgment was recorded.", current: index + 1, total: targetPostIds.length, status: index + 1 >= targetPostIds.length ? "completed" : "active", evidenceRefs: [mirror.externalRef] });
-    const acts = (decision.acts ?? [{ action: decision.action, text: decision.text, rationale: decision.rationale }]).filter((act) => allowedActions.includes(act.action) && act.action !== "no_op");
+    const acts = (decision.acts ?? [{ action: decision.action, text: decision.text, rationale: decision.rationale, routePreference: decision.routePreference }]).filter((act) => allowedActions.includes(act.action) && act.action !== "no_op");
     const decisionInput = {
       focalMirrorObjectIds: [mirror.id],
       origin: { kind: "operator" as const, refId: nudge.id },
       influences: ["Operator context", "Mission", "Taste", "Current social context"],
       confidence: "medium" as const,
       summary: decision.rationale,
-      acts: acts.map((act) => ({ decision: act.action as "reply" | "like" | "follow" | "quote" | "repost", text: act.text, rationale: act.rationale })),
+      acts: acts.map((act) => ({ decision: act.action as "reply" | "like" | "follow" | "quote" | "repost", text: act.text, rationale: act.rationale, routePreference: act.routePreference })),
       runId: options?.runId,
       invocationId: options?.invocationId,
       plannerRunId: options?.runId,
@@ -2248,9 +2536,9 @@ export async function judgeOperatorNudgeTargets(
     for (const act of acts) {
       const target = act.action === "follow" ? mirror.author?.externalRef : mirror.externalRef;
       if (!target) continue;
-      const actionDecision = { ...decisionInput, ...(recorded ? { acts: undefined } : {}), decision: act.action as "reply" | "like" | "follow" | "quote" | "repost" };
-      if (act.action === "reply") next = formXReplyIntent(next, act.text.trim(), mirror.externalRef.id, undefined, undefined, assetIdsForSocialDecision(decision), actionDecision);
-      else next = formXActionIntent(next, { affordance: `x.${act.action}` as "x.like" | "x.repost" | "x.quote" | "x.follow", target, text: act.action === "quote" ? act.text.trim() : undefined, assetIds: act.action === "quote" ? assetIdsForSocialDecision(decision) : undefined, decision: actionDecision, runId: options?.runId, invocationId: options?.invocationId, attentionEpisodeId: options?.attentionEpisodeId });
+      const actionDecision = { ...decisionInput, ...(recorded ? { acts: undefined } : {}), decision: act.action as "reply" | "like" | "follow" | "quote" | "repost", routePreference: act.routePreference };
+      if (act.action === "reply") next = formXReplyIntent(next, act.text.trim(), mirror.externalRef.id, undefined, undefined, assetIdsForSocialDecision(decision), actionDecision, [], act.routePreference);
+      else next = formXActionIntent(next, { affordance: `x.${act.action}` as "x.like" | "x.repost" | "x.quote" | "x.follow", target, text: act.action === "quote" ? act.text.trim() : undefined, assetIds: act.action === "quote" ? assetIdsForSocialDecision(decision) : undefined, decision: actionDecision, routePreference: act.routePreference, runId: options?.runId, invocationId: options?.invocationId, attentionEpisodeId: options?.attentionEpisodeId });
       recorded = true;
     }
   }

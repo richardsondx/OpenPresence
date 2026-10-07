@@ -11,14 +11,31 @@ import type { Assignment, GrowthReviewKind, OpenPresenceState } from "./types";
 
 /** Run the model-backed Growth role from a headless worker or an API action. */
 export async function runModelGrowthReview(source: OpenPresenceState, assignment: Assignment, kind: GrowthReviewKind, options?: { reviewAt?: Date; sandboxSessionId?: string }) {
-  const presence = source.presences.find((item) => item.id === assignment.presenceId) ?? source.presence;
+  const presence = source.presences.find((item) => item.id === assignment.presenceId);
   if (!presence) return source;
+  const sandboxSessionId = options?.sandboxSessionId;
+  if (assignment.environment === "sandbox" && !sandboxSessionId) throw new Error("A rehearsal Growth review requires its exact Sandbox session.");
+  const activeSessions = source.playgroundSessions.filter(session => session.presenceId === presence.id && session.status === "active");
+  if (sandboxSessionId && (assignment.environment !== "sandbox" || assignment.sessionId && assignment.sessionId !== sandboxSessionId
+    || !activeSessions.some(session => session.id === sandboxSessionId)
+    || !assignment.sessionId && activeSessions.length !== 1)) {
+    throw new Error("This Growth responsibility does not belong to the requested active Sandbox session.");
+  }
+  // Legacy responsibilities created before their first rehearsal starts can
+  // acquire that single session. Multiple active forks require explicit ownership.
+  if (sandboxSessionId && !assignment.sessionId) {
+    assignment.sessionId = sandboxSessionId;
+    const persisted = source.assignments.find(item => item.id === assignment.id);
+    if (persisted) persisted.sessionId = sandboxSessionId;
+  }
 
   ensureGrowthEvidenceRecords(source, presence.id);
   const snapshot = deriveGrowthEvidenceSnapshot(source, presence.id, options?.sandboxSessionId ? { sandboxSessionId: options.sandboxSessionId } : undefined);
   const evidence = {
-    strategyEvidence: source.growthEvidenceRecords?.filter((item) => item.presenceId === presence.id).slice(0, 80),
-    hypotheses: source.growthHypotheses?.filter((item) => item.originatingPresenceId === presence.id && (!options?.sandboxSessionId || item.sandboxSessionId === options.sandboxSessionId)),
+    strategyEvidence: source.growthEvidenceRecords?.filter((item) => item.presenceId === presence.id && item.agentId === assignment.agentId
+      && (sandboxSessionId ? item.sandboxSessionId === sandboxSessionId : !item.sandboxSessionId)).slice(0, 80),
+    hypotheses: source.growthHypotheses?.filter((item) => item.originatingPresenceId === presence.id && item.agentId === assignment.agentId
+      && (sandboxSessionId ? item.sandboxSessionId === sandboxSessionId : !item.sandboxSessionId)),
     evidenceSnapshot: snapshot,
     capabilities: derivePresenceCapabilityManifest(source, presence.id).items,
   };

@@ -51,7 +51,7 @@ flowchart TD
 - **Core Question**: Does the candidate data reach the agent's actual model context in clean, usable form?
 - **Diagnostic Checks**:
   - Inspect the prompt serialization code (the prompt construction pipeline).
-  - Print the exact text/tokens sent to the LLM.
+  - Inspect the exact model context locally. Before writing logs or shared proof artifacts, redact credentials, private operator text, and private mirrored content; retain only the smallest evidence needed to explain the boundary.
   - Is the post truncated, stripped of author info, missing parent post metadata, or omitted due to context window budgets?
   - Is privacy filtering or presence scoping accidentally excluding this item?
 - **PASS Criteria**: The exact raw candidate text, author, URL, and metadata are visible in the formatted prompt sent to the model runtime.

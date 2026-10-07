@@ -1,12 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GET } from "../app/api/assets/[id]/route";
 import { GET as bridgeAssetGet } from "../app/api/bridge/v1/assets/[id]/route";
+import { createPublicExpressionCandidate, sealExecutionForDelivery } from "../lib/publication-security";
 import { createAgent, createRuntimeScope } from "../lib/runtime";
 import { issueRuntimeScopeCookie } from "../lib/runtime-scope";
 import { readState, writeBridgeIdentity, writeState } from "../lib/db";
 import { createBridgeWithKey, reportBridgeIdentity } from "../lib/bridge";
 import { putAssetBytes } from "../lib/asset-store";
 import type { Asset } from "../lib/types";
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe("scoped Asset media authorization", () => {
   it("does not accept forged headers or query parameters without a server-issued scope", async () => {
@@ -55,17 +58,52 @@ describe("scoped Asset media authorization", () => {
     });
     const executorId = "genny-image-test-executor";
     reportBridgeIdentity(bridge.bridge!, { executorId, username: "genny" });
-    const response = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/genny-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": executorId } }), { params: Promise.resolve({ id: "genny-image" }) });
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
+    const publicationState = readState();
+    const approvedAssets = ["genny-image", "observed-image", "tampered-image"];
+    const text = "An explicitly approved image publication.";
+    const execution = {
+      id: "approved-media-execution", socialIntentId: "approved-media-intent", presenceId: publicationState.presence!.id, bridgeId: bridge.bridge!.id, connector: "bridge" as const, affordance: "x.post", mode: "review" as const, status: "claimed" as const, source: "operator" as const, attempts: 1, environment: "live" as const, idempotencyKey: "approved-media", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), lease: { executorId, claimedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 120_000).toISOString() }, publication: {
+        id: "approved-media-publication", format: "x.media-post", payload: { text }, assetIds: approvedAssets, links: [], createdAt: new Date().toISOString(), publicExpression: createPublicExpressionCandidate({ state: publicationState, presence: publicationState.presence!, affordance: "x.post", text, source: "operator_manual", socialIntentId: "approved-media-intent", mediaIds: approvedAssets }),
+      },
+    };
+    sealExecutionForDelivery(execution);
+    publicationState.executions.push(execution);
+    writeState(publicationState);
+    const response = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/genny-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": executorId, "x-openpresence-execution-id": "approved-media-execution" } }), { params: Promise.resolve({ id: "genny-image" }) });
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/png");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("x-content-sha256")).toBe(storage.exactHash);
     expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
+    const unresolved = readState();
+    const unresolvedAsset = unresolved.assets.find(item => item.id === "genny-image")!;
+    unresolvedAsset.metadataReview = { status: "open" };
+    unresolvedAsset.reusePermission = "needs_approval";
+    writeState(unresolved);
+    const held = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/genny-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": executorId, "x-openpresence-execution-id": "approved-media-execution" } }), { params: Promise.resolve({ id: "genny-image" }) });
+    expect(held.status).toBe(409);
+    const reviewed = readState();
+    reviewed.executions.find(item => item.id === "approved-media-execution")!.publication!.operatorAssetApproval = { assetIds: [...approvedAssets], reason: "Reviewed this exact publication.", at: new Date().toISOString() };
+    writeState(reviewed);
+    const exactApproval = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/genny-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": executorId, "x-openpresence-execution-id": "approved-media-execution" } }), { params: Promise.resolve({ id: "genny-image" }) });
+    expect(exactApproval.status).toBe(200);
+    expect(Buffer.from(await exactApproval.arrayBuffer())).toEqual(bytes);
+    expect(readState().assets.find(item => item.id === "genny-image")?.metadataReview?.status).toBe("open");
+    // Restore the original ready control for the remaining scope/integrity checks.
+    const control = readState();
+    control.assets.find(item => item.id === "genny-image")!.metadataReview = { status: "resolved" };
+    control.assets.find(item => item.id === "genny-image")!.reusePermission = "ready_to_use";
+    control.executions.find(item => item.id === "approved-media-execution")!.publication!.operatorAssetApproval = undefined;
+    writeState(control);
+    const absentExecution = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/genny-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": executorId } }), { params: Promise.resolve({ id: "genny-image" }) });
+    expect(absentExecution.status).toBe(409);
     const unverified = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/genny-image", { headers: { authorization: `Bearer ${bridge.key}` } }), { params: Promise.resolve({ id: "genny-image" }) });
     expect(unverified.status).toBe(409);
-    const wrongExecutor = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/genny-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": "another-executor" } }), { params: Promise.resolve({ id: "genny-image" }) });
+    const wrongExecutor = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/genny-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": "another-executor", "x-openpresence-execution-id": "approved-media-execution" } }), { params: Promise.resolve({ id: "genny-image" }) });
     expect(wrongExecutor.status).toBe(409);
-    const wrongBridge = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/genny-image", { headers: { authorization: "Bearer definitely-not-a-bridge-key", "x-openpresence-executor-id": executorId } }), { params: Promise.resolve({ id: "genny-image" }) });
+    const wrongBridge = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/genny-image", { headers: { authorization: "Bearer definitely-not-a-bridge-key", "x-openpresence-executor-id": executorId, "x-openpresence-execution-id": "approved-media-execution" } }), { params: Promise.resolve({ id: "genny-image" }) });
     expect(wrongBridge.status).toBe(401);
 
     const latest = readState();
@@ -75,17 +113,17 @@ describe("scoped Asset media authorization", () => {
       { id: "tampered-image", agentId: latest.agent!.id, presenceId: latest.presence!.id, type: "image", status: "ready", storage: { ...storage, exactHash: "0".repeat(64) }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as unknown as Asset,
     );
     writeState(latest);
-    const foreign = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/foreign-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": executorId } }), { params: Promise.resolve({ id: "foreign-image" }) });
+    const foreign = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/foreign-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": executorId, "x-openpresence-execution-id": "approved-media-execution" } }), { params: Promise.resolve({ id: "foreign-image" }) });
     expect(foreign.status).toBe(404);
-    const observed = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/observed-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": executorId } }), { params: Promise.resolve({ id: "observed-image" }) });
+    const observed = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/observed-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": executorId, "x-openpresence-execution-id": "approved-media-execution" } }), { params: Promise.resolve({ id: "observed-image" }) });
     expect(observed.status).toBe(409);
-    const tampered = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/tampered-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": executorId } }), { params: Promise.resolve({ id: "tampered-image" }) });
+    const tampered = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/tampered-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": executorId, "x-openpresence-execution-id": "approved-media-execution" } }), { params: Promise.resolve({ id: "tampered-image" }) });
     expect(tampered.status).toBe(409);
     writeBridgeIdentity({ bridgeId: bridge.bridge!.id, executorId, username: "another-account", status: "verified", observedAt: new Date().toISOString() });
-    const mismatched = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/genny-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": executorId } }), { params: Promise.resolve({ id: "genny-image" }) });
+    const mismatched = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/genny-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": executorId, "x-openpresence-execution-id": "approved-media-execution" } }), { params: Promise.resolve({ id: "genny-image" }) });
     expect(mismatched.status).toBe(409);
     writeBridgeIdentity({ bridgeId: bridge.bridge!.id, executorId, username: "genny", status: "verified", observedAt: new Date(Date.now() - 31 * 60_000).toISOString() });
-    const stale = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/genny-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": executorId } }), { params: Promise.resolve({ id: "genny-image" }) });
+    const stale = await bridgeAssetGet(new Request("http://localhost/api/bridge/v1/assets/genny-image", { headers: { authorization: `Bearer ${bridge.key}`, "x-openpresence-executor-id": executorId, "x-openpresence-execution-id": "approved-media-execution" } }), { params: Promise.resolve({ id: "genny-image" }) });
     expect(stale.status).toBe(409);
   });
 

@@ -176,6 +176,10 @@ export function effectiveAssetObservation(state: OpenPresenceState, asset: Asset
   };
 }
 
+export function assetPerceptionNeedsReview(uncertainty: string | undefined) {
+  return uncertainty !== "low" && uncertainty !== "medium";
+}
+
 export function deriveAssetReadiness(state: OpenPresenceState, asset: Asset): AssetReadiness {
   if (asset.status === "failed") return "failed";
   if (asset.archivedAt) return "unavailable";
@@ -183,9 +187,9 @@ export function deriveAssetReadiness(state: OpenPresenceState, asset: Asset): As
   if (asset.status === "queued" || asset.status === "processing") return "processing";
   const edit = latestMetadataEdit(state, asset);
   const perception = latestLibraryPerception(state, asset);
-  if (edit?.status === "open") return "needs_review";
+  if (edit?.status === "open" || asset.metadataReview?.status === "open") return "needs_review";
   if (edit?.status === "resolved" && edit.observation?.trim()) return "ready";
-  if (perception?.result.observation?.trim() && ["low", "medium"].includes(perception.result.uncertainty)) return "ready";
+  if (perception?.result.observation?.trim() && !assetPerceptionNeedsReview(perception.result.uncertainty)) return "ready";
   if (asset.perception?.observation?.trim() && !asset.perception.uncertainty?.some((item) => /insufficient|uncertain|unknown|high|poor|incomplete|unreadable/i.test(item))) return "ready";
   return "needs_review";
 }
@@ -303,12 +307,21 @@ export function liveAssetReuseReason(state: OpenPresenceState, presenceId: strin
   const inFlightAssetIds = new Set<string>();
   for (const execution of state.executions) {
     if (execution.presenceId !== presenceId || execution.environment !== "live" || execution.publication?.id === options?.excludePublicationId) continue;
-    if (["failed", "blocked", "cancelled", "expired", "verification-closed"].includes(execution.status)) continue;
+    if (!["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"].includes(execution.status)) continue;
     for (const assetId of execution.publication?.assetIds ?? []) inFlightAssetIds.add(assetId);
   }
   const priorAssets = [...priorUsageAssetIds, ...inFlightAssetIds].map((assetId) => state.assets.find((asset) => asset.id === assetId)).filter((asset): asset is Asset => Boolean(asset));
-  const repeated = candidateAssets.find((candidate) => assetPostingUnavailableUntil(state, candidate, presenceId, timestamp(), options) || priorAssets.some((prior) => prior.id !== candidate.id && assetsRepresentSameVisual(candidate, prior) && (inFlightAssetIds.has(prior.id) || !isLibraryAsset(candidate) || !isLibraryAsset(prior) || assetPostingUnavailableUntil(state, prior, presenceId, timestamp(), options))));
+  const repeated = candidateAssets.find((candidate) => inFlightAssetIds.has(candidate.id) || assetPostingUnavailableUntil(state, candidate, presenceId, timestamp(), options) || priorAssets.some((prior) => prior.id !== candidate.id && assetsRepresentSameVisual(candidate, prior) && (inFlightAssetIds.has(prior.id) || !isLibraryAsset(candidate) || !isLibraryAsset(prior) || assetPostingUnavailableUntil(state, prior, presenceId, timestamp(), options))));
+  if (repeated && (inFlightAssetIds.has(repeated.id) || priorAssets.some(prior => inFlightAssetIds.has(prior.id) && assetsRepresentSameVisual(repeated, prior)))) return "This visual is already part of an active live publication and cannot be selected for another one.";
   return repeated ? "This visual was already published by this Presence and cannot be used again in a live publication." : undefined;
+}
+
+/** Current publication availability, distinct from private viewing access. */
+export function assetIsAvailableForPublication(state: OpenPresenceState, asset: Asset, presenceId?: string) {
+  const selectedPresenceId = presenceId ?? state.presence?.id;
+  const presence = state.presences.find(item => item.id === selectedPresenceId) ?? (state.presence?.id === selectedPresenceId ? state.presence : undefined);
+  if (!presence || assetSelectionFailure(state, asset.id, { presenceId: presence.id, requireReady: false })) return false;
+  return presence.environment !== "live" || !liveAssetReuseReason(state, presence.id, [asset.id]);
 }
 
 export function collectionContainsAsset(state: OpenPresenceState, collectionId: string, assetId: string) {
@@ -335,10 +348,14 @@ export interface AssetSearchResult {
 export function readEligibleAsset(state: OpenPresenceState, assetId: string, presenceId?: string) {
   const asset = state.assets.find((item) => item.id === assetId);
   if (!asset || !isLibraryAsset(asset) || asset.archivedAt || !assetIsEligibleForPresence(state, asset, presenceId ?? state.presence?.id)) return undefined;
-  if (assetPostingUnavailableUntil(state, asset, presenceId ?? state.presence?.id)) return undefined;
+  const selectedPresenceId = presenceId ?? state.presence?.id;
+  const selectedPresence = state.presences.find(item => item.id === selectedPresenceId) ?? state.presence;
+  const publicationReason = assetSelectionFailure(state, asset.id, { presenceId: selectedPresenceId, requireReady: false })
+    ?? (selectedPresence?.environment === "live" && selectedPresenceId ? liveAssetReuseReason(state, selectedPresenceId, [asset.id]) : undefined);
   const effective = effectiveAssetObservation(state, asset);
   return {
     assetId: asset.id,
+    publicationAvailability: { available: assetIsAvailableForPublication(state, asset, selectedPresenceId), reason: publicationReason, unavailableUntil: assetPostingUnavailableUntil(state, asset, selectedPresenceId) },
     agentId: asset.agentId,
     name: asset.description ?? asset.sourceOccurrences?.[0]?.fileName ?? `${asset.type} asset`,
     type: asset.type,
@@ -378,7 +395,7 @@ export function searchEligibleAssets(state: OpenPresenceState, query: string, op
   const normalizedQuery = query.trim().toLowerCase();
   const presenceId = options?.presenceId ?? state.presence?.id;
   return state.assets
-    .filter((asset) => !asset.archivedAt && isLibraryAsset(asset) && (asset.reusePermission ?? "ready_to_use") === "ready_to_use" && asset.agentId === state.agent?.id && assetIsEligibleForPresence(state, asset, presenceId) && !assetPostingUnavailableUntil(state, asset, presenceId))
+    .filter((asset) => !asset.archivedAt && isLibraryAsset(asset) && (asset.reusePermission ?? "ready_to_use") === "ready_to_use" && asset.agentId === state.agent?.id && assetIsEligibleForPresence(state, asset, presenceId) && assetIsAvailableForPublication(state, asset, presenceId))
     .filter((asset) => !options?.collectionId || collectionContainsAsset(state, options.collectionId, asset.id))
     .map((asset) => {
       const effective = effectiveAssetObservation(state, asset);

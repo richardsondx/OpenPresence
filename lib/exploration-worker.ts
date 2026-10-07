@@ -19,7 +19,7 @@ import { hydrateNativeXThreadContext } from "./native-x";
 import { compileSocialThreadContext } from "./thread-context";
 import { isCognitionEligibleMirrorObject } from "./social-context";
 import { languagesMatch } from "./language-policy";
-import { bridgeExecutionStatus } from "./bridge-contract";
+import { bridgeReadyForExpectedAccount } from "./bridge-contract";
 import { readNativeXCredentials, searchRecentXPosts } from "./x";
 import { deliverNativeExecutions } from "./native-execution-delivery";
 import { requestAttentionCapacity } from "./attention-governor";
@@ -76,9 +76,11 @@ function nativeCanAct(connection: OpenPresenceState["nativeConnections"][number]
 }
 
 function chromeBridgeFor(state: OpenPresenceState, presenceId: string, affordance: string) {
+  const presence = state.presences.find((item) => item.id === presenceId) ?? (state.presence?.id === presenceId ? state.presence : undefined);
+  if (!presence || presence.browserAccess?.enabled !== true) return undefined;
   return state.bridges.find((bridge) => bridge.presenceId === presenceId
     && bridge.name.startsWith("OpenPresence Chrome")
-    && bridgeExecutionStatus(bridge) === "connected"
+    && bridgeReadyForExpectedAccount(bridge, presence.handle)
     && bridge.capabilities.affordances.some((item) => item === affordance || item === `x.${affordance}`));
 }
 

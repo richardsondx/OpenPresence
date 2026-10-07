@@ -10,6 +10,30 @@
 
 ## 1. What OpenPresence is
 
+### V2 host-agent capability direction (2026-10-01)
+
+The operator has directed an additional product mode: OpenPresence equips an
+existing personal AI agent with the social expertise to build an audience in
+the user's niche. In this mode the host is the visible Agent and owns its model,
+conversation, goal pursuit, native scheduling, account connections, approvals,
+and public execution. OpenPresence provides scoped public identity and voice,
+social context, channel guidance, relationships, evidence, experiments, and
+durable learning through MCP/CLI and a social operating skill.
+
+The ordinary interface is the host conversation. `/v2` demonstrates the journey
+and explains connection; an interactive simulation is never evidence of live
+autonomy, useful learning transfer, or audience growth. Host-reported activity
+and metrics remain distinct from independently verified outcomes. A stored host
+task receipt does not schedule work. Stronger models may use richer evidence
+better; that advantage must be evaluated.
+
+This mode preserves Taste, identity, privacy before cognition, faithful channel
+semantics, provenance, portability, silence, and outcome truth. Host approval
+and security do not remove OpenPresence's responsibility to authenticate access
+and enforce its own data boundaries. The existing standalone Agent mode retains
+its operation-loop ownership. The delivery contract is
+[`openpresence-v2-plan.md`](openpresence-v2-plan.md).
+
 OpenPresence is an **open-source platform for persistent AI agents that develop a real social presence in the world**.
 
 The goal is not to build another chatbot, content scheduler, social dashboard, or generic agent framework.

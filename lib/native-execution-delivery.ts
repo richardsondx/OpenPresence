@@ -212,7 +212,8 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
     }
     const connection = sourceConnection && durableConnection ? sourceConnection : undefined;
     const unavailableNativeConnection = next.nativeConnections.find((item) => item.presenceId === execution.presenceId && item.channelId === "x" && xNativeWriteUnavailable(item));
-    if (!connection && unavailableNativeConnection && browserBridgeFor(next, execution.presenceId, execution.affordance)) {
+    const routePresence = next.presences.find((item) => item.id === execution.presenceId) ?? next.presence;
+    if (!connection && unavailableNativeConnection && routePresence?.browserAccess?.enabled === true && browserBridgeFor(next, execution.presenceId, execution.affordance)) {
       next = rerouteExecutionToBrowser(next, execution.id, "The X API write route is unavailable; the authorized Chrome Bridge is the continuity route for this public action.");
       continue;
     }
@@ -280,8 +281,8 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
         } else if (isPersonBlockingError(message)) {
           next = failNativeExecution(next, execution.id, message);
           next = recordPersonBlockedFromExecution(next, execution.id, message, "native_delivery");
-        } else if (isMentionRestrictedError(message) || xNativeWriteUnavailable({ deliveryError: message })) {
-          console.log("Native channel action rejected; learning browser fallback", execution.id);
+        } else if ((isMentionRestrictedError(message) || xNativeWriteUnavailable({ deliveryError: message })) && (next.presences.find((item) => item.id === execution.presenceId) ?? next.presence)?.browserAccess?.enabled === true && browserBridgeFor(next, execution.presenceId, execution.affordance)) {
+          console.log("Native channel action rejected; recording browser route preference", execution.id);
           next = rerouteExecutionToBrowser(next, execution.id, message);
           next = markNativeConnectionNeedsAttention(next, execution.presenceId, message);
         } else {
@@ -329,8 +330,8 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
         } else if (isPersonBlockingError(message)) {
           next = failNativeExecution(next, execution.id, message);
           next = recordPersonBlockedFromExecution(next, execution.id, message, "native_delivery");
-        } else if (isMentionRestrictedError(message) || xNativeWriteUnavailable({ deliveryError: message })) {
-          console.log("Native channel action rejected; learning browser fallback", execution.id);
+        } else if ((isMentionRestrictedError(message) || xNativeWriteUnavailable({ deliveryError: message })) && (next.presences.find((item) => item.id === execution.presenceId) ?? next.presence)?.browserAccess?.enabled === true && browserBridgeFor(next, execution.presenceId, execution.affordance)) {
+          console.log("Native channel action rejected; recording browser route preference", execution.id);
           next = rerouteExecutionToBrowser(next, execution.id, message);
           next = markNativeConnectionNeedsAttention(next, execution.presenceId, message);
         } else {

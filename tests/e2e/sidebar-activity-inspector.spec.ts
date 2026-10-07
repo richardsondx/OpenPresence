@@ -7,7 +7,7 @@ test.beforeEach(async ({ request }) => {
 
 test("Agent inspector shows today's work, opens evidence, and keeps Needs you separate", async ({ page, request }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await page.getByRole("button", { name: /Meet my Agent|Create Agent \+ Presence/ }).click();
   const initial = await (await request.get("/api/state")).json();
   const presenceId = initial.presence.id as string;
   const now = new Date().toISOString();
@@ -31,18 +31,18 @@ test("Agent inspector shows today's work, opens evidence, and keeps Needs you se
   await expect(inspector.getByRole("button", { name: "Today" })).toHaveAttribute("aria-pressed", "true");
   await expect(inspector.getByRole("button", { name: "Needs you" })).toBeVisible();
   await expect(inspector.getByRole("button", { name: "About" })).toBeVisible();
-  await expect(inspector.getByText("Reviewed the morning feed", { exact: true })).toBeVisible();
+  await expect(inspector.getByText("Attention pass started", { exact: true })).toBeVisible();
   await expect(inspector.locator(".inspector-view-nav button span")).toHaveCount(0);
 
-  await inspector.getByRole("button", { name: "Reviewed the morning feed", exact: false }).click();
-  const dialog = page.getByRole("dialog", { name: "Reviewed the morning feed" });
+  await inspector.getByRole("button", { name: "Attention pass started", exact: false }).click();
+  const dialog = page.getByRole("dialog", { name: "Attention pass started" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText("Summary", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "Summary", exact: true })).toBeVisible();
   await expect(dialog.getByText("Searched the connected channel", { exact: true })).toBeVisible();
-  await expect(dialog.getByRole("button", { name: /Started Attention pass started/ })).toBeVisible();
-  await expect(dialog.getByRole("button", { name: /Completed Attention pass completed/ })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Update.*Attention pass started/ })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Update.*Attention pass completed/ })).toBeVisible();
   await dialog.getByRole("button", { name: /Searched the connected channel/ }).click();
-  await expect(dialog.getByText("What this checked", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("region", { name: "Selected work step" })).toContainText("Loaded the latest feed");
   await expect(dialog.getByText("Technical context", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Close activity details" }).click();
   await expect(dialog).toHaveCount(0);

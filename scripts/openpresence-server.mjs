@@ -55,7 +55,7 @@ const port = String(runtimeSelection.port);
 // Multiple local Presence workspaces can run side by side. Keep their Next
 // build artifacts isolated so one dev server cannot invalidate another
 // server's route manifests while Chrome is exercising the interface.
-const nextDistDir = process.env.OPENPRESENCE_NEXT_DIST_DIR || `.next-${port}`;
+const nextDistDir = process.env.OPENPRESENCE_NEXT_DIST_DIR || (mode === "dev" ? `.next-${port}` : ".next");
 const serverLockPath = `${dbPath}.server-lock`;
 let serverLockFd;
 function processIsAlive(processId) {
@@ -68,6 +68,9 @@ function processIsAlive(processId) {
   }
 }
 function acquireServerLock() {
+  // First-run initialization may select a directory that does not exist yet.
+  // Create it only after the database selection and initialization checks pass.
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const lockContents = JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() });
   try {
     serverLockFd = fs.openSync(serverLockPath, "wx", 0o600);

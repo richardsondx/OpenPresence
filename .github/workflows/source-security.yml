@@ -1,0 +1,32 @@
+name: Source security
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan complete history with redacted output
+        run: >-
+          docker run --rm -v "$GITHUB_WORKSPACE:/source:ro"
+          zricethezav/gitleaks:v8.24.2 git --redact --no-banner /source
+      - name: Reject private runtime and captured evidence paths
+        shell: python
+        run: |
+          import re, subprocess
+          paths = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
+          paths += [line.partition(' ')[2] for line in subprocess.check_output(['git', 'rev-list', '--objects', '--all']).decode().splitlines() if ' ' in line]
+          pattern = re.compile(r'(^|/)(\.env(?:\.|$)|\.secret-key$|\.publication-signing-key$|node_modules/|__pycache__/|\.venv/)|\.(db|sqlite)(-|$)|\.(bak|backup|pem|key|p12|pfx|har)$|(^|/)trace\.zip$|^data/|^tmp/|^var/')
+          forbidden = [p for p in sorted(set(paths)) if p != '.env.example' and (pattern.search(p) or (p.startswith('qa-learnings/') and p not in ['qa-learnings/README.md', 'qa-learnings/regression-rules.md']))]
+          if forbidden:
+              raise SystemExit('Private/generated paths must not occur in tracked files or Git history:\n' + '\n'.join(forbidden))

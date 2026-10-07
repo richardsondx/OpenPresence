@@ -100,7 +100,7 @@ A social conversation asks who is speaking, what has already happened, what dese
 
 That makes the experience feel less like prompting a tool and more like watching someone decide whether to join a room.
 
-**Artifact:** `/home/example/Code/OpenPresence/docs/screenshots/chat.png`
+**Artifact:** `docs/screenshots/chat.png`
 
 **Question:** What would your Agent need to understand before entering a group conversation?
 

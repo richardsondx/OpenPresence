@@ -383,8 +383,22 @@ export function reconcileLiveAssignmentRuns(source: OpenPresenceState, nowMs = D
       assignment.lastOutcome = { class: "delivery_failed", message: deliveryMessage, at: timestamp };
       assignment.nextDueAt = undefined;
       assignment.updatedAt = timestamp;
+    }
+    if (deliveryNeedsOperator && (run.status !== "failed" || run.currentStage !== "blocked" || run.lastError !== deliveryMessage || !run.completedAt || run.leaseOwner || run.leaseExpiresAt)) {
+      // The Assignment may already have been marked needs_operator by an
+      // earlier recovery pass. The run projection still needs to settle in
+      // that case; otherwise Activity keeps showing an old delivery_pending
+      // row forever even though no execution remains in flight.
+      run.status = "failed";
+      run.currentStage = "blocked";
+      run.lastError = deliveryMessage;
+      run.completedAt = run.completedAt ?? execution.updatedAt ?? timestamp;
+      run.leaseOwner = undefined;
+      run.leaseExpiresAt = undefined;
+      run.updatedAt = timestamp;
       continue;
     }
+    if (deliveryNeedsOperator) continue;
     if (assignment && !["completed", "cancelled", "blocked", "expired_incomplete"].includes(assignment.status)) {
       const nextDueAt = new Date(nowMs + 15 * 60_000).toISOString();
       const sameOutcome = assignment.lastOutcome?.class === "delivery_failed" && assignment.lastOutcome.message === deliveryMessage;

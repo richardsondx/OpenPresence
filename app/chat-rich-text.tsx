@@ -1,11 +1,22 @@
 import React, { Fragment, type ReactNode } from "react";
 
-// A deliberately small, inert Markdown surface. No HTML or executable links.
+// A deliberately small Markdown surface. HTML stays inert; source links use HTTP(S).
+function sourceHref(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password ? url.href : null;
+  } catch { return null; }
+}
+
 function inline(text: string): ReactNode[] {
-  return text.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/g).map((part, index) =>
-    part.startsWith("**") && part.endsWith("**") ? <strong key={index}>{part.slice(2, -2)}</strong>
+  return text.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\([^\s)]+\))/g).map((part, index) => {
+    const link = /^\[([^\]\n]+)\]\(([^\s)]+)\)$/.exec(part);
+    const href = link && sourceHref(link[2]);
+    return href ? <a key={index} href={href} target="_blank" rel="noopener noreferrer">{link![1]}</a>
+      : part.startsWith("**") && part.endsWith("**") ? <strong key={index}>{part.slice(2, -2)}</strong>
       : part.startsWith("`") && part.endsWith("`") ? <code key={index}>{part.slice(1, -1)}</code>
-        : <Fragment key={index}>{part}</Fragment>);
+        : <Fragment key={index}>{part}</Fragment>;
+  });
 }
 
 export function ChatRichText({ content }: { content: string }) {

@@ -95,12 +95,17 @@ export function classifyFailureRootCause(
     };
   }
 
-  // Credits / Billing exhaustion
-  if (isXCreditsError(msg)) {
+  // Credits / Billing exhaustion. OpenAI's "no model API quota" response is
+  // a hard account boundary, not a temporary provider rate limit.
+  const modelProviderQuotaExhausted = dependency === "model_provider"
+    && /no model api quota|insufficient_quota|billing_hard_limit|credit.*(?:exhaust|balance)|exceeded.*current quota/i.test(msg);
+  if (isXCreditsError(msg) || modelProviderQuotaExhausted) {
     const xBilling = dependency === "native_x" || dependency === "runtime" && /\bX\b|twitter/i.test(msg);
     return {
-      rootCauseKey: `${dependency}.credits_exhausted`,
-      safeSummary: `${xBilling ? "X API" : dependency === "model_provider" ? "AI model provider" : "Provider"} billing is blocking access. Review available credits and spending limits to restore it.`,
+     rootCauseKey: `${dependency}.credits_exhausted`,
+      safeSummary: modelProviderQuotaExhausted
+        ? "The AI model provider has no model API quota available. Restore provider billing or choose another connected model in Brain → Provider access."
+        : `${xBilling ? "X API" : dependency === "model_provider" ? "AI model provider" : "Provider"} billing is blocking access. Review available credits and spending limits to restore it.`,
       retryable: false,
       requiresOperator: true,
       requiresAuth: false,

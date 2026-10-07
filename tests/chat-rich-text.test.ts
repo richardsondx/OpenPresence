@@ -19,4 +19,12 @@ describe("private chat formatting", () => {
     expect(html).not.toContain('<script>');
     expect(html).not.toContain('<img');
   });
+  it("makes source citations clickable while preserving escaped labels and inert unsafe links", () => {
+    const html = renderToStaticMarkup(createElement(ChatRichText, { content: '[Source <script>](https://example.org/research?q=a&b=c)\n\n[Unsafe](javascript:alert) [Credentials](https://user:secret@example.org/)\n\n`[Code](https://example.org/)`' }));
+    expect(html).toContain('href="https://example.org/research?q=a&amp;b=c" target="_blank" rel="noopener noreferrer"');
+    expect(html).toContain('Source &lt;script&gt;</a>');
+    expect(html.match(/<a /g)).toHaveLength(1);
+    expect(html).toContain('<code>[Code](https://example.org/)</code>');
+    expect(html).not.toContain('<script>');
+  });
 });

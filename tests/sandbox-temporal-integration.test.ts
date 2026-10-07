@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   advanceSandboxTimeWithTemporalEvents,
   cloneState,
+  compileAssignmentInstruction,
   createAgent,
   createSandboxCheckpoint,
   cancelSandboxRetry,
@@ -14,6 +15,8 @@ import {
   startPlaygroundSession,
 } from "../lib/runtime";
 import { SandboxTemporalKernel } from "../lib/sandbox-temporal";
+import { POST as statePost } from "../app/api/state/route";
+import { readStateSnapshot, writeState } from "../lib/db";
 
 function fixtureState() {
   return createAgent({
@@ -27,6 +30,42 @@ function fixtureState() {
 }
 
 describe("Playground temporal integration boundary", () => {
+  it("closes only the fork responsibility when an inherited pending measurement fires", async () => {
+    let state = startPlaygroundSession(fixtureState());
+    const source = state.playgroundSessions[0]!;
+    const assignment = compileAssignmentInstruction(state, "Publish one useful original post", source.presenceId, "sandbox");
+    assignment.sessionId = source.id;
+    assignment.status = "awaiting_execution";
+    const deliveryOutcomeId = "pending-fork-delivery";
+    const measurementEventId = "pending-fork-measurement";
+    assignment.followThrough = { status: "awaiting_measurement", deliveryOutcomeId, measurementEventId };
+    state.assignments = [assignment];
+    state.outcomes = [{ id: deliveryOutcomeId, executionId: "pending-fork-execution", socialIntentId: "pending-fork-intent", presenceId: source.presenceId, sessionId: source.id, environment: "sandbox", status: "succeeded", observedAt: source.virtualNow }] as never;
+    const kernel = SandboxTemporalKernel.fromSnapshot(source.temporalSnapshot!);
+    kernel.scheduleEvent({ id: "pending-fork-cause", type: "world_observation", at: kernel.now, payload: { assignmentId: assignment.id, deliveryOutcomeId } });
+    kernel.advanceBy(0);
+    kernel.scheduleDelayedOutcome({ id: measurementEventId, causeEventId: "pending-fork-cause", offsetMs: 60_000, value: { assignmentId: assignment.id, deliveryOutcomeId, measured: true } });
+    kernel.startRetry({ operationId: assignment.id, policy: { maxAttempts: 2, initialDelayMs: 120_000 }, payload: { assignmentId: assignment.id, deliveryOutcomeId } });
+    source.temporalSnapshot = kernel.snapshot();
+    state = createSandboxCheckpoint(state, source.id, "delivery awaiting measurement");
+    state = forkSandboxCheckpoint(state, source.id, state.sandboxCheckpoints![0]!.id);
+    const fork = state.playgroundSessions.find(item => item.source === "replay")!;
+    const forkAssignment = state.assignments.find(item => item.sessionId === fork.id)!;
+    expect(fork.temporalSnapshot!.now).toBe(source.temporalSnapshot.now);
+    expect(fork.temporalSnapshot!.events.find(item => item.id === "pending-fork-cause")).toEqual(source.temporalSnapshot.events.find(item => item.id === "pending-fork-cause"));
+    expect(fork.temporalSnapshot!.retries[0]).toMatchObject({ operationId: forkAssignment.id, payload: { assignmentId: forkAssignment.id, deliveryOutcomeId: forkAssignment.followThrough!.deliveryOutcomeId } });
+    const sourceBefore = structuredClone(state.assignments.find(item => item.id === assignment.id));
+    writeState(state, { force: true });
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "advanceSandboxTime", sessionId: fork.id, minutes: 1 }), headers: { "content-type": "application/json" } }));
+    expect(response.status).toBe(200);
+    const persisted = readStateSnapshot();
+    expect(persisted.assignments.find(item => item.id === assignment.id)).toEqual(sourceBefore);
+    const completed = persisted.assignments.find(item => item.id === forkAssignment.id)!;
+    expect(completed).toMatchObject({ sessionId: fork.id, status: "completed", followThrough: { status: "measured", deliveryOutcomeId: `pending-fork-delivery:sandbox:${fork.id}` } });
+    const measured = persisted.playgroundSessions.find(item => item.id === fork.id)!.temporalSnapshot!.outcomes.find(item => item.id === measurementEventId)!;
+    expect(measured).toMatchObject({ status: "recorded", value: { assignmentId: completed.id, deliveryOutcomeId: completed.followThrough!.deliveryOutcomeId } });
+    expect(persisted.outcomes.find(item => item.id === completed.followThrough!.deliveryOutcomeId)?.sessionId).toBe(fork.id);
+  });
   it("exposes acceleration and pause controls through the persisted session boundary", () => {
     let state = startPlaygroundSession(fixtureState());
     const session = state.playgroundSessions[0]!;
@@ -161,7 +200,7 @@ describe("Playground temporal integration boundary", () => {
     expect(fork).toBeDefined();
     expect(state.events).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "integration:source-event", sessionId: source.id }),
-      expect.objectContaining({ id: "integration:source-event", sessionId: fork.id }),
+      expect.objectContaining({ id: `integration:source-event:sandbox:${fork.id}`, checkpointOriginId: "integration:source-event", sessionId: fork.id }),
     ]));
     const forkEvent = { id: "integration:fork-event", sessionId: fork.id, type: "system" as const, title: "Fork marker", detail: "branch isolation", time: fork.virtualNow, tone: "neutral" as const };
     const isolated = { ...state, events: [...state.events, forkEvent] };
@@ -169,7 +208,7 @@ describe("Playground temporal integration boundary", () => {
       expect.objectContaining({ id: "integration:source-event" }),
     ]);
     expect(isolated.events.filter((event) => event.sessionId === fork.id)).toEqual([
-      expect.objectContaining({ id: "integration:source-event" }),
+      expect.objectContaining({ id: `integration:source-event:sandbox:${fork.id}`, checkpointOriginId: "integration:source-event" }),
       forkEvent,
     ]);
   });

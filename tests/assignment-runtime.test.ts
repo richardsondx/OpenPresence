@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as ai from "@/lib/ai";
 import * as perceptionRuntime from "@/lib/perception-runtime";
 import { saveChannelSecret } from "../lib/db";
-import { applyOperation, assignmentIsSatisfied, createAgent, startPlaygroundSession } from "@/lib/runtime";
+import { applyOperation, assignmentIsSatisfied, createAgent, deliverSandboxExecution, startPlaygroundSession } from "@/lib/runtime";
 import { readState, saveProviderSecret, writeState } from "@/lib/db";
 import { POST } from "@/app/api/state/route";
+import type { Asset } from "@/lib/types";
 
 vi.mock("@/lib/perception-runtime", async () => {
   const actual = await vi.importActual<typeof import("@/lib/perception-runtime")>("@/lib/perception-runtime");
@@ -28,6 +29,17 @@ async function waitForAssignment(assignmentId: string, timeoutMs = 5_000) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error(`Assignment ${assignmentId} did not reach a terminal state in time.`);
+}
+
+async function waitForAssignmentExecutionReview(assignmentId: string, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = readState();
+    const execution = state.executions.find((item) => item.assignmentId === assignmentId);
+    if (execution?.status === "awaiting-review") return state;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Assignment ${assignmentId} did not reach media review in time.`);
 }
 
 describe("Sandbox assignment runtime", () => {
@@ -335,8 +347,60 @@ describe("Sandbox assignment runtime", () => {
     expect(result.assignments[0]).toMatchObject({ status: "completed", progress: { verified: 1 } });
     expect(asset).toMatchObject({ nature: "observed", provenance: { acquisitionProvider: "tavily", publisher: "Publisher", sourcePageUrl: "https://publisher.example/chart" }, storage: { mimeType: "image/png" } });
     expect(result.sourceEvidence.some((item) => item.assetIds.includes(asset!.id))).toBe(true);
+    const deliveredExecution = result.executions.find(item => item.assignmentId === assignmentId && item.status === "succeeded");
+    expect(result.socialDecisions.find(item => item.socialIntentId === deliveredExecution?.socialIntentId)).toMatchObject({ sessionId, origin: { kind: "assignment", refId: assignmentId }, generatedContentHash: expect.any(String) });
     expect(result.assetUsages.some((item) => item.assetId === asset!.id && item.assignmentId === assignmentId)).toBe(true);
     expect(result.assetResearchSessions).toEqual(expect.arrayContaining([expect.objectContaining({ assignmentId, status: "selected", selectedCandidateId: expect.any(String), candidates: expect.arrayContaining([expect.objectContaining({ perception: expect.objectContaining({ visualForm: "chart" }) })]) })]));
+  });
+
+  it("uses an explicitly requested operator upload without web discovery, then waits for media approval", async () => {
+    process.env.OPENPRESENCE_AI_MOCK = "1";
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ results: [], images: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    let state = createAgent({ name: "Upload Agent", description: "Explain useful AI agent ideas.", mode: "agent", handle: "@upload_agent", accent: "#D68754" });
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
+    state = startPlaygroundSession(state, state.presence!.id, "fresh");
+    const sessionId = state.playgroundSessions[0]!.id;
+    const importedAt = new Date().toISOString();
+    const uploaded: Asset = {
+      id: "operator-uploaded-image",
+      agentId: state.agent!.id,
+      type: "image",
+      status: "ready",
+      retention: "preserved",
+      reusePermission: "ready_to_use",
+      accessScope: { mode: "all_agent_presences" },
+      description: "agent-and-presence.png",
+      dataUrl: "data:image/png;base64,AA==",
+      mimeType: "image/png",
+      sizeBytes: 1,
+      provenance: { origin: "operator_upload", importedAt },
+      createdAt: importedAt,
+      updatedAt: importedAt,
+    };
+    state.assets.unshift(uploaded);
+    state = applyOperation(state, { type: "createAssignment", presenceId: state.presence!.id, sessionId, environment: "sandbox", instruction: "Produce exactly 1 original post for builders. Use the operator-uploaded image agent-and-presence.png when it strengthens the story. Do not search the web for a replacement." });
+    const assignmentId = state.assignments[0]!.id;
+    state = applyOperation(state, { type: "startAssignment", id: assignmentId, sessionId });
+    writeState(state);
+
+    expect((await POST(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "workAssignment", id: assignmentId, sessionId }) }))).ok).toBe(true);
+    const result = await waitForAssignmentExecutionReview(assignmentId);
+    const execution = result.executions.find((item) => item.assignmentId === assignmentId);
+    const publication = result.publications.find((item) => item.assignmentId === assignmentId);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(publication?.assetIds).toEqual([uploaded.id]);
+    const sourceDecision = result.socialDecisions.find(item => item.socialIntentId === execution?.socialIntentId);
+    expect(sourceDecision).toMatchObject({ agentId: state.agent!.id, presenceId: state.presence!.id, sessionId, decision: "original_post" });
+    expect(sourceDecision?.socialStrategy?.selectedByAct[0]?.patternId).toBeTruthy();
+    const retrieval = result.socialStrategyRetrievalRuns?.find(item => item.id === sourceDecision?.socialStrategy?.retrievalRunId);
+    expect(retrieval?.consideredPatterns.some(item => item.id === sourceDecision?.socialStrategy?.selectedByAct[0]?.patternId)).toBe(true);
+    expect(execution).toMatchObject({ status: "awaiting-review", publication: { assetIds: [uploaded.id] }, reviewReason: expect.stringContaining("needs review") });
+    expect(result.assetResearchSessions).toEqual(expect.arrayContaining([expect.objectContaining({ assignmentId, status: "selected", selectedCandidateId: uploaded.id, searchHistory: [], decisionHistory: expect.arrayContaining([expect.objectContaining({ decision: "select", candidateId: uploaded.id })]) })]));
+
+    const approved = applyOperation(result, { type: "approveExecution", id: execution!.id });
+    const delivered = deliverSandboxExecution(approved, execution!.id);
+    expect(delivered.executions.find((item) => item.id === execution!.id)).toMatchObject({ status: "succeeded", publication: { assetIds: [uploaded.id], operatorAssetApproval: expect.objectContaining({ assetIds: [uploaded.id] }) } });
   });
 
   it("reformulates one empty visual search and publishes text-only when the visual is helpful", async () => {
@@ -365,6 +429,8 @@ describe("Sandbox assignment runtime", () => {
     expect(queries[1]).not.toBe(queries[0]);
     expect(result.assignments[0]).toMatchObject({ status: "completed", progress: { verified: 1 } });
     expect(result.publications.find((item) => item.assignmentId === assignmentId)?.assetIds).toEqual([]);
+    const execution = result.executions.find(item => item.assignmentId === assignmentId && item.status === "succeeded");
+    expect(result.socialDecisions.find(item => item.socialIntentId === execution?.socialIntentId)).toMatchObject({ sessionId, variationSpecification: "Text-only visual-research fallback" });
     expect(result.assetResearchSessions).toEqual(expect.arrayContaining([expect.objectContaining({ assignmentId, status: "text_only", outcome: "discovery_empty", candidates: [] })]));
   });
 
@@ -437,7 +503,8 @@ describe("Sandbox assignment runtime", () => {
     expect(assignment?.followThrough).toMatchObject({ status: "measured", deliveryOutcomeId: expect.any(String), measurementEventId: expect.any(String), planRevision: expect.any(Number) });
     const trajectory = result.playgroundSessions.find((item) => item.id === sessionId)?.temporalSnapshot?.trajectory ?? [];
     expect(trajectory.filter((item) => item.kind === "measurement_scheduled")).toHaveLength(1);
-    expect(trajectory.filter((item) => item.kind === "learning" && item.data && typeof item.data === "object" && (item.data as { assignmentId?: unknown }).assignmentId === assignmentId)).toHaveLength(1);
+    // Delivery follow-through changes the plan; without measured audience evidence it must not claim a learning update.
+    expect(trajectory.filter((item) => item.kind === "learning" && item.data && typeof item.data === "object" && (item.data as { assignmentId?: unknown }).assignmentId === assignmentId)).toHaveLength(0);
     expect(trajectory.some((item) => item.kind === "replan" && item.data && typeof item.data === "object" && (item.data as { assignmentId?: unknown }).assignmentId === assignmentId)).toBe(true);
     expect(result.publications.some((item) => item.assignmentId === assignmentId)).toBe(true);
   });

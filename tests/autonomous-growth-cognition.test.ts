@@ -22,7 +22,7 @@ describe("Continuous Growth Awareness & Strategy Adaptation", () => {
   it("derives an auditable GrowthEvidenceSnapshot separating activity from outcomes", () => {
     let state = fixture();
     const presenceId = state.presence!.id;
-    const presence = { ...state.presence!, createdAt: new Date(Date.now() - 6 * 86_400_000).toISOString() };
+    const presence = { ...state.presence!, environment: "live" as const, createdAt: new Date(Date.now() - 6 * 86_400_000).toISOString() };
     state = { ...state, presence, presences: [presence] };
 
     // Record observed actions
@@ -106,7 +106,7 @@ describe("Continuous Growth Awareness & Strategy Adaptation", () => {
     state = applyOperation(state, {
       type: "createAssignment",
       presenceId,
-      environment: "sandbox",
+      environment: "live",
       instruction: "Grow this Presence toward 10,000 followers while building an audience of AI founders.",
     });
     const assignment = state.assignments[0]!;

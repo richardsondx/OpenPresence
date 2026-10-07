@@ -28,7 +28,7 @@ type SandboxScoped = { sandboxSessionId?: string };
 
 function hypothesisAppliesToPresence(state: OpenPresenceState, hypothesis: GrowthHypothesis, presence: Presence, sandboxSessionId?: string) {
   if (hypothesis.agentId !== state.agent?.id) return false;
-  if (sandboxSessionId && (hypothesis as GrowthHypothesis & SandboxScoped).sandboxSessionId !== sandboxSessionId) return false;
+  if ((hypothesis as GrowthHypothesis & SandboxScoped).sandboxSessionId !== sandboxSessionId) return false;
   if (hypothesis.scope === "presence") return hypothesis.originatingPresenceId === presence.id;
   if (hypothesis.scope === "channel") return hypothesis.channelId === presence.channel;
   return true;
@@ -39,7 +39,7 @@ function independentOutcomeCount(records: GrowthEvidenceRecord[]) {
 }
 
 function evidenceForHypothesis(state: OpenPresenceState, hypothesis: GrowthHypothesis, sandboxSessionId?: string) {
-  const records = new Map((state.growthEvidenceRecords ?? []).filter((record) => !sandboxSessionId || (record as GrowthEvidenceRecord & SandboxScoped).sandboxSessionId === sandboxSessionId).map((record) => [record.id, record]));
+  const records = new Map((state.growthEvidenceRecords ?? []).filter((record) => (record as GrowthEvidenceRecord & SandboxScoped).sandboxSessionId === sandboxSessionId).map((record) => [record.id, record]));
   const supporting = hypothesis.supportingEvidenceIds.map((id) => records.get(id)).filter((record): record is GrowthEvidenceRecord => Boolean(record));
   const contradicting = hypothesis.contradictingEvidenceIds.map((id) => records.get(id)).filter((record): record is GrowthEvidenceRecord => Boolean(record));
   return { supporting, contradicting };
@@ -50,7 +50,7 @@ function outcomeSupportsTarget(state: OpenPresenceState, record: GrowthEvidenceR
   if (record.learningHypothesisIds?.includes(hypothesis.id)) return true;
   const targets = hypothesis.decisionTargets ?? [];
   return record.causalDecisionIds.some((decisionId) => {
-    const decision = state.socialDecisions.find((item) => (!sandboxSessionId || (item as typeof item & SandboxScoped).sandboxSessionId === sandboxSessionId)
+    const decision = state.socialDecisions.find((item) => (item.sessionId === sandboxSessionId)
       && item.id === decisionId
       && item.agentId === hypothesis.agentId
       && (hypothesis.scope !== "presence" || item.presenceId === hypothesis.originatingPresenceId)
@@ -97,7 +97,7 @@ export function learningStateForPresence(state: OpenPresenceState, presence: Pre
 
 export function captureLearningCheckpoint(state: OpenPresenceState, presence: Presence, capturedAt: string, sourceReviewId?: string, sandboxSessionId?: string) {
   const learning = learningStateForPresence(state, presence, sandboxSessionId);
-  const previous = (state.learningCheckpoints ?? []).find((item) => item.presenceId === presence.id && (!sandboxSessionId || (item as LearningCheckpointRecord & SandboxScoped).sandboxSessionId === sandboxSessionId));
+  const previous = (state.learningCheckpoints ?? []).find((item) => item.presenceId === presence.id && (item as LearningCheckpointRecord & SandboxScoped).sandboxSessionId === sandboxSessionId);
   const checkpoint: LearningCheckpoint = {
     id: `learning-checkpoint:${presence.id}:${sandboxSessionId ? `${sandboxSessionId}:` : ""}${(state.learningCheckpoints ?? []).length + 1}`,
     capturedAt,
@@ -183,14 +183,20 @@ export function recordLearningCounterfactualInPlace(state: OpenPresenceState, pr
 export function learningAdjustmentForPattern(state: OpenPresenceState, presence: Presence, patternId: string, sandboxSessionId?: string) {
   let adjustment = 0;
   for (const hypothesis of state.growthHypotheses ?? []) {
-    if (!hypothesisAppliesToPresence(state, hypothesis, presence, sandboxSessionId) || hypothesis.status !== "supported" || !hypothesis.decisionTargets?.length) continue;
+    if (!hypothesisAppliesToPresence(state, hypothesis, presence, sandboxSessionId) || !["supported", "weakened", "disfavored", "retired"].includes(hypothesis.status) || !hypothesis.decisionTargets?.length) continue;
     const { supporting, contradicting } = evidenceForHypothesis(state, hypothesis, sandboxSessionId);
     const currentSupporting = supporting.filter((record) => evidenceIsCurrent(record) && outcomeSupportsTarget(state, record, hypothesis, sandboxSessionId));
     const currentContradicting = contradicting.filter((record) => evidenceIsCurrent(record) && outcomeSupportsTarget(state, record, hypothesis, sandboxSessionId));
     if (independentOutcomeCount([...currentSupporting, ...currentContradicting]) < 2) continue;
-    const supportCount = currentSupporting.length;
-    const contradictCount = currentContradicting.length;
-    adjustment += hypothesis.decisionTargets.filter((target) => target.strategyId === patternId).reduce((sum, target) => sum + target.effect, 0) * (supportCount - contradictCount) * confidenceValue[hypothesis.confidence];
+    const effect = hypothesis.decisionTargets.filter((target) => target.strategyId === patternId).reduce((sum, target) => sum + target.effect, 0);
+    if (hypothesis.status === "supported") {
+      adjustment += effect * (currentSupporting.length - currentContradicting.length) * confidenceValue[hypothesis.confidence];
+    } else if (independentOutcomeCount(currentContradicting) >= 2) {
+      // Retiring the interpretation must also stop positively rediscovering
+      // the measured losing strategy. Keep a bounded, scoped avoidance signal
+      // from its verified contradictions; this is never a publication ban.
+      adjustment -= Math.abs(effect) * independentOutcomeCount(currentContradicting) * confidenceValue[hypothesis.confidence];
+    }
   }
   return Math.max(-3, Math.min(3, Math.round(adjustment * 100) / 100));
 }

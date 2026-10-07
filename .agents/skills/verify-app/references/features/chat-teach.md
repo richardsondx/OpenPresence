@@ -116,3 +116,30 @@ milestone/update claims need a separate measured, causally supported trajectory.
 - `tests/operator-chat-harness.test.ts`: completion checkpoint can continue a promise into tools, retains action deduplication, and marks tool-budget exhaustion failed.
 - `tests/social-strategy.test.ts`: observed public sources become unproven scoped hypotheses and are retrieved later; unknown/cross-Presence sources are rejected. Chat renders `learn_social_pattern` as Saved strategy lesson.
 - Controlled real-model evidence and limits: `qa-learnings/chat-initiative-2026-09-16.md`.
+
+### Today work journeys (2026-10-01)
+
+- Chat → Open context sidebar → Today groups durable requests, linked background
+  Assignments, attention passes, and repeated operational notices. The count is
+  work journeys, not raw event count. Needs you stays a separate view.
+- Select a journey to open its Summary and chronological step list. Select a
+  tool step for its recorded request/result; failed attempts remain visible
+  after recovery. Technical lineage is a secondary disclosure. Credentials and
+  media byte payloads are redacted, and large results are visibly bounded.
+- Status comes from persisted work, execution, and outcome records. A reply or
+  successful handoff does not complete a linked Assignment. Events without
+  durable completion proof remain Recorded. No fictional subagents are shown.
+- On other workspace surfaces the open inspector loads the bounded Chat
+  projection for receipts without inflating the Activity heartbeat. Long tool
+  sequences retain the originating operator turn beyond the 100-message window.
+- Escape closes the detail popup first, leaves Today open, and restores focus.
+  Desktop uses two columns; mobile stacks scrollable steps above the result.
+- The composer stays usable during sends and work. A legacy answered user-action
+  hold permits a later reply only after its linked answer persists and its worker
+  lease is clear. Active private research turns still serialize; background
+  Assignments use the existing reserved Chat worker lane.
+- Proof: `tests/e2e/today-work-journey.spec.ts` and
+  `tests/e2e/sidebar-activity-inspector.spec.ts`, both desktop/mobile;
+  `tests/work-journey.test.ts`, `tests/chat-journey-projection.test.ts`, and
+  `tests/autonomy-concurrency.test.ts`. See
+  `qa-learnings/today-work-journey-2026-10-01.md` for scope and limitations.

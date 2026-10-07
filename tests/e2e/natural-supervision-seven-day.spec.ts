@@ -152,7 +152,7 @@ test.describe("Seven-day natural supervision trajectory", () => {
 
     const evidence: JsonRecord[] = [];
     let previous = await readState(request);
-    for (const day of golden.days) {
+    for (const [index, day] of golden.days.entries()) {
       await composer.fill(day.operatorUtterance);
       const sent = page.waitForResponse((response) => response.ok() && response.request().method() === "POST"
         && response.url().endsWith("/api/state")
@@ -180,6 +180,11 @@ test.describe("Seven-day natural supervision trajectory", () => {
       if (index === 0) {
         expect(text(replies[0]?.content)).toMatch(/saved|ongoing responsibility|Agent-owned/i);
         expect(text(replies[0]?.content)).not.toMatch(/not automatically a posting task|conversation first/i);
+      }
+      if (day.day === 7) {
+        expect(text(replies[0]?.content)).toContain("5 verified rehearsal outcomes");
+        expect(text(replies[0]?.content)).toContain("no verified live outcomes");
+        expect(text(replies[0]?.content)).toContain("can’t claim they improved growth");
       }
       if (day.day === 3) {
         expect(stateCollection(afterChat, "preferenceEvidence")).toHaveLength(1);
@@ -286,6 +291,11 @@ test.describe("Seven-day natural supervision trajectory", () => {
       allExecutionsSandbox: finalExecutions.every((item) => item.environment === "sandbox"),
       agentInitiatedUpdateCount: agentInitiatedMessages.length,
       agentInitiatedUpdateKinds: agentInitiatedMessages.map((message) => message.agentInitiated?.kind),
+      supervisorTurns: messagesFor(finalState, presenceId).filter(message => message.role === "operator").map(message => ({
+        operatorId: message.id,
+        request: message.content,
+        replies: messagesFor(finalState, presenceId).filter(reply => reply.role === "presence" && reply.replyToMessageId === message.id).map(reply => ({ id: reply.id, replyToMessageId: reply.replyToMessageId, content: reply.content })),
+      })),
       evidence,
     };
     console.info(`[natural-supervision-seven-day] ${JSON.stringify(trajectoryEvidence)}`);

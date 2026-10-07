@@ -1,3 +1,4 @@
+import { recordChatExecutionProgress } from "./chat-execution-progress";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -211,6 +212,7 @@ sqlite.exec("CREATE TABLE IF NOT EXISTS bridge_health (bridge_id TEXT PRIMARY KE
 // the monolithic workspace so an older cognition write cannot erase a newer
 // verified account binding.
 sqlite.exec("CREATE TABLE IF NOT EXISTS bridge_identity (bridge_id TEXT PRIMARY KEY, executor_id TEXT NOT NULL, username TEXT, status TEXT NOT NULL, message TEXT, observed_at TEXT NOT NULL, updated_at TEXT NOT NULL)");
+sqlite.exec("CREATE TABLE IF NOT EXISTS bridge_executor_adapter (bridge_id TEXT NOT NULL, executor_id TEXT NOT NULL, payload TEXT NOT NULL, observed_at TEXT NOT NULL, PRIMARY KEY (bridge_id, executor_id))");
 sqlite.exec("CREATE TABLE IF NOT EXISTS bridge_executor_identity (bridge_id TEXT NOT NULL, executor_id TEXT NOT NULL, username TEXT, status TEXT NOT NULL, message TEXT, observed_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (bridge_id, executor_id))");
 sqlite.exec("INSERT OR IGNORE INTO bridge_executor_identity (bridge_id, executor_id, username, status, message, observed_at, updated_at) SELECT bridge_id, executor_id, username, status, message, observed_at, updated_at FROM bridge_identity");
 sqlite.exec("INSERT INTO agent_workspace_revisions (agent_id, revision, updated_at) SELECT agent_id, 0, updated_at FROM agent_workspaces WHERE agent_id NOT IN (SELECT agent_id FROM agent_workspace_revisions)");
@@ -1097,6 +1099,7 @@ export function readBridgeById(bridgeId: string): Bridge | undefined {
     if (health && (!bridge.updatedAt || health.updated_at > bridge.updatedAt)) Object.assign(bridge, { state: health.state, adapterStatus: health.adapter_status, lastHeartbeatAt: health.last_heartbeat_at, lastSeenAt: health.last_seen_at, lastSyncAt: health.last_sync_at, updatedAt: health.updated_at });
     const identity = readBridgeIdentity(bridgeId);
     if (identity) bridge.accountIdentity = identity;
+    bridge.browserAdapters = readBrowserAdapterObservations(bridgeId);
     return bridge as unknown as Bridge;
   } catch { return undefined; }
 }
@@ -1127,6 +1130,14 @@ function hydrateMirrorEvents(state: OpenPresenceState, includeMirrorEvents = tru
   }
 }
 
+export function writeBrowserAdapterObservation(bridgeId: string, adapter: NonNullable<Bridge["browserAdapters"]>[number]) {
+  sqlite.prepare("INSERT INTO bridge_executor_adapter (bridge_id, executor_id, payload, observed_at) VALUES (?, ?, ?, ?) ON CONFLICT(bridge_id, executor_id) DO UPDATE SET payload=excluded.payload, observed_at=excluded.observed_at").run(bridgeId, adapter.executorId, JSON.stringify({ ...adapter, accountIdentity: undefined }), adapter.observedAt);
+}
+export function readBrowserAdapterObservations(bridgeId: string): NonNullable<Bridge["browserAdapters"]> {
+  const rows = sqlite.prepare("SELECT payload FROM bridge_executor_adapter WHERE bridge_id = ? ORDER BY observed_at DESC").all(bridgeId) as Array<{ payload: string }>;
+  return rows.flatMap(row => { try { const adapter = JSON.parse(row.payload) as NonNullable<Bridge["browserAdapters"]>[number]; return [{ ...adapter, accountIdentity: readBridgeIdentityForExecutor(bridgeId, adapter.executorId) }]; } catch { return []; } });
+}
+
 export function readBridgeIdentity(bridgeId: string): Bridge["accountIdentity"] | undefined {
   const row = sqlite.prepare("SELECT username, status, message, observed_at FROM bridge_identity WHERE bridge_id = ?").get(bridgeId) as { username?: string | null; status: string; message?: string | null; observed_at: string } | undefined;
   if (!row) return undefined;
@@ -1141,9 +1152,10 @@ export function readBridgeIdentityForExecutor(bridgeId: string, executorId: stri
 
 function hydrateBridgeIdentity(state: OpenPresenceState): OpenPresenceState {
   const rows = sqlite.prepare("SELECT bridge_id, username, status, message, observed_at FROM bridge_identity").all() as Array<{ bridge_id: string; username?: string | null; status: string; message?: string | null; observed_at: string }>;
-  if (!rows.length) return state;
+  const adapters = (bridge: Bridge) => readBrowserAdapterObservations(bridge.id);
+  if (!rows.length) return { ...state, bridges: state.bridges.map(bridge => ({ ...bridge, browserAdapters: adapters(bridge) })) };
   const identities = new Map(rows.map((row) => [row.bridge_id, { username: row.username ?? undefined, status: row.status as NonNullable<Bridge["accountIdentity"]>["status"], message: row.message ?? undefined, observedAt: row.observed_at }]));
-  return { ...state, bridges: state.bridges.map((bridge) => identities.has(bridge.id) ? { ...bridge, accountIdentity: identities.get(bridge.id) } : bridge) };
+  return { ...state, bridges: state.bridges.map((bridge) => ({ ...bridge, browserAdapters: adapters(bridge), ...(identities.has(bridge.id) ? { accountIdentity: identities.get(bridge.id) } : {}) })) };
 }
 
 /**
@@ -1453,6 +1465,7 @@ export function writeBridgeIdentity(input: { bridgeId: string; executorId: strin
 export function deleteBridgeIdentity(bridgeId: string) {
   sqlite.prepare("DELETE FROM bridge_identity WHERE bridge_id = ?").run(bridgeId);
   sqlite.prepare("DELETE FROM bridge_executor_identity WHERE bridge_id = ?").run(bridgeId);
+  sqlite.prepare("DELETE FROM bridge_executor_adapter WHERE bridge_id = ?").run(bridgeId);
   stateCache = undefined;
 }
 
@@ -1682,7 +1695,13 @@ export function readStateSnapshotForContext(context: StateContext): OpenPresence
       scoped.presence = scoped.presences.find((presence) => presence.id === context.presenceId) ?? scoped.presence;
     }
     if (context.includeMirrorEvents === false) scoped.mirrorEvents = [];
-    return markStateNormalized(scoped);
+    // Bridge heartbeats are persisted in the compact bridge_health table and
+    // do not advance the monolithic app_state revision. Refresh that small
+    // operational projection even on the compatibility-snapshot fast path;
+    // otherwise the UI can see a connected Bridge while an autonomous worker
+    // reuses an old heartbeat and incorrectly chooses the unavailable native
+    // observer.
+    return markStateNormalized(hydrateOperationalState(hydrateBridgeHealth(scoped)));
   }
   try {
     const compact = JSON.parse(row.payload) as OpenPresenceState;
@@ -1923,7 +1942,7 @@ export function readRuntimeAuditProjection(presenceId?: string) {
     socialDecisions: readNormalizedOrCompatibility<OpenPresenceState["socialDecisions"][number]>("social_decisions", "$.socialDecisions", presenceId ? "json_extract(payload, '$.presenceId') = ?" : undefined, presenceId ? [presenceId] : []),
     executions: readNormalizedOrCompatibility<OpenPresenceState["executions"][number]>("executions", "$.executions", presenceId ? "json_extract(payload, '$.presenceId') = ?" : undefined, presenceId ? [presenceId] : []),
     outcomes: readNormalizedOrCompatibility<OpenPresenceState["outcomes"][number]>("outcomes", "$.outcomes"),
-    resourceUsageEvents: filterPresence(parseJsonEach<OpenPresenceState["resourceUsageEvents"][number]>("$.resourceUsageEvents")),
+    resourceUsageEvents: readNormalizedOrCompatibility<OpenPresenceState["resourceUsageEvents"][number]>("resource_usage_events", "$.resourceUsageEvents"),
     attentionEpisodes: readNormalizedOrCompatibility<NonNullable<OpenPresenceState["attentionEpisodes"]>[number]>("attention_episodes", "$.attentionEpisodes"),
     socialStrategyRetrievalRuns: readNormalizedOrCompatibility<NonNullable<OpenPresenceState["socialStrategyRetrievalRuns"]>[number]>("social_strategy_retrieval_runs", "$.socialStrategyRetrievalRuns"),
     growthHypotheses: readNormalizedOrCompatibility<NonNullable<OpenPresenceState["growthHypotheses"]>[number]>("growth_hypotheses", "$.growthHypotheses"),
@@ -2383,6 +2402,7 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
     && stateCache.state.agent?.id === normalized.agent?.id
     ? stateCache.state
     : undefined;
+  recordChatExecutionProgress(normalized, previousHighVolumeState);
   let compatibilityPayload = "";
   sqlite.transaction(() => {
     let actualRevision = 0;

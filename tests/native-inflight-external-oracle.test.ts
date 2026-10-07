@@ -355,7 +355,7 @@ describe("native in-flight barrier with an external side-effect oracle", () => {
     const approvedResponse = await statePost(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "approveExecution", id: execution.id }) }));
     expect(approvedResponse.status).toBe(200);
     const approved = await approvedResponse.json() as OpenPresenceState;
-    expect(approved.executions.find((item) => item.id === execution.id)?.status).toBe("approved");
+    expect(approved.executions.find((item) => item.id === execution.id)?.status).toBe("succeeded");
     const executeResponse = await statePost(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "executeIntent", id: execution.socialIntentId }) }));
     expect(executeResponse.status).toBe(200);
     expect(db.readState().executions.find((item) => item.id === execution.id)?.status).toBe("succeeded");

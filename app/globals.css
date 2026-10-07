@@ -7195,7 +7195,7 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
   box-shadow: none;
   background: transparent;
 }
-.operator-chat-tool > summary {
+.operator-chat-tool > summary, .operator-chat-tool-heading {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -7207,6 +7207,7 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
   line-height: 1.5;
 }
 .operator-chat-tool > summary::-webkit-details-marker { display: none; }
+.operator-chat-message.is-tool-activity:empty { display: none; }
 .operator-chat-tool > summary:focus-visible,
 .operator-chat-technical > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
 .operator-chat-tool-icon { display: flex; flex-shrink: 0; }
@@ -7226,6 +7227,10 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .operator-chat-review-reason { color: var(--muted); }
 .operator-chat-review-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
 .operator-chat-review-actions .action-button { min-height: 32px; padding: 6px 10px; }
+.operator-chat-review-card .operator-chat-review-heading span { font-family: inherit; font-size: 11px; line-height: 1.4; text-transform: none; letter-spacing: normal; color: var(--muted); }
+.operator-chat-review-card .operator-chat-decision-media.is-compact { margin: 0 0 10px; padding: 0; border: 0; background: transparent; }
+.operator-chat-review-card .operator-chat-decision-media.is-compact img { width: auto; max-width: 100%; max-height: 280px; min-height: 0; border-color: var(--border); }
+.operator-chat-review-card .operator-chat-review-reason { margin: 0; font-size: 12px; line-height: 1.45; }
 .operator-chat-browser-activity { align-self: flex-start; width: min(100%, 740px); margin: 2px 0; color: #5e6f9a; }
 .operator-chat-browser-activity > summary { display: flex; align-items: center; gap: 8px; padding: 8px 0; cursor: pointer; list-style: none; font-size: 12px; line-height: 1.5; }
 .operator-chat-browser-activity > summary::-webkit-details-marker { display: none; }
@@ -7800,4 +7805,34 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
   .app-shell .operator-chat-outbox-retry { grid-column: 2; justify-self: start; }
   .app-shell .operator-chat-outbox-remove { grid-column: 3; grid-row: 1; }
   .app-shell .operator-chat-outbox-title small { flex-basis: 100%; margin-left: 15px; }
+}
+
+/* Work journeys keep the conversation readable and disclose actual receipts. */
+.inspector-journey-status { color: var(--muted); font-size: 10px; }
+.inspector-journey-status.is-failed, .inspector-journey-status.is-needs_you { color: #a45b25; }
+.agent-activity-detail-dialog { width: min(1080px, calc(100vw - 40px)); padding: 0; gap: 0; overflow: hidden; }
+.agent-activity-detail-dialog > header { padding: 22px 26px; margin: 0; }
+.agent-activity-journey-layout { display: grid; grid-template-columns: minmax(240px, 32%) minmax(0, 1fr); min-height: 340px; overflow: hidden; }
+.agent-activity-journey-layout .agent-activity-detail-timeline { display: block; overflow-y: auto; padding: 18px; border-right: 1px solid var(--line); max-height: min(560px, calc(100dvh - 200px)); }
+.journey-summary-button { width: 100%; border: 0; border-radius: 7px; padding: 10px; color: var(--ink); background: transparent; text-align: left; cursor: pointer; }
+.journey-summary-button.is-selected, .agent-activity-detail-step.is-selected { background: var(--surface-subtle); border-radius: 7px; }
+.agent-activity-detail-step-button strong { white-space: normal; overflow-wrap: anywhere; line-height: 1.45; }
+.agent-activity-detail-step-button { padding: 6px 8px 14px 0; }
+.agent-activity-detail-step.is-failed .agent-activity-detail-marker, .agent-activity-detail-step.is-needs_you .agent-activity-detail-marker { color: #a45b25; border-color: #eed4b9; background: #fff5e8; }
+.agent-activity-journey-evidence { padding: 24px 28px; overflow-y: auto; min-width: 0; max-height: min(560px, calc(100dvh - 200px)); }
+.agent-activity-journey-evidence h3 { margin: 0 0 14px; font-size: 17px; letter-spacing: -.02em; }
+.agent-activity-journey-evidence p { margin: 0 0 18px; font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-activity-journey-evidence small { color: var(--muted); font-size: 11px; }
+.journey-tool-evidence h4 { font-size: 12px; margin: 16px 0 8px; }
+.journey-tool-evidence pre { max-width: 100%; padding: 14px; margin: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-subtle); font-size: 11px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.journey-technical-context { margin-top: 20px; font-size: 11px; color: var(--muted); }
+.journey-technical-context summary { cursor: pointer; }
+.journey-technical-context dl > div { display: grid; grid-template-columns: 100px minmax(0,1fr); gap: 8px; margin-top: 8px; }
+.journey-technical-context dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .agent-activity-detail-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 24px); overflow-y: auto; }
+  .agent-activity-detail-dialog > header { padding: 18px; }
+  .agent-activity-journey-layout { display: flex; flex-direction: column; overflow: visible; }
+  .agent-activity-journey-layout .agent-activity-detail-timeline { max-height: 230px; padding: 14px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .agent-activity-journey-evidence { padding: 20px; max-height: none; overflow: visible; }
 }

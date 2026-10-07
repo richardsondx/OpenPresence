@@ -144,6 +144,7 @@ export function captureSandboxWorld(state: OpenPresenceState, sessionId: string)
 /** Return a stable digest suitable for replay equivalence evidence. */
 export function sandboxWorldDigest(snapshot: Omit<SandboxWorldSnapshot, "digest"> | SandboxWorldSnapshot): string {
   const { digest: _digest, ...base } = snapshot as SandboxWorldSnapshot;
+  void _digest;
   return hash(canonical(base));
 }
 
@@ -197,4 +198,61 @@ export function restoreSandboxWorld(source: OpenPresenceState, snapshot: Sandbox
 
 export function assertSandboxWorldSnapshot(snapshot: SandboxWorldSnapshot): void {
   if (snapshot.digest !== sandboxWorldDigest(snapshot)) throw new Error("Sandbox replay checkpoint digest does not match its contents.");
+}
+
+/** Fork entities own unique internal IDs while preserving immutable checkpoint
+ * provenance. External channel identities and the meaning of world stimuli stay
+ * unchanged; exact references to copied internal entities follow the fork. */
+export function namespaceSandboxForkWorld(snapshot: SandboxWorldSnapshot, forkSessionId: string): SandboxWorldSnapshot {
+  const idMap = new Map<string, string>();
+  for (const records of Object.values(snapshot.collections)) for (const value of records) {
+    if (value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string") {
+      const originalId = (value as { id: string }).id;
+      idMap.set(originalId, `${originalId}:sandbox:${forkSessionId}`);
+    }
+  }
+  const remap = (value: unknown, field?: string): unknown => {
+    // Provider identity is world truth, not a local ledger key.
+    if (field === "externalRef") return clone(value);
+    if (typeof value === "string") return idMap.get(value) ?? value;
+    if (Array.isArray(value)) return value.map(item => remap(item));
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, remap(item, key)]));
+  };
+  const collections = Object.fromEntries(Object.entries(snapshot.collections).map(([key, values]) => [key, values.map(value => {
+    if (!value || typeof value !== "object") return clone(value);
+    const original = value as Record<string, unknown>;
+    return { ...(remap(value) as Record<string, unknown>), ...(typeof original.id === "string" ? { checkpointOriginId: original.id } : {}), sessionId: forkSessionId, sandboxSessionId: forkSessionId };
+  })]));
+  const temporalSnapshot = clone(snapshot.session.temporalSnapshot);
+  if (temporalSnapshot) {
+    // Fired history is immutable checkpoint provenance. Future work instead
+    // targets the fork's copied entities, including delayed values which the
+    // kernel hides until their measurement event is released.
+    for (const event of temporalSnapshot.events) {
+      if (event.status === "pending") event.payload = remap(event.payload);
+    }
+    for (const outcome of temporalSnapshot.outcomes) {
+      if (outcome.status !== "scheduled") continue;
+      if (outcome.value !== undefined) outcome.value = remap(outcome.value);
+      if (temporalSnapshot.deferredOutcomeValues && outcome.id in temporalSnapshot.deferredOutcomeValues) {
+        temporalSnapshot.deferredOutcomeValues[outcome.id] = remap(temporalSnapshot.deferredOutcomeValues[outcome.id]);
+      }
+    }
+    for (const retry of temporalSnapshot.retries) {
+      if (!["pending", "attempting"].includes(retry.status)) continue;
+      retry.operationId = idMap.get(retry.operationId) ?? retry.operationId;
+      retry.payload = remap(retry.payload);
+    }
+  }
+  const forked = {
+    ...clone(snapshot),
+    session: { ...clone(snapshot.session), id: forkSessionId, source: "replay" as const, status: "active" as const, temporalSnapshot },
+    collections,
+    // Learning's own IDs are separately namespaced at the restore boundary;
+    // its causal links must already point at the copied world entities.
+    ...(snapshot.learning ? { learning: remap(snapshot.learning) as SandboxWorldSnapshot["learning"] } : {}),
+  };
+  forked.digest = sandboxWorldDigest(forked);
+  return forked;
 }

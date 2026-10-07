@@ -5,10 +5,11 @@ test("folder import shows file progress and completes with rendered assets", asy
 
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
-  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await page.goto("/?view=assets");
-  await expect(page.getByRole("heading", { name: "Asset library", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Meet my Agent" }).click();
+  await page.goto("/artifacts?tab=media");
+  await expect(page.getByRole("heading", { name: "Media", exact: true })).toBeVisible();
 
+  await page.getByText("Import a folder", { exact: true }).click();
   const folderInput = page.getByLabel("Choose a folder of assets");
   await folderInput.setInputFiles("scenarios/fixtures");
   await expect(page.getByText("5 assets ready to add", { exact: true })).toBeVisible();

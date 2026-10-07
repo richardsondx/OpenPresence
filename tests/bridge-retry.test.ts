@@ -1,10 +1,26 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { acknowledgeExecution, claimExecutions, closeChromeVerification, createBridgeWithKey, failExecution, ingestEvents, reconcileBridge, recordVerifiedBridgeReaction, reportBridgeIdentity, verifyChromeExecution } from "../lib/bridge";
-import { applyOperation, createAgent, formChatPostIntent, formXReplyIntent, recordNativeMirror } from "../lib/runtime";
+import { acknowledgeExecution, claimExecutions, closeChromeVerification, createBridgeWithKey, failExecution, heartbeatBridge, ingestEvents, reconcileBridge, recordVerifiedBridgeReaction, reportBridgeIdentity as recordBridgeIdentity, verifyChromeExecution } from "../lib/bridge";
+import { applyOperation, createAgent as createBaseAgent, formChatPostIntent, formXReplyIntent, recordNativeMirror } from "../lib/runtime";
 import { appendMirrorEvents, readState, readStateForBridge, readStateVersion, WorkspaceConflictError, writeState } from "../lib/db";
 import type { Execution, MirrorEvent } from "../lib/types";
 
 afterEach(() => vi.unstubAllEnvs());
+
+// This suite exercises the Chrome/X tool; model that tool as explicitly enabled
+// instead of relying on connectionMode alone to imply browser authorization.
+function createAgent(input: Parameters<typeof createBaseAgent>[0]) {
+  const state = createBaseAgent(input);
+  if (state.presence) state.presence.browserAccess = { ...state.presence.browserAccess, enabled: true };
+  state.presences = state.presences.map((presence) => presence.id === state.presence?.id
+    ? { ...presence, browserAccess: { ...presence.browserAccess, enabled: true } }
+    : presence);
+  return state;
+}
+
+function reportBridgeIdentity(bridge: Parameters<typeof recordBridgeIdentity>[0], input: Parameters<typeof recordBridgeIdentity>[1]) {
+  heartbeatBridge(readState().bridges.find((item) => item.id === bridge.id) ?? bridge, input.executorId, { version: "0.1.2", protocolVersion: 2, probed: true, capabilities: { channelRead: true, mediaUpload: true, verification: true, affordances: ["post", "reply", "quote", "like", "repost", "follow", "delete"] } });
+  return recordBridgeIdentity(readState().bridges.find((item) => item.id === bridge.id) ?? bridge, input);
+}
 
 describe("Bridge browser retry lifecycle", () => {
   it("resolves connector state from the indexed Bridge owner", () => {
@@ -75,7 +91,7 @@ describe("Bridge browser retry lifecycle", () => {
     expect(readState().workspaceRevision).toBe(beforeRevision);
   });
 
-  it("recovers an older Native billing failure when the verified browser becomes ready", () => {
+  it("preserves an expired Native billing failure when the verified browser becomes ready", () => {
     const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
     state.presence!.environment = "live";
     state.presences = state.presences.map((presence) => presence.id === state.presence!.id ? { ...presence, environment: "live" } : presence);
@@ -94,12 +110,11 @@ describe("Bridge browser retry lifecycle", () => {
     const recovered = result.state.executions.find((item) => item.id === executionId)!;
     const recoveredIntent = result.state.socialIntents.find((item) => item.id === intentId)!;
 
-    expect(recovered).toMatchObject({ connector: "bridge", bridgeId: bridge.id, status: "queued" });
-    expect(recovered.failure).toBeUndefined();
-    expect(recoveredIntent.state).toBe("active");
-    expect(new Date(recoveredIntent.validity.expiresAt!).getTime()).toBeGreaterThan(Date.now());
-    expect(result.state.actions.find((item) => item.executionId === executionId)?.status).toBe("queued");
-    expect(result.state.events.some((event) => event.title === "Recovered public work through Chrome")).toBe(true);
+    expect(recovered).toMatchObject({ connector: "native", status: "failed", attempts: 1 });
+    expect(recovered.failure?.message).toContain("billing");
+    expect(recoveredIntent.state).toBe("expired");
+    expect(new Date(recoveredIntent.validity.expiresAt!).getTime()).toBeLessThan(Date.now());
+    expect(result.state.actions.find((item) => item.executionId === executionId)?.status).toBe("failed");
   });
 
   it("resumes the same blocked Assignment when the verified browser route recovers", () => {
@@ -119,12 +134,12 @@ describe("Bridge browser retry lifecycle", () => {
     const resumed = result.state.assignments.find((item) => item.id === assignment.id)!;
 
     expect(resumed.status).toBe("active");
-    expect(resumed.lastOutcome?.message).toContain("original Assignment is resuming");
+    expect(resumed.lastOutcome?.message).toContain("fresh judgment");
     expect(resumed.work?.blockedReason).toBeUndefined();
-    expect(result.state.events.some((event) => event.title === "Resumed blocked work through Chrome")).toBe(true);
+    expect(result.state.executions).toHaveLength(0);
   });
 
-  it("retains one causal execution through native quota failure, wrong-account hold, browser resume, and verified outcome", () => {
+  it("never revives an expired failed execution across browser account recovery", () => {
     let state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
     const presenceId = state.presence!.id;
     state.presence!.environment = "live";
@@ -142,31 +157,15 @@ describe("Bridge browser retry lifecycle", () => {
     state.executions.unshift({ id: executionId, socialIntentId: intentId, presenceId, affordance: "x.like", mode: "auto", status: "failed", attempts: 1, connector: "native", target: { type: "x.post", id: "causal-target" }, idempotencyKey: executionId, failure: { code: "X_API_CREDITS_EXHAUSTED", message: "X API billing request rejected (HTTP 402): credits depleted.", retryable: false }, createdAt: now, updatedAt: now, environment: "live" } as never);
     writeState(state);
 
-    const trace: string[] = ["native_attempt_failed_quota"];
-    let bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge!.id)!;
-    reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "example_agent" });
-    trace.push("browser_route_selected");
-    bridge = readState().bridges.find((item) => item.id === bridge.id)!;
-    reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "another-account" });
-    const wrongAccountClaim = claimExecutions(readState().bridges.find((item) => item.id === bridge.id)!, { executorId: "chrome-test", limit: 1 });
-    trace.push("wrong_account_held");
-    expect(wrongAccountClaim.executions).toHaveLength(0);
-    expect(readState().executions.find((item) => item.id === executionId)?.status).toBe("queued");
-
-    bridge = readState().bridges.find((item) => item.id === bridge.id)!;
-    reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "example_agent" });
-    trace.push("expected_account_resumed");
-    bridge = readState().bridges.find((item) => item.id === bridge.id)!;
-    const claimed = claimExecutions(bridge, { executorId: "chrome-test", limit: 1 });
-    expect(claimed.executions.map((item) => item.id)).toEqual([executionId]);
-    trace.push("browser_write_claimed");
-    const acknowledged = acknowledgeExecution(bridge, executionId, { executorId: "chrome-test", externalRef: { type: "x.like", id: "causal-like" } });
-    trace.push("external_outcome_verified");
-
-    expect(trace).toEqual(["native_attempt_failed_quota", "browser_route_selected", "wrong_account_held", "expected_account_resumed", "browser_write_claimed", "external_outcome_verified"]);
-    expect(acknowledged.execution).toMatchObject({ id: executionId, connector: "bridge", status: "succeeded", externalRef: { type: "x.like", id: "causal-like" } });
-    expect(readState().executions.filter((item) => item.id === executionId)).toHaveLength(1);
-    expect(readState().nativeConnections.find((item) => item.id === "causal-native")).toMatchObject({ status: "needs-attention", deliveryError: expect.stringContaining("credits") });
+    const before = readState().socialIntents.find(item => item.id === intentId)!.validity.expiresAt;
+    reportBridgeIdentity(bridgeResult.bridge!, { executorId: "chrome-test", username: "example_agent" });
+    reportBridgeIdentity(bridgeResult.bridge!, { executorId: "chrome-test", username: "another-account" });
+    reportBridgeIdentity(bridgeResult.bridge!, { executorId: "chrome-test", username: "example_agent" });
+    expect(claimExecutions(readState().bridges[0]!, { executorId: "chrome-test", limit: 1 }).executions).toEqual([]);
+    expect(readState().executions.find(item => item.id === executionId)).toMatchObject({ status: "failed", attempts: 1, connector: "native" });
+    expect(readState().socialIntents.find(item => item.id === intentId)?.validity.expiresAt).toBe(before);
+    expect(readState().outcomes).toEqual([]);
+    expect(readState().nativeConnections[0]).toMatchObject({ status: "needs-attention" });
   });
 
   it("keeps duplicate Bridge observations on the indexed health path", () => {
@@ -265,16 +264,16 @@ describe("Bridge browser retry lifecycle", () => {
     let bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge?.id)!;
     const held = claimExecutions(bridge, { executorId: "chrome-test", limit: 1 });
     expect(held.executions).toHaveLength(0);
-    expect(held.retryAfterIdentity).toBe(true);
-    const queuedExecutionId = held.state.executions.find((item) => item.status === "queued")?.id;
-    expect(queuedExecutionId).toBeTruthy();
+    expect(held.retryAfterIdentity).toBe(false);
+    const waitingExecution = held.state.executions.find((item) => item.status === "awaiting-connector");
+    expect(waitingExecution).toBeTruthy();
 
     reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "example_agent" });
     ingestEvents(readState().bridges.find((item) => item.id === bridgeResult.bridge?.id)!, { events: [{ sourceEventId: "identity-target", event: "created", object: { externalRef: { type: "x.post", id: "target-post-identity" }, objectType: "post", language: "en", author: { displayName: "Target" }, content: { text: "A target conversation." }, visibility: "public", shareability: "presence-only" } }] });
     bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge?.id)!;
     const claimed = claimExecutions(bridge, { executorId: "chrome-test", limit: 1 });
     expect(claimed.retryAfterIdentity).toBe(false);
-    expect(claimed.executions[0]?.id).toBe(queuedExecutionId);
+    expect(claimed.executions[0]?.id).toBe(waitingExecution?.id);
   });
 
   it("retires expired queued work and continues to the next live action", () => {
@@ -289,7 +288,8 @@ describe("Bridge browser retry lifecycle", () => {
     const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
     state = applyOperation(bridgeResult.state, { type: "setPresence", patch: { execution: { reply: "auto" } } });
     state = formXReplyIntent(state, "This stale action should retire.", "target-post-stale");
-    const staleIntent = state.socialIntents.find((intent) => intent.state === "active");
+    const staleExecution = state.executions.find((execution) => execution.target?.id === "target-post-stale");
+    const staleIntent = state.socialIntents.find((intent) => intent.id === staleExecution?.socialIntentId);
     staleIntent!.validity.expiresAt = new Date(Date.now() - 1_000).toISOString();
     state = formXReplyIntent(state, "This current action should still claim.", "target-post-current");
     writeState(state);
@@ -329,7 +329,7 @@ describe("Bridge browser retry lifecycle", () => {
     state = formXReplyIntent(state, "A bounded browser retry test.", "target-post-1");
     expect(state.presence?.connectionMode).toBe("bridge");
     expect(state.bridges.find((item) => item.id === bridgeResult.bridge?.id)?.state).toBe("online");
-    expect(state.executions[0]?.status).toBe("queued");
+    expect(state.executions[0]?.status).toBe("awaiting-connector");
     writeState(state);
 
     const bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge?.id)!;
@@ -370,7 +370,7 @@ describe("Bridge browser retry lifecycle", () => {
 
     expect(claim.executions).toHaveLength(0);
     expect(claim.state.bridges.find((item) => item.id === bridge.id)?.accountIdentity).toMatchObject({ status: "mismatch", username: "another-account" });
-    expect(claim.state.executions[0]?.status).toBe("queued");
+    expect(claim.state.executions[0]?.status).toBe("awaiting-connector");
   });
 
   it("does not claim a queued reply after the target establishes a blocked boundary", () => {
@@ -428,6 +428,10 @@ describe("Bridge browser retry lifecycle", () => {
     reportBridgeIdentity(bridge, { executorId: "operator-browser", username: "richardsondx" });
     bridge = readState().bridges.find((item) => item.id === bridge.id)!;
     ingestEvents(bridge, { events: [{ sourceEventId: "executor-isolation-target", event: "created", object: { externalRef: { type: "x.post", id: "target-post-executor-isolation" }, objectType: "post", language: "en", author: { displayName: "Target" }, content: { text: "A target conversation." }, visibility: "public", shareability: "presence-only" } }] });
+    const queuedState = readState();
+    const queuedReply = queuedState.executions.find((execution) => execution.target?.id === "target-post-executor-isolation");
+    if (queuedReply) Object.assign(queuedReply, { status: "queued", environment: "live", connector: "bridge", bridgeId: bridge.id });
+    writeState(queuedState);
     bridge = readState().bridges.find((item) => item.id === bridge.id)!;
 
     expect(bridge.accountIdentity).toMatchObject({ status: "verified", username: "example_agent" });
@@ -435,9 +439,57 @@ describe("Bridge browser retry lifecycle", () => {
     expect(wrongExecutor.executions).toHaveLength(0);
     expect(wrongExecutor.retryAfterIdentity).toBe(true);
 
+    const changeExpectedHandle = (handle: string) => {
+      const latest = readState();
+      if (latest.presence?.id === state.presence!.id) latest.presence.handle = handle;
+      latest.presences = latest.presences.map((presence) => presence.id === state.presence!.id ? { ...presence, handle } : presence);
+      writeState(latest);
+    };
+    changeExpectedHandle("@renamed-presence");
+    const staleIdentityClaim = claimExecutions(readState().bridges.find((item) => item.id === bridge.id)!, { executorId: "genny-browser", limit: 1 });
+    expect(staleIdentityClaim.executions).toHaveLength(0);
+    expect(staleIdentityClaim.retryAfterIdentity).toBe(true);
+
+    changeExpectedHandle("@example_agent");
+    reportBridgeIdentity(readState().bridges.find((item) => item.id === bridge.id)!, { executorId: "genny-browser", username: "example_agent" });
     const gennyExecutor = claimExecutions(bridge, { executorId: "genny-browser", limit: 1 });
     expect(gennyExecutor.executions).toHaveLength(1);
     expect(gennyExecutor.retryAfterIdentity).toBe(false);
+
+    changeExpectedHandle("@renamed-presence");
+    expect(() => acknowledgeExecution(
+      readState().bridges.find((item) => item.id === bridge.id)!,
+      gennyExecutor.executions[0]!.id,
+      { executorId: "genny-browser", externalRef: { type: "x.reply", id: "stale-account-reply" } },
+    )).toThrow("independent delivery verification");
+    expect(readState().outcomes).toHaveLength(0);
+  });
+
+  it("binds waiting live work to the browser route when the expected account becomes available", () => {
+    let state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    state.presence!.environment = "live";
+    state.presence!.connectionMode = "bridge";
+    state.presence!.browserAccess = { enabled: true };
+    state.presences = state.presences.map((presence) => presence.id === state.presence!.id
+      ? { ...presence, environment: "live", connectionMode: "bridge", browserAccess: { enabled: true } }
+      : presence);
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    const connectedAt = new Date().toISOString();
+    Object.assign(bridgeResult.state.bridges[0]!, { adapterStatus: "connected", lastHeartbeatAt: connectedAt, lastSeenAt: connectedAt });
+    state = applyOperation(bridgeResult.state, { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    state = formXReplyIntent(state, "Wait for the browser account before delivery.", "target-post-waiting-browser");
+    const waiting = state.executions[0]!;
+    expect(waiting).toMatchObject({ status: "awaiting-connector", environment: "live" });
+    expect(waiting.bridgeId).toBeUndefined();
+    writeState(state);
+
+    reportBridgeIdentity(readState().bridges.find((item) => item.id === bridgeResult.bridge!.id)!, { executorId: "chrome-test", username: "example_agent" });
+
+    expect(readState().executions.find((item) => item.id === waiting.id)).toMatchObject({
+      status: "queued",
+      connector: "bridge",
+      bridgeId: bridgeResult.bridge!.id,
+    });
   });
 
   it("holds a claimed pre-write action and resumes automatically after the expected account returns", () => {
@@ -693,11 +745,11 @@ describe("Bridge browser retry lifecycle", () => {
     });
     expect(result.verified).toBe(false);
     expect(result.execution.status).toBe("verification-pending");
-    expect(result.execution.failure?.code).toBe("X_API_VERIFICATION_PENDING");
+    expect(result.execution.failure?.code).toBe("BROWSER_READBACK_REQUIRED");
     expect(result.execution.externalRef).toBeUndefined();
   });
 
-  it("verifies a text-only original post from strict browser proof when X API verification is unavailable", async () => {
+  it("does not verify an old matching text-only DOM post without claim-bound website evidence", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
     vi.stubEnv("OPENPRESENCE_AI_MOCK", "0");
@@ -727,9 +779,9 @@ describe("Bridge browser retry lifecycle", () => {
         assetIds: [],
       },
     });
-    expect(result.verified).toBe(true);
-    expect(result.execution).toMatchObject({ status: "succeeded", externalRef: { type: "x.post", id: "2100964409350692998" } });
-    expect(readState().outcomes.some((outcome) => outcome.executionId === execution.id && outcome.status === "succeeded")).toBe(true);
+    expect(result.verified).toBe(false);
+    expect(result.execution).toMatchObject({ status: "verification-pending", failure: { code: "BROWSER_READBACK_REQUIRED" } });
+    expect(readState().outcomes.some((outcome) => outcome.executionId === execution.id)).toBe(false);
   });
 
   it("rejects DOM readback that clears the composer without a matching public permalink or relationship", async () => {
@@ -766,7 +818,7 @@ describe("Bridge browser retry lifecycle", () => {
     });
     expect(result.verified).toBe(false);
     expect(result.execution.status).toBe("verification-pending");
-    expect(result.execution.failure?.code).toBe("X_API_VERIFICATION_PENDING");
+    expect(result.execution.failure?.code).toBe("BROWSER_READBACK_REQUIRED");
     expect(result.execution.externalRef).toBeUndefined();
   });
 });

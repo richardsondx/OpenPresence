@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const projectRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const runtimeConfigPath = path.join(projectRoot, "data", "openpresence-runtime.json");
 const manifestPath = path.join(projectRoot, "data", "openpresence-db.json");
 const defaultPort = 3015;

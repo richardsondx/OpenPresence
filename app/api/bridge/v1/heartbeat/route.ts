@@ -8,7 +8,7 @@ export async function POST(request: Request) {
     const bridge = bridgeFromRequest(request);
     if (!bridge) return NextResponse.json({ error: "Bridge authentication failed." }, { status: 401 });
     const input = heartbeatInput.parse(await request.json());
-    const result = heartbeatBridge(bridge, input.executorId);
+    const result = heartbeatBridge(bridge, input.executorId, input.adapter);
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Bridge heartbeat failed." }, { status: 400 });

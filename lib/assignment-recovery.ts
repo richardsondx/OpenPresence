@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import { isAutonomousPreWriteDeliveryFailure } from "./live-assignment-run";
 import type { AssignmentRun, OpenPresenceState } from "./types";
 import { defaultOperationalStagePolicies } from "./responsibility-continuity";
+import { evaluateExecutionReadiness } from "./execution-readiness";
+import { bridgeReadyForExpectedAccount } from "./bridge-contract";
 import { isXCreditsError } from "./x-credits";
+import { assignmentIsSatisfied } from "./runtime";
 
 /** Dependency outages do not require operator guidance. Keep slow automatic probes. */
 export function isTemporaryAssignmentFailure(error: string): boolean {
@@ -405,6 +408,54 @@ export function resumeRecoverableAssignmentFailures(state: OpenPresenceState, no
       continue;
     }
     if (deferRecoverableAssignmentFailure(state, run.id, nowMs)) resumed.push(assignment.id);
+  }
+  return resumed;
+}
+
+/** Resume responsibility, never replay a failed public action or renew its social moment. */
+export function resumeBrowserBlockedResponsibilities(state: OpenPresenceState, nowMs = Date.now()): string[] {
+  const resumed: string[] = [];
+  const preWriteCodes = new Set(["X_API_CREDITS_EXHAUSTED", "NATIVE_API_UNAVAILABLE", "BRIDGE_NOT_CHECKED_IN", "BROWSER_CONNECTOR_UPDATE_REQUIRED", "BROWSER_CONNECTOR_UNAVAILABLE", "UNSUPPORTED_ASSET", "ACCOUNT_NOT_READY", "ACCOUNT_MISMATCH"]);
+  for (const assignment of state.assignments) {
+    if (assignment.planningOnly || assignment.agentId !== state.agent?.id || assignmentIsSatisfied(assignment, state) || assignment.environment !== "live" || !["blocked", "needs_operator", "active"].includes(assignment.status) || assignmentWindowState(assignment, nowMs) !== "open") continue;
+    if (assignment.status === "active" && !["delivery_failed", "assignment_blocked"].includes(assignment.lastOutcome?.class ?? "")) continue;
+    const reason = assignment.lastOutcome?.message ?? assignment.work?.blockedReason ?? "";
+    if (!/X API billing|api credits|spend(?:ing)? cap|authorized browser route|No active delivery route|browser connector|browser.*(?:disconnect|unavailable)|adapter.*(?:out.of.date|update)|Bridge.*(?:check.in|unavailable)/i.test(reason)) continue;
+    const presence = state.presences.find(item => item.id === assignment.presenceId);
+    if (!presence || presence.status !== "live" || presence.environment === "sandbox" || presence.browserAccess?.enabled !== true) continue;
+    if ((state.assignmentRuns ?? []).some(run => run.assignmentId === assignment.id && openAssignmentRunStatuses.has(run.status))) continue;
+    const executions = state.executions.filter(execution => execution.assignmentId === assignment.id);
+    if (executions.some(execution => {
+      // Previous completed occurrences must not prevent an ongoing responsibility
+      // from making its next fresh decision. They are never queued again here.
+      if (["succeeded", "cancelled", "expired"].includes(execution.status)) return false;
+      return execution.presenceId !== presence.id || execution.environment !== "live" || execution.externalRef || execution.executedAt || state.outcomes.some(outcome => outcome.executionId === execution.id)
+      || ["queued", "approved", "awaiting-review", "awaiting-manual", "awaiting-connector", "claimed", "executing", "verification-pending", "verification-closed"].includes(execution.status)
+      || !preWriteCodes.has(execution.failure?.code ?? "") || execution.failure?.reviewedAt || execution.source === "operator";
+    })) continue;
+    // Responsibilities describe outcomes; adapters advertise executable actions.
+    // A growth responsibility can resume through replies when posting is off.
+    const kind = assignment.deliverable.type;
+    const affordances = kind === "audience_growth" ? ["reply", "post", "quote"]
+      : ["meaningful_engagement", "public_interaction"].includes(kind) ? ["reply", "quote"]
+      : ["post", "original_publication", "maintain_original_presence", "image_post", "video_post"].includes(kind) ? ["post"]
+      : [kind];
+    const media = ["image_post", "video_post"].includes(kind);
+    const routeReady = affordances.some(affordance => {
+      const bridge = state.bridges.find(item => item.presenceId === presence.id && bridgeReadyForExpectedAccount(item, presence.handle, nowMs, { affordance, media }));
+      if (!bridge) return false;
+      const readiness = evaluateExecutionReadiness({ presence, channel: presence.channel, affordance, state, environment: "live" });
+      return readiness.executableNow && ["ready", "awaiting_review"].includes(readiness.disposition) && readiness.availableRoutes.includes("bridge");
+    });
+    if (!routeReady) continue;
+    const at = new Date(nowMs).toISOString();
+    assignment.status = "active";
+    assignment.work = { ...(assignment.work ?? { phase: "candidate_review", attempts: 0, maxAttempts: 4, storiesResearched: 0 }), phase: "candidate_review", blockedReason: undefined };
+    assignment.nextDueAt = at;
+    assignment.lastOutcome = { class: "incomplete", message: "The authorized browser route is ready again. The same responsibility is returning to observation and fresh judgment; its earlier failure is retained in history.", at };
+    assignment.revision = (assignment.revision ?? 0) + 1;
+    assignment.updatedAt = at;
+    resumed.push(assignment.id);
   }
   return resumed;
 }

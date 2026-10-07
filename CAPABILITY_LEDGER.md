@@ -11,6 +11,31 @@ baseline and must be re-verified against the current checkout before release.
 mechanical proof gates, dependencies, and exact closure gaps for the current
 candidate. It does not replace this ledger's capability definitions or status.
 
+## 2026-10-01 Chat and learning closure
+
+Current evidence: `qa-learnings/chat-learning-recovery-2026-10-01.md` and
+`qa-learnings/learning-closure-2026-10-01/review.md`. Actual Chrome research
+without Tavily completes one browser search, two source reads and a grounded
+reply, retaining receipts and five provider calls across reload. Chat now uses
+durable 12-step slices with a 48-step cap, typed recovery, persisted user-action
+waits and receipt checks for researched/delivered/scheduled/background claims.
+Public research does not bypass authenticated-X identity or publication permission.
+
+Five naturally attributed real-model learning source decisions now complete;
+checkpoint restart preserves causal records. Independent audits reconstruct
+measured contradiction/weakening/retirement and six media source decisions
+(two each relevant, irrelevant and text-only), with equal-clock provider-bound
+forward comparisons and unchanged Taste. Later choices are equal or differ in
+the reverse preferred direction: beneficial transfer, autonomous later avoidance
+and learned media choice are not demonstrated. LEARN-002/003/004 remain PARTIAL.
+
+The independently reviewed seven-day trajectory has five verified rehearsal
+outcomes, durable correction and zero unsupported interruptions. It does not
+prove the missing positive autonomous milestone. Historical fabricated strategy
+updates remain invalidated. AUT-010, EVAL-005 and UX-004 remain PARTIAL; the
+complete composed EVAL-004/SBX-008 gates remain open. AUT-011 still requires
+read-only authenticated X proof with the correct verified `@example_agent` account.
+
 ## 2026-09-21 verification-loop audit
 
 Current closure evidence lives in `qa-learnings/verification-loop-2026-09-21/`.
@@ -269,12 +294,13 @@ confidence estimate.
 | AUT-004 | Calendar is a truthful projection of the current plan | Runtime and visible schedule do not diverge; user does not maintain task fields | `FEATURES_MAP.md`, `tests/publishing-plan.test.ts`, `tests/e2e/schedule-recovery.spec.ts`, `tests/runtime.test.ts` (linked Assignment intervention synchronizes Calendar and standing intent), `app/client-page.tsx` projection UI, `qa-learnings/canonical-certification-d338604-2026-09-17.md`, `qa-learnings/calendar-plan-projection-audit-2026-09-17.md`, `tests/e2e/chat-first-harness.spec.ts` (Agent-owned publishing item cancellation leaves one successor plan and visible projected windows after reload) | PROVEN | No remaining gate in the declared truthful projection contract |
 | AUT-005 | Chat can create and mutate Agent-owned executable work directly | User intention does not require manual task creation or activation | `tests/operator-chat-tools.test.ts`, `tests/e2e/chat-first-harness.spec.ts`; `tests/operator-chat-harness.test.ts` proves a natural supervisory request uses typed `plan_intervention` to mutate the existing Agent-owned responsibility without duplication; isolated Chromium: ownership request → `Assignment queued` → Tasks → active Agent-owned goal after reload; `qa-learnings/plan-intervention-browser-2026-09-17.md` proves scoped guidance mutates and persists through the Tasks inspector; `tests/plan-intervention-process-boundary.test.ts` and `qa-learnings/plan-intervention-process-boundary-2026-09-17.md` prove Process A termination → fresh Process B restore → public virtual-time execution exactly once without activation or live side effects | PROVEN | No remaining gate in the declared direct Agent-owned execution contract; dependent-work reconsideration remains under AUT-006/UX-005 |
 | AUT-006 | New events and failures can cause justified re-planning | Obsolete work does not continue silently | `lib/assignment-recovery.ts`, `app/api/state/route.ts`, `tests/assignment-failure-recovery.test.ts`, `tests/publishing-plan.test.ts`, `tests/e2e/mandatory-seven-day-no-babysitting.spec.ts` (canonical seven-day trajectory: breaking event → explicit invalidation review → successor active plan; linked Agent-owned responsibility remains active; successor Calendar windows are copied into its plan; superseded windows are non-executable and no stale execution follows), `qa-learnings/certification-closure-11eaa8e-2026-09-17.md`, `qa-learnings/superseded-plan-fence-2026-09-17.md` | PROVEN | No remaining gate in the declared event-driven dependent-work reconsideration contract |
-| AUT-010 | Agent can initiate a useful supervisory update without routine noise | Meaningful problems, opportunities, strategy changes, and breakthroughs reach the Presence-scoped conversation; routine receipts remain in Activity; retries dedupe | `lib/operator-initiated-communication.ts`, `lib/runtime.ts`, `tests/agent-initiated-communication.test.ts` (20 tests, including legacy/new degraded-X notice removal and zero Chat interruptions for retried partial observation), `tests/e2e/natural-supervision-seven-day.spec.ts`, `qa-learnings/release-candidate-249dfe-2026-09-17.md` (exact candidate: one meaningful strategy-change update across the composed seven-day trajectory), candidate `9663c2e` (degraded native observation remains operational state only; exact-candidate release health and broad suite passed) | PARTIAL | Prove the same threshold on a fully autonomous multi-day milestone/recap and against an independent adversarial verifier |
+| AUT-010 | Agent can initiate a useful supervisory update without routine noise | Meaningful problems, opportunities, strategy changes, and breakthroughs reach the Presence-scoped conversation; routine receipts remain in Activity; retries dedupe | `lib/operator-initiated-communication.ts`, `lib/runtime.ts`, `tests/agent-initiated-communication.test.ts` (20 tests, including legacy/new degraded-X notice removal and zero Chat interruptions for retried partial observation), `tests/e2e/natural-supervision-seven-day.spec.ts`, `qa-learnings/release-candidate-249dfe-2026-09-17.md` (historical positive strategy-change claim invalidated by the 2026-09-21 audit), candidate `9663c2e` (degraded native observation remains operational state only; exact-candidate release health and broad suite passed) | PARTIAL | Prove the same threshold on a fully autonomous multi-day milestone/recap and against an independent adversarial verifier |
 | AUT-007 | Agent follows through, measures, and adapts after action | An intermediate delivery is not outcome completion | `lib/live-assignment-run.ts`, `lib/runtime.ts`, `app/api/state/route.ts`, `tests/assignment-runtime.test.ts`, `qa-learnings/canonical-certification-5ef27b4-2026-09-17.md` | PROVEN | Independent public verifier passed delivery → awaiting_measurement → outcome_recorded → exactly-once scoped learning → replan → completion on immutable `5ef27b4`; duplicate advance produced no duplicate chain |
 | AUT-008 | Agent stays within Presence permissions and escalates only at the boundary | Autonomy never bypasses the Execution Envelope | `lib/execution-readiness.ts`, `tests/assignment-runtime.test.ts`, `tests/source-invariance.test.ts`, `lib/native-execution-delivery.ts`, `tests/native-execution-delivery.test.ts` (delivery rechecks paused/revoked authority before connector use) | PARTIAL | Rerun the independent adversarial suite against integrated main, including approved and queued live actions |
 | AUT-009 | Failed or uncertain delivery is not shown as success | Intent, execution, delivery, and outcome remain distinct | `tests/assignment-failure-recovery.test.ts`, `tests/assignment-domain.test.ts` (acknowledgement without matching Outcome remains `delivery_pending`); `docs/operational-autonomy-checklist.md` | PROVEN | Add live UI evidence for one failure state |
+| AUT-011 | X API and signed-in browser are peer tools with durable route selection | Per-action preference and known health guide execution/observation; known API failures are not reprobed; X rate limits block both tools; Browser identity must match the Presence handle; model-provider quota remains a separate cognition dependency; interrupted browser reads are reclaimed with a renewable lease | `lib/runtime.ts`, `lib/execution-router.ts`, `lib/autonomy-worker.ts`, `lib/operator-chat-tools.ts`, `lib/ai.ts`, `lib/incident-engine.ts`, `lib/browser-channel-read.ts`, `lib/bridge.ts`, `app/api/bridge/v1/reads/route.ts`, `extension/background.js`, `tests/browser-channel-read.test.ts`, `tests/bridge-retry.test.ts`; `qa-learnings/regression-rules.md` (peer-tool, account-binding, route-recovery, and read-recovery contract). Deterministic route/identity/lease regressions pass; Chrome now verifies `@example_agent`, but the 2026-10-01 read attempt was not claimed by the installed extension; see `qa-learnings/learning-closure-2026-10-01/x-quick-test-2026-10-01.json` | PARTIAL | Reload the installed extension and verify one read-only Browser observation under the verified `@example_agent` account; keep model-provider quota as a separate cognition gate |
 | LEARN-001 | Outcomes become evidence tied to the declared goal | Metrics inform judgment rather than rewrite identity | `lib/social-strategy.ts`, `lib/growth-scope.ts`, `tests/social-strategy.test.ts`, `tests/sandbox.test.ts` (public metric path plus durable state reload), `qa-learnings/learning-audit-4d4903d-2026-09-17.md` (persisted-trajectory audit; candidate canonical run and public metric-path evidence) | PROVEN | No remaining gate in the declared goal-tied outcome-evidence contract |
-| LEARN-002 | Stored learning changes a later decision | Saved insight is not decorative memory | `lib/social-strategy.ts`, `lib/learning-runtime.ts`, `tests/autonomous-growth-cognition.test.ts`, `lib/learning-counterfactual.ts`; `tests/learning-counterfactual.test.ts` (SQLite round-trip, explicit decision-lineage gating, JSON-round-tripped Sandbox snapshots, public fork overlay namespacing, fresh-source overlay exclusion, source-restore preservation, serialized World A/World B retained-vs-removed learning, changed later runtime strategy, and selected-action attribution for quote/repost/like/follow) plus `lib/sandbox-replay.ts`/`lib/runtime.ts`; `qa-learnings/learning-audit-4d4903d-2026-09-17.md`; public-worker repair and bounded real-provider attempt: `qa-learnings/learn002-public-closure-2026-09-21/review.md` / `packet.json` (2026-09-21) | PARTIAL | First missing real transition: two comparable decisions attributed to the same pattern (one of five in the retained real run). Then measure, fork, and prove later behavioral transfer; deterministic strategy attribution and full observation-parent reconstruction are insufficient |
+| LEARN-002 | Stored learning changes a later decision | Saved insight is not decorative memory | `lib/social-strategy.ts`, `lib/learning-runtime.ts`, `tests/autonomous-growth-cognition.test.ts`, `lib/learning-counterfactual.ts`; `tests/learning-counterfactual.test.ts` (SQLite round-trip, explicit decision-lineage gating, JSON-round-tripped Sandbox snapshots, public fork overlay namespacing, fresh-source overlay exclusion, source-restore preservation, serialized World A/World B retained-vs-removed learning, changed later runtime strategy, and selected-action attribution for quote/repost/like/follow); `tests/sandbox-learning-choice-chain.test.ts` plus `qa-learnings/learning-choice-verification-2026-09-23/review.md` and `deterministic-proof.json` (public worker, fresh IDs, raw causal joins, independent retained-vs-removed reconstruction); prior public-worker repair and bounded real-provider attempt: `qa-learnings/learn002-public-closure-2026-09-21/review.md` / `packet.json` | PARTIAL | Deterministic causal proof is closed, but real forward transfer is not: GPT-4o-mini produced two fresh comparable decisions whose retained/removed choice stayed identical, Mercury produced one, and a five-decision attempt hit the isolated runtime memory restart. Current five-source and independent raw-link gates pass (`qa-learnings/learning-closure-2026-10-01/review.md`); matched fresh choices are equal or reverse preferred direction. Recovery condition: demonstrate useful fresh transfer for the learned reason, with provider evidence |
 | LEARN-003 | Patterns are scoped, confidence changes, and stale patterns retire | Tiny samples and context shifts do not create global rules | `lib/social-strategy.ts`, `lib/learning-runtime.ts`, `tests/learning-counterfactual.test.ts` (independent causal-decision counting, one-year recency gate, Presence/Channel/Agent scope regression, measured contradiction and bounded retirement) and `qa-learnings/learning-audit-4d4903d-2026-09-17.md` | PARTIAL | Prove the full autonomous contradiction/retirement trajectory through an independent learning adversary |
 | LEARN-004 | Relevant media is distinguished from arbitrary media | “Use images” is not a sufficient learned abstraction | `lib/asset-discovery.ts`, `lib/perception-runtime.ts`, `lib/runtime.ts`, `app/api/state/route.ts`, `lib/social-strategy.ts` (`MediaEvidenceProfile`), `lib/types.ts`, `tests/asset-intelligence.test.ts`, `tests/perception.test.ts`, `tests/learning-counterfactual.test.ts`, `tests/sandbox.test.ts` (three executable relevant/irrelevant/text-only variants with verified metric evidence and persisted profiles), `qa-learnings/media-learning-structure-2026-09-17.md`, `qa-learnings/release-candidate-2154c5c-2026-09-17.md`, `qa-learnings/release-candidate-249dfe2-2026-09-17.md` (canonical media truth-release slice passed) | PARTIAL | Independently verify that a later media choice changes for the learned reason |
 | LEARN-005 | User feedback persists as a durable constraint | Corrections survive the current turn and respect scope | `tests/ai.test.ts`, `tests/operator-chat-harness.test.ts` (typed `record_preference` saves scoped evidence, survives the worker merge boundary, and deduplicates), `tests/chat-feedback-process-boundary.test.ts` (Process A → termination → fresh Process B restores scoped evidence, then identical future input produces a different counterfactual social decision with zero executions and no foreign-Presence evidence), `tests/e2e/natural-supervision-feedback-loop.spec.ts` (public natural correction → concise acknowledgement → scoped evidence → later Sandbox decision changes), `tests/e2e/natural-supervision-seven-day.spec.ts` (updated seven-day golden trajectory persists the Day 3 correction while preserving an unrelated Day 4 repost), `lib/social-strategy.ts`, `tests/learning-counterfactual.test.ts`, `qa-learnings/chat-feedback-durability-2026-09-17.md`, `qa-learnings/natural-supervision-feedback-loop-2026-09-17.md` | PROVEN | Clean detached public seven-day trajectory proves the full correction-to-later-decision contract; no remaining gate in this row |
@@ -290,13 +316,13 @@ confidence estimate.
 | EVAL-001 | Trajectory-level scenario harness exists | Evals run on top of the Sandbox rather than replacing it | `bin/openpresence.mjs`, `scenarios/`, `tests/scenarios.test.ts`, `tests/e2e/scenario-rehearsal.spec.ts`, `tests/e2e/mandatory-seven-day-no-babysitting.spec.ts`, `tests/sandbox-multi-rate-trajectory.test.ts`; canonical composed seven-day trajectory passed through public controls, exact-candidate independent runtime verifier, and detached public Chromium verifier; durable attestation in `qa-learnings/release-candidate-0f237e3-2026-09-17.md` | PROVEN | No remaining gap in the declared composed-harness contract |
 | EVAL-002 | Deterministic properties use deterministic assertions | Judges are not used where state can be asserted | `tests/*.test.ts`, `tests/playground-cli.test.ts` | PROVEN | Audit new evals for green-by-definition tests |
 | EVAL-003 | Material failures become reproducible regressions | A fixed failure remains protected | `qa-learnings/`, `tests/e2e/`, `docs/operational-autonomy-checklist.md`, `qa-learnings/eval-003-failure-linkage-2026-09-17.md`, `lib/types.ts`/`lib/runtime.ts` (failed or unavailable Scenario evaluations now require capability linkage at the durable write boundary), `tests/scenarios.test.ts`, `qa-learnings/release-candidate-249dfe2-2026-09-17.md` (exact-candidate fail-closed verifier attack and canonical composed run with no unclassified material failure) | PROVEN | No remaining gate in the declared fail-closed capability-linkage contract |
-| EVAL-005 | Natural supervisory interaction is evaluated as a trajectory | Realistic user utterances are judged by behavior, state, and follow-up rather than exact wording or internal tool scripts | `qa-learnings/conversation-prompt-evals/2026-09-16-natural-supervision-golden.json`, `docs/plans/natural-supervision-eval.md`, `tests/e2e/natural-supervision-seven-day.spec.ts`, `qa-learnings/release-candidate-249dfe2-2026-09-17.md` (exact candidate: 7 natural turns, 10,080 virtual minutes, 5 verified outcomes, one strategy-change update, durable correction) | PARTIAL | Run the clean trajectory through an independent adversarial verifier and review interruption behavior |
+| EVAL-005 | Natural supervisory interaction is evaluated as a trajectory | Realistic user utterances are judged by behavior, state, and follow-up rather than exact wording or internal tool scripts | `qa-learnings/conversation-prompt-evals/2026-09-16-natural-supervision-golden.json`, `docs/plans/natural-supervision-eval.md`, `tests/e2e/natural-supervision-seven-day.spec.ts`, `qa-learnings/release-candidate-249dfe2-2026-09-17.md` (historical positive update invalidated; current independent seven-day proof: 7 turns, 10,080 virtual minutes, 5 verified rehearsal outcomes, durable correction, zero interruptions; see 2026-10-01 QA packet) | PARTIAL | Run the clean trajectory through an independent adversarial verifier and review interruption behavior |
 | EVAL-004 | Counterfactual/ablation verification is repeatable | Future behavior differs only when the relevant evidence/state differs | Existing prompt ablations in `qa-learnings/conversation-prompt-evals/`; deterministic learning projections, persisted retrieval, lineage gating, SQLite-persisted World A/World B forward ablation, JSON-round-tripped Sandbox snapshot retained-vs-removed learning proof, fresh-source overlay exclusion, and Sandbox retrieval fencing in `lib/sandbox-replay.ts`/`lib/runtime.ts`; public fork isolation/idempotence and post-restart inject/reply behavior independently audited on `abe4993`/`7f13cf3`/`27ebac1`/`31f62b0`; exact candidate `f6059d1` `tests/autonomy-proof.test.ts` closed-loop quote/repost/follow delivery and relationship-memory evidence | PARTIAL | Complete causal-cone ablation and an independent composed verifier still remain; the action-family harness now covers quote/repost/follow execution, but does not by itself prove counterfactual causality |
 | TOOL-001 | Agents can inspect/control Sandbox through a reusable CLI | No repeated throwaway script is required for common Sandbox work | `bin/openpresence.mjs`, `tests/playground-cli.test.ts`, `README.md` | PROVEN | Add commands only for demonstrated recurring gaps |
 | TOOL-002 | Agents can control and verify the running app | Browser/runtime proof has isolated state and structured evidence | `.agents/skills/verify-app/scripts/verify-app.mjs`, `.agents/skills/verify-app/SKILL.md` | PROVEN | Keep feature-map maintenance current |
 | TOOL-003 | Independent verifier agents can challenge builder claims | Builder success is not the sole proof for critical capabilities | `docs/AGENT_EXECUTION_FLOW.md`; exact-candidate independent verifier challenged the integrated public workflow and passed cross-process replay, cross-rate semantics, hidden-truth, reset/session isolation, retry/cancellation race, production-escape, and runtime-health oracles without source edits; durable attestation in `qa-learnings/certification-closure-11eaa8e-2026-09-17.md` | PROVEN | No remaining gap in the declared independent-verifier contract |
 | UX-001 | User experience feels like supervising an Agent, not managing tasks | Routine operational work is Agent-owned and visible without machinery leakage; no normal user task-entry or activation flow | `FEATURES_MAP.md`, `.agents/skills/product-usability-auditor/SKILL.md`, `docs/operational-autonomy-checklist.md`, `app/client-page.tsx` (Tasks/Growth/Artifacts creation and full editor flows removed; Chat intervention and cancel remain), `tests/e2e/responsive-workspace.spec.ts`, `tests/e2e/artifacts-playbook.spec.ts` (no Add, Growth goal, template scheduling, or full editor controls), `tests/operator-chat-harness.test.ts` (new Chat responsibility is Agent-owned and executable without activation), `qa-learnings/simplification-tasks-supervisory-2026-09-17.md`, `qa-learnings/product-review-tasks-supervisory-2026-09-17.md` | PROVEN | No remaining gate in the declared no-task-management UX contract |
-| UX-004 | Chat is a lightweight, grounded supervisory interface | Responses are concise/action-first, use actual Growth/Calendar/plan state, infer operations from natural language, and support occasional Agent-initiated updates | `lib/supervisory-chat.ts`, `lib/operator-chat-harness.ts`, `lib/operator-initiated-communication.ts`, `tests/supervisory-chat.test.ts`, `tests/agent-initiated-communication.test.ts`, `tests/operator-chat-harness.test.ts`, `tests/e2e/natural-supervision-seven-day.spec.ts`, `tests/e2e/natural-supervision-feedback-loop.spec.ts`, `qa-learnings/release-candidate-249dfe2-2026-09-17.md` (exact candidate: grounded 7-day natural supervision and one non-routine update) | PARTIAL | Verify the complete trajectory and interruption threshold with an independent adversarial review |
+| UX-004 | Chat is a lightweight, grounded supervisory interface | Responses are concise/action-first, use actual Growth/Calendar/plan state, infer operations from natural language, and support occasional Agent-initiated updates | `lib/supervisory-chat.ts`, `lib/operator-chat-harness.ts`, `lib/operator-initiated-communication.ts`, `tests/supervisory-chat.test.ts`, `tests/agent-initiated-communication.test.ts`, `tests/operator-chat-harness.test.ts`, `tests/e2e/natural-supervision-seven-day.spec.ts`, `tests/e2e/natural-supervision-feedback-loop.spec.ts`, `qa-learnings/release-candidate-249dfe2-2026-09-17.md` (historical non-routine update invalidated; actual Chrome research and independent grounded seven-day quiet trajectory in 2026-10-01 QA packet) | PARTIAL | Verify the complete trajectory and interruption threshold with an independent adversarial review |
 | UX-005 | Plan Intervention lets the user supervise any Agent-owned planned item | Calendar item → scoped conversational feedback → durable Agent-owned plan mutation; cancel/postpone/constrain/replan remain coherent without a task editor | `lib/types.ts` (`planIntervention`), `lib/operator-chat-harness.ts`, `lib/autonomy-worker.ts`, `lib/runtime.ts`, `app/client-page.tsx`, `tests/runtime.test.ts` (postpone/constrain/cancel synchronize linked Calendar projection and standing intent), `tests/e2e/mandatory-seven-day-no-babysitting.spec.ts` (natural correction → scoped constraint), `tests/e2e/chat-first-harness.spec.ts` (browser guidance and direct Agent-owned publishing-item cancellation both survive reload with a coherent successor projection), `tests/plan-intervention-process-boundary.test.ts`, `qa-learnings/plan-intervention-browser-2026-09-17.md`, `qa-learnings/calendar-plan-projection-audit-2026-09-17.md` | PROVEN | No remaining gate in the declared scoped intervention contract |
 | UX-003 | Environment and permission truth stays visible | Sandbox, review-gated, live, and disconnected states are not represented as equivalent | `app/client-page.tsx` / `app/globals.css` shared `environmentStateFor` projection; `qa-learnings/ux-003-environment-state-projection-2026-09-17.md`; `qa-learnings/final-candidate-01fdd69-2026-09-17.md`; exact candidate responsive Chromium desktop/mobile journey 8/8 passed; Sandbox, paused, approval-required, syncing, stale, disconnected, and connected labels are explicit in workspace/Activity surfaces; `qa-learnings/release-candidate-249dfe2-2026-09-17.md` (current-selector public desktop/mobile Activity checks passed; existing responsive review/navigation evidence reused) | PROVEN | No remaining gate in the declared environment/permission projection contract |
 | SIM-001 | Simplification preserves protected behavior | Deletion is preceded by capability-level ablation | `.agents/skills/design-simplifier/SKILL.md`, `CAPABILITY_LEDGER.md`, `qa-learnings/simplification-tasks-supervisory-2026-09-17.md`, `qa-learnings/product-review-tasks-supervisory-2026-09-17.md`; removed Tasks/Growth/Artifacts user-entry and full editor controls while retaining internal Assignments, Chat intervention, Calendar projection, and execution proof; `tests/e2e/responsive-workspace.spec.ts` (final isolated Chromium and mobile runs, 4/4 each, retained reports/logs under `qa-learnings/verification-loop-2026-09-21/`); `qa-learnings/sim001-planning-only-public-proof-20260921.md` final-runtime rerun (public planning-only migration, restart, fresh Sandbox Agent-owned responsibility, auto Sandbox execution/outcome, and no duplicate IDs across second restart; final source hashes and raw snapshot hashes retained) | PROVEN | No remaining gap in the declared migration/restart/new-Agent/no-duplicate contract |
@@ -1100,3 +1126,120 @@ Bounded desktop/mobile evidence preserves AUT-004, AUT-005, UX-001, UX-005 and S
 ### Recovery continuity evidence — 2026-09-22
 
 AUT-009 and UX-004 retain their existing capability status; this change does not establish complete live autonomy. Bounded evidence covers temporary failure backoff, native rejection → browser routing, authenticated browser observation, account mismatch rejection, and recovery history surviving resolution/reload on desktop/mobile. Implementation spans `assignment-recovery.ts`, `incident-engine.ts`, `browser-channel-read.ts`, the bridge read endpoint/extension, and Chat projections. Evidence and remaining gates: `qa-learnings/agent-resilience-2026-09-22/README.md`. The next meaningful gate is a real signed-in X session demonstrating fresh observation → agent decision → verified authorized outcome after a native outage; prolonged real-provider recovery remains unproven.
+
+## 2026-10-01 Chat publication approval follow-through
+
+Pending publication reviews now show the proposed text, selected image, and approval controls directly in Chat. Approval dispatches the same authorized execution and persists receipt-grounded progress; duplicate approval does not create another outcome. Desktop and mobile isolated browser journeys verify visible image bytes, public API approval, simulated delivery, reload, and duplicate approval. Final frozen unit suite: 1433 passed, 3 skipped after the scoped Bridge media and ownership repairs. Evidence: `qa-learnings/chat-approval-followthrough-2026-10-01.md`.
+
+The existing live human-approved image post was resumed and failed before delivery while retrieving its sealed media. No verified public outcome is claimed. The Bridge image route now requires the active sealed execution, matching executor lease and exact publication-local approval to retrieve reviewable media. Seventeen independent authorization checks pass, including preservation of foreign Asset Agent ownership through normalization. Live verification awaits the updated installed extension. UX-004 and AUT-011 remain PARTIAL.
+
+## 2026-10-01 Chat media selection checkpoint
+
+Current media availability now precedes publication choice across library search, Chat picker and attachment cognition. The independent mocked-cognition worker trajectory verifies same-turn stale-image recovery to one fresh review request, with no duplicate intent or approval transfer. See `qa-learnings/chat-media-selection-2026-10-01.md`. This bounded runtime proof does not establish real-model editorial choice or promote UX-004/AUT-011.
+
+## 2026-10-01 Approved image transport checkpoint
+
+The reported live image failed during byte retrieval before public submission.
+Chrome adapter protocol readiness now gates media claims, with a specific
+persisted Chat recovery request. A composed actual-Chromium test checks approval,
+claim, authorized PNG retrieval and production file attachment against a
+simulated composer. Installed-extension and live-X verification remain open;
+UX-004 and AUT-011 remain PARTIAL. Evidence and scope:
+`qa-learnings/chat-image-delivery-2026-10-01.md`.
+
+The later missing-Chat-image report reproduced a separate presentation defect:
+terminal projection and review-only rendering hid saved media. The saved preview
+now persists after approval/failure, with current scoped access and no added
+delivery authority. Actual Genny Chrome loaded both selected PNGs; six isolated
+desktop/mobile journeys pass. This scoped preview fix does not promote the
+complete UX-004 or AUT-011 gates or claim live X upload.
+
+
+## 2026-10-01 Browser continuity checkpoint
+
+Executor-specific probed readiness, existing-responsibility recovery, bounded
+exact-media retry, and website media identity verification are implemented.
+168 focused tests pass, including actual HTTP route adversaries and declared
+image/post/reply/quote fixture outcomes; TypeScript passes. Independent review
+found and closed raw-ack proof bypass and false-positive verification response
+bugs. Historical successful actions stay unchanged and unmet metric goals resume;
+uncertain current actions remain held. See
+`qa-learnings/chat-image-delivery-2026-10-01.md` for commands and exact scope.
+
+AUT-011 and UX-004 remain PARTIAL. No current installed-adapter probe exists for
+Genny; live observation, a normal worker fresh decision with matching live
+outcome, and composed live reload/restart/publication gates remain BLOCKED.
+The expired image request is not renewed. LEARN-002/003/004, AUT-010, EVAL-005,
+EVAL-004 and SBX-008 are not promoted by fixture route or transport evidence.
+
+
+2026-10-01 scoped UX-004 checkpoint: pending Chat reviews are static expanded
+decision cards, with duplicate pending receipts consolidated and simpler image
+previews. Six desktop/mobile journeys pass and actual Genny Chrome confirms
+visible text/image/approval on reload and after clicking the static heading.
+Approval/cancel operations and saved receipts are retained. Broad UX-004 remains
+PARTIAL; see qa-learnings/chat-approval-followthrough-2026-10-01.md.
+
+### 2026-10-01 — Today journey evidence, bounded UX-004 improvement
+
+Today now groups durable requests and background responsibilities with selectable
+recorded tool requests/results, failed attempts, current status, and recovery.
+A completed private reply does not complete delegated work; missing proof remains
+Recorded. Scope, credential redaction, long-journey parent retention, review status,
+and historical failure preservation have targeted regressions. Current desktop and
+mobile browser journeys pass (8 cases), including composer follow-up during an
+in-flight send, persisted ordering, Today detail selection, Escape, and reload.
+Evidence: `qa-learnings/today-work-journey-2026-10-01.md`;
+`tests/work-journey.test.ts`, `tests/chat-journey-projection.test.ts`,
+`tests/autonomy-concurrency.test.ts`, `tests/e2e/today-work-journey.spec.ts`.
+UX-004 remains PARTIAL: deterministic rendering/scheduling evidence and factual
+prompt context do not establish real-model conversational quality, arbitrary
+specialist delegation, or interruptible executing private research. Next gate:
+independent real-model supervision trial with ongoing responsibility, natural
+follow-up, failure/recovery, and receipt-grounded progress across turns.
+
+2026-10-01 13:25 — AUT-011 / AUT-010 / UX-004 evidence supplement: repaired attachment-before-text acceptance and consumed-input handling; bounded failure diagnostics persist into same-run Chat continuation through normal worker and lease. Controlled provider rejects replacement action and unsupported rejection claim; two ongoing responsibility outcome-type recovery regressions pass. 178 focused tests + typecheck pass. Installed extension still reports 0.1.2 (repair artifact 0.1.3). No live image publication or real-model multi-cycle recovery proved; historical delivery ambiguity remains preserved. All affected capability claims stay PARTIAL. See qa-learnings/chat-image-delivery-2026-10-01.md.
+
+## 2026-10-01 V2 host-agent capability candidate
+
+| ID | Behavioral contract | Status / evidence |
+|---|---|---|
+| V2-001 | Host can discover real MCP tools/skill and persist isolated, retry-safe social context across sessions | VERIFIED locally: SDK HTTP, clean stdio, dedicated process, tenant/scope/auth lifecycle and SQLite tests in `tests/v2-*.test.ts`. Real Muse read-only authorization, skill retrieval, three workspace reads (including server restart) and a growth-plan call passed; displayed request markers matched the server trace. Fresh-chat/write/background gates remain open. |
+| V2-002 | Public voice and corrections remain scoped, undo preserves later goals, Never rules inherit | VERIFIED deterministic service regressions; PARTIAL host cognition: initial native-model smokes did not reliably persist a correction. |
+| V2-003 | Account selection and scheduling never authorize public actions | VERIFIED tool boundary: no execution tools; policy on every successful result requires target confirmation and each public action. A user’s intended handle is not a verified connection. Host enforcement is a pilot gate. |
+| V2-004 | Visual retrieval delivers actual pixels with honest provenance and uncertainty | VERIFIED fixture provider/image transport and invalid-pixel rejection; live Evidence8 corpus, semantics and reuse rights are NOT VERIFIED. |
+| V2-005 | Recorded observations support attributable experiments without inventing growth or scheduler operation | VERIFIED deterministic receipt, age, channel and hypothesis-boundary checks. Host reports remain unverified. Durable beneficial learning transfer and qualified audience growth are UNPROVEN. |
+| V2-006 | Stronger host models benefit from OpenPresence beyond prompts alone | EVAL INFRASTRUCTURE AVAILABLE: frozen48cases, private grading and actual MCP native-tool runner. Twelve ungraded smoke trials are not comparative certification. |
+
+Evidence and exact limits: `qa-learnings/openpresence-v2-implementation-2026-10-01.md`.
+`FEATURES_MAP.md` remains the sole feature navigation map. No production readiness
+or social-account management is inferred from the simulated `/v2` experience.
+
+
+### V2 conversation and connection simplification — 2026-10-01
+
+Removed the staged navigation, account settings, inspector and deployment text
+from the shared V2 demonstration. One chronological transcript asks one question
+at a time. The connection page uses one server-configured, agent-neutral prompt
+and three short steps. No personal handle is a shared default. Voice changes and
+undo require fresh example review; Instagram text without media remains a caption
+draft. V2-002/003/005 remain protected by the existing service contracts; the demo
+has no social execution or scheduler. Browser evidence and limits are recorded in
+`qa-learnings/v2-simplification-2026-10-01.md`. This UI evidence does not certify
+host enforcement, actual growth, or beneficial learning transfer.
+
+
+### V2 host conversation guidance — 2026-10-01
+
+Skill 2.0.2 and MCP initialization now require plain-language ordinary replies,
+one consequential question per turn and diagnostics only on explicit request.
+The live dedicated service was restarted and resource retrieval verified the
+new version. Cached host skills need refreshing. Seven transport/account-policy
+tests passed. This proves instruction delivery and preserves authority, not host
+behavior. Two five-trial development smokes through actual isolated MCP on Kimi
+produced no raw technical fields, but independent review found bundled-question
+failures: 1/5 in the initial candidate and 2/5 in the shorter candidate. Samples
+are too small for reliable comparison. Automated grades were mostly invalid or
+uncertain and do not establish a pass. Conversational reliability remains PARTIAL;
+actual normal-use Muse dialogue after refresh is UNVERIFIED. See
+`qa-learnings/v2-conversation-guidance-2026-10-01.md`.

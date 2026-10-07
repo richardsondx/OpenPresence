@@ -9,7 +9,7 @@ export function useWorkspaceSurface(ref: RefObject<HTMLElement | null>, active: 
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const surface = ref.current;
     if (!surface) return;
-    const focusable = () => Array.from(surface.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]')).filter((element) => element.getClientRects().length > 0);
+    const focusable = () => Array.from(surface.querySelectorAll<HTMLElement>('button:not([disabled]), summary, a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]')).filter((element) => element.getClientRects().length > 0);
     const frame = requestAnimationFrame(() => focusable()[0]?.focus({ preventScroll: true }));
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") { event.preventDefault(); onClose(); }

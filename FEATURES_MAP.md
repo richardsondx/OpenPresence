@@ -253,12 +253,24 @@ These are three different ways to work with the Agent:
 
 Chat shows link previews, consideration status, assignment handoff, verified actions, and failures. Recovery and connector actions are optional, dismissible system/tool bubbles in the scrollable transcript—not fixed banners—and “Check again” queues a normal operator turn. Supervisory replies should answer the direct point first, take the smallest warranted runtime action, and stay short unless the operator asks for detail. Growth, Calendar, plan, and Activity state are grounded context for these turns. Teach explains that the transcript stays with the Agent while durable meaning belongs in Brain. Rehearsal explicitly says nothing publishes or silently teaches the Agent.
 
+Private research uses `search_web` and `read_web`. An optional search API failure
+falls back to an enabled managed browser, which can start automatically. Public
+research uses an isolated read-only page without channel cookies; authenticated
+X work still requires the verified Presence account and its existing authority.
+Research receipts retain bounded source text, URLs, timestamps, and route.
+Long Chat turns continue in saved execution slices, with a 48-step work limit
+and a stop after two unchanged failures. A required user action preserves the
+same work without blocking other private Chat. Restored access resumes that
+request; explicit retry retains receipts and starts a fresh work budget.
+Completion checks reject unsupported research, scheduling, delivery, and
+continuation claims. The configured AI runtime remains a separate dependency.
+
 Natural-supervision QA covers realistic utterances such as progress checks, growth concerns, intensity requests, shared posts, breaking opportunities, feedback, and casual strategy questions. It also checks the reverse direction: the Agent may initiate a private update only for a meaningful breakthrough, problem, opportunity, permission need, material strategy change, or useful recap, not for every routine action receipt.
 
 **QA expectations**
 
 - Sending a link creates an observation/consideration flow, not an automatic public act.
-- “Create Assignment” creates responsibility; it is the explicit boundary between a nudge and required work.
+- A clear ongoing outcome request creates a durable responsibility through the Chat tool path; the operator does not need to name an Assignment or activate it manually.
 - Rehearsal cannot publish, mutate Live Memory/Growth, or contaminate live history.
 - Conversation history, durable meaning, and Memory remain separate stores.
 - Rehearsal links must be opened through the selected Agent/Presence context; test both client navigation and refresh.
@@ -439,8 +451,10 @@ article, or slides. Assets are evidence and expression, not decoration.
 
 Artifacts gives the operator separate Templates and Media tabs. Templates show
 reusable formats and learned approaches with visible evidence and results; Media
-shows the Agent-owned visual library and recent discoveries. Chat can attach
-eligible Agent media without authorizing publication. Playground Curation Lab
+shows only the Agent-owned visual library: user uploads and web visuals
+intentionally retained for a concrete reuse reason. Web images merely inspected
+during research remain working memory in the relevant post context. Chat can
+attach eligible Agent media without authorizing publication. Playground Curation Lab
 lets the operator search configured sources, review candidates, mark
 good/rejected/starred, inspect references, and calibrate Taste. Settings explains
 that perception explains media while Taste decides whether it is worth acting on.
@@ -452,6 +466,7 @@ that perception explains media while Taste decides whether it is worth acting on
 - Source evidence, perception, factual grounding, rights, and Taste decisions remain distinguishable.
 - Reused/transformed assets retain parent lineage and publication history.
 - Sandbox, Native, and Bridge consume the same Asset/Publication contract.
+- Media boundary/upload proof: `qa-learnings/media-library-verification-2026-09-23.md`.
 
 ### 15. Execution Envelope, Social Intent, Delivery, and review
 
@@ -721,4 +736,83 @@ The final test is always the product test from the philosophy: **does this help 
 
 ### Recovery continuity update — 2026-09-22
 
-Temporary model/worker failures retain the existing Assignment and schedule backoff instead of exhausting into operator work. Supported X actions can use enabled, verified browser hands when the native API is unavailable; browser reads use the authenticated `/api/bridge/v1/reads` queue. Main Chat shows dated recovery and route-change bubbles from persisted evidence, including resolved history. See `qa-learnings/agent-resilience-2026-09-22/README.md` for bounded proof and live-session gaps.
+Temporary model/worker failures retain the existing Assignment and schedule backoff instead of exhausting into operator work. X API and the signed-in browser are peer tools: supported X actions can use the browser tool when the API is unavailable or the browser is preferred, but only when the browser's currently verified handle matches the selected Presence. Browser reads use the authenticated `/api/bridge/v1/reads` queue; a stale verified identity is rejected before a read starts. Main Chat shows dated recovery and route-change bubbles from persisted evidence, including resolved history. See `qa-learnings/agent-resilience-2026-09-22/README.md` for bounded proof and live-session gaps.
+
+Chat publication reviews show the exact post and selected image directly in the
+conversation with Approve publication / Cancel controls, outside tool disclosures.
+Approval resumes the same authorized execution and posts durable, grounded
+progress/outcome updates; repeated tool inspections do not duplicate the review.
+Routine browser reads stay in Activity. Evidence:
+`qa-learnings/chat-approval-followthrough-2026-10-01.md`.
+
+Chat media selection uses current publication availability before choosing library images: used images under the Presence cooldown, matching visual copies and active reservations are excluded from search and the default attachment picker. Stale selections return unused alternatives without creating an action; replacement images follow normal review. Private historical-image inspection remains available. Proof: `qa-learnings/chat-media-selection-2026-10-01.md`.
+
+Approved image delivery checks the shipped Chrome adapter protocol before claiming media work, keeping an outdated connector's approved action saved and showing a specific recovery request in Chat. Composed Chromium evidence covers exact PNG bytes through approval, claim, retrieval and file attachment; installed-extension/live-X upload remains unverified. See `qa-learnings/chat-image-delivery-2026-10-01.md`.
+
+Chat retains the saved post and selected image after approval or failed delivery, once per execution and outside technical details. Approval controls appear only when review is required. Actual Genny Chrome confirmed decoded images; six desktop/mobile regressions cover approval, failure, reload and picker availability in the same QA packet.
+
+
+Browser continuity now uses persisted executor-specific capability probes and
+account identity. Fresh readiness returns eligible existing responsibilities to
+normal worker eligibility without renewing expired requests or clearing X API
+billing failures. Exact unexpired media-transfer failures recover once through
+the existing signed retry boundary; legacy approvals return to visible review.
+Extension 0.1.2 and `lib/browser-delivery-proof.ts` join uploaded byte hashes,
+platform media IDs, created object identity and independent website readback for
+browser-only post/reply/quote/image verification. Raw shipped-Chrome publication
+acks and DOM-only matches cannot count delivery. Missing evidence remains a
+verification wait without reposting. The 168-test scoped fixture checkpoint is
+recorded in `qa-learnings/chat-image-delivery-2026-10-01.md`; installed-extension
+and actual autonomous/live delivery gates remain BLOCKED/unproven.
+
+
+Chat pending publication review is now one always-expanded, non-collapsible
+Review post card containing exact text/media and approval/cancel. Duplicate
+pending tool rows are consolidated; technical evidence stays secondary. Six
+desktop/mobile journeys plus actual Genny Chrome confirm visible approval and
+reload persistence. See qa-learnings/chat-approval-followthrough-2026-10-01.md.
+
+Today work journeys (2026-10-01): Chat → context sidebar → Today → select work →
+select a recorded tool step. Work is grouped by durable request/Assignment/attention
+lineage, with actual requests, results, failed attempts, and current status.
+Needs you remains separate. Desktop presents steps beside evidence; mobile stacks
+these panels. Chat receipts remain scoped to the selected Agent and Presence;
+opening Today elsewhere fetches the bounded Chat projection. Proof and selectors:
+`tests/e2e/today-work-journey.spec.ts`,
+`tests/e2e/sidebar-activity-inspector.spec.ts`, and the Chat/Teach verification guide.
+
+Image delivery recovery (2026-10-01 13:25): extension 0.1.3 separates attachment acceptance from text readiness, accepts consumed FileLists only with complete scoped per-file previews, and records actual bounded notices. Late failure receipts rejoin the same normal Chat worker; replacement public actions are forbidden during continuation. Ongoing growth/original-presence recovery maps outcomes to browser actions. 178 controlled tests and typecheck pass; live image delivery and real-model diagnosis remain PARTIAL pending extension reload and verified external receipts. Evidence: qa-learnings/chat-image-delivery-2026-10-01.md.
+
+## OpenPresence V2 — social capability for a personal agent
+
+**Business:** help a user's existing personal agent build a qualified audience in
+its niche through durable social context, public voice, evidence and experiments.
+The host owns the model, conversation, native schedules, connections and public
+actions. No audience-growth benefit is yet certified.
+
+**Code:** `lib/v2/service.ts` supplies twelve typed tools backed by isolated SQLite
+in `lib/v2/store.ts`; `lib/v2/skill.ts` supplies the operating skill. SDK transport,
+OAuth/PKCE and grant isolation live in `lib/v2/{mcp,oauth,auth}.ts`. Dedicated HTTP,
+stdio and CLI entry points are `scripts/v2-{http,mcp,cli}.ts`; `/api/v2/mcp` also
+runs in Next. Source/visual retrieval reuses canonical strategy and asset adapters.
+Host-reported receipts and measurements cannot become verified effectiveness.
+
+**User:** `/v2` is a scripted, chronological cooking-account conversation with
+one question at a time, suggested replies, an illustrative dinner photo, voice
+changes and undo, explicit example review, cadence and cautious learning.
+Instagram captions without media stay drafts. `/v2/connect` offers three short
+steps and one agent-neutral copy prompt; configured HTTPS connection details are
+supplied by the server. Operator deployment instructions stay in developer docs. Skill and MCP initialization
+guidance require ordinary-language host replies, one question at a time, and
+operator diagnostics only on request; cached host skills require refreshing.
+Every user chooses their own account. Account intent is separate from a confirmed
+host account ID, and every public action requires specific confirmation. The
+initial Muse trial has no social account access. These tools cannot publish or
+grant standing approval.
+
+**Verification:** `tests/v2-*.test.ts`, `tests/e2e/v2.spec.ts` and `evals/v2/`
+exercise domain, transport, authorization, UI and model behavior. Use existing
+Vitest/Playwright and `eval:prompts --surface v2`, not a parallel verification CLI.
+See `docs/v2-connection.md`, `docs/v2-evaluation.md` and
+`qa-learnings/openpresence-v2-implementation-2026-10-01.md` for reproducible evidence
+and incomplete Muse, learning-transfer and growth gates.

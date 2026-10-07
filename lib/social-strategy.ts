@@ -67,8 +67,8 @@ const patterns: SocialStrategyPattern[] = [
     channelId: "x",
     mechanism: "invite expertise",
     audienceRole: "make a technically grounded exchange more useful",
-    supportedActs: ["reply", "quote"],
-    supportedFormats: ["x.reply", "x.quote"],
+    supportedActs: ["original_post", "reply", "quote"],
+    supportedFormats: ["x.post", "x.reply", "x.quote"],
     usefulConditions: ["a real unresolved question is present", "the author or audience can add missing context"],
     weakConditions: ["the question is rhetorical", "there is no concrete object to discuss"],
     risks: ["asking a question only to keep engagement alive", "outsourcing the Agent's own answer"],
@@ -389,6 +389,37 @@ export function summarizeStrategyPatternPerformance(state: OpenPresenceState, pr
     .sort((left, right) => right.averageEngagementSignal - left.averageEngagementSignal || right.samples - left.samples);
 }
 
+function sandboxStrategyPerformanceContext(state: OpenPresenceState, presenceId: string, sessionId: string) {
+  const grouped = new Map<string, { patternId: string; age: number; samples: Map<string, { impressions: number; signal: number; at: string }> }>();
+  for (const record of state.growthEvidenceRecords ?? []) {
+    if (record.agentId !== state.agent?.id || record.presenceId !== presenceId || record.sandboxSessionId !== sessionId || record.kind !== "WORLD_OUTCOME" || !record.verified || !evidenceIsCurrent(record) || record.causalDecisionIds?.length !== 1) continue;
+    const decision = state.socialDecisions.find(item => item.id === record.causalDecisionIds![0] && item.sessionId === sessionId && item.presenceId === presenceId);
+    const execution = decision?.socialIntentId ? state.executions.find(item => item.socialIntentId === decision.socialIntentId && item.sessionId === sessionId && item.status === "succeeded") : undefined;
+    if (!decision || !execution || !state.outcomes.some(item => item.executionId === execution.id && item.sessionId === sessionId && item.status === "succeeded")) continue;
+    const mirror = state.mirrorObjects.find(item => item.originExecutionId === execution.id && item.sessionId === sessionId);
+    if (!mirror) continue;
+    const sourceMirrorId = (mirror as typeof mirror & { checkpointOriginId?: string }).checkpointOriginId;
+    for (const reference of record.sourceRefs.filter(item => item.kind === "publication_metric")) {
+      const metric = state.publicationMetricSnapshots.find(item => item.id === reference.id && item.presenceId === presenceId && (item.mirrorObjectId === mirror.id || item.mirrorObjectId === sourceMirrorId) && item.observationStatus !== "unavailable");
+      if (!metric || !Number.isFinite(metric.publicationAgeSeconds) || metric.publicationAgeSeconds < 0) continue;
+      const signal = (metric.impressions ?? 0) + (metric.likes ?? 0) * 4 + (metric.replies ?? 0) * 6 + (metric.reposts ?? 0) * 8 + (metric.quotes ?? 0) * 8;
+      for (const selection of decision.socialStrategy?.selectedByAct ?? []) {
+        if (!selection.patternId) continue;
+        const key = `${metric.publicationAgeSeconds}:${selection.patternId}`;
+        const group = grouped.get(key) ?? { patternId: selection.patternId, age: metric.publicationAgeSeconds, samples: new Map() };
+        const prior = group.samples.get(decision.id);
+        if (!prior || prior.at < metric.observedAt) group.samples.set(decision.id, { impressions: metric.impressions ?? 0, signal, at: metric.observedAt });
+        grouped.set(key, group);
+      }
+    }
+  }
+  if (!grouped.size) return "No verified scoped Sandbox strategy performance comparison is available.";
+  return `Observed Sandbox strategy performance (descriptive, not causal; compare equal publication ages only):\n${[...grouped.values()].slice(0, 10).map(group => {
+    const samples = [...group.samples.values()];
+    return `- ${group.patternId}: ${samples.length} independent verified decision${samples.length === 1 ? "" : "s"}, age ${group.age}s, average impressions ${Math.round(samples.reduce((sum, sample) => sum + sample.impressions, 0) / samples.length)}, measured performance signal ${(samples.reduce((sum, sample) => sum + sample.signal, 0) / samples.length).toFixed(1)}${samples.length < 2 ? "; single sample, do not generalize" : ""}.`;
+  }).join("\n")}\nThe performance signal is impressions + 4×likes + 6×replies + 8×reposts + 8×quotes. It describes this experiment, not guaranteed growth or audience quality. Prefer testing a better-supported mechanism when it also fits the present idea, mission, and Taste; remain free to choose silence or a better justified exception.`;
+}
+
 function strategyPerformanceContext(state: OpenPresenceState, presenceId: string) {
   const summaries = summarizeStrategyPerformance(state, presenceId);
   if (!summaries.length) return "No verified live publication-performance comparison is available yet. Do not infer that one act grows the audience better than another.";
@@ -429,8 +460,9 @@ function mediaProfileForMirror(state: OpenPresenceState, mirror: OpenPresenceSta
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]?.result;
   const visualRole = perception?.visualRole;
   const decorative = perception?.decorative;
-  const fit = decorative || visualRole === "atmosphere" ? "irrelevant" : visualRole ? "relevant" : "unknown";
-  const relationship = decorative || visualRole === "atmosphere" ? "decorative" : visualRole === "evidence" ? "proof" : visualRole === "context" || visualRole === "subject" ? "context" : "unknown";
+  const irrelevant = decorative || visualRole === "atmosphere" || visualRole === "none";
+  const fit = irrelevant ? "irrelevant" : visualRole ? "relevant" : "unknown";
+  const relationship = irrelevant ? "decorative" : visualRole === "evidence" ? "proof" : visualRole === "context" || visualRole === "subject" ? "context" : "unknown";
   return { mode: "media", semanticKind: perception?.visualForm ?? asset?.semanticKind, visualRole, decorative, fit, relationship };
 }
 
@@ -527,13 +559,16 @@ export function applyGrowthHypothesisActions(
   reviewId: string,
   actions: NonNullable<import("./types").GrowthReviewDecision["hypothesisActions"]> | undefined,
   createdAt = new Date().toISOString(),
+  sandboxSessionId?: string,
 ) {
   if (!actions?.length) return state;
   const hypotheses = [...(state.growthHypotheses ?? [])];
   const byId = new Map(hypotheses.map((hypothesis) => [hypothesis.id, hypothesis]));
-  const evidence = state.growthEvidenceRecords ?? [];
+  const inScope = (item: { agentId: string; sandboxSessionId?: string }) => item.agentId === state.agent?.id
+    && (sandboxSessionId ? item.sandboxSessionId === sandboxSessionId : !item.sandboxSessionId);
+  const evidence = (state.growthEvidenceRecords ?? []).filter(item => item.presenceId === presenceId && inScope(item));
   const evidenceById = new Map(evidence.map((record) => [record.id, record]));
-  const knownIds = new Set(byId.keys());
+  const knownIds = new Set(hypotheses.filter(item => item.originatingPresenceId === presenceId && inScope(item)).map(item => item.id));
   const addHistory = (hypothesis: GrowthHypothesis, status: GrowthHypothesis["status"]) => {
     hypothesis.status = status;
     hypothesis.reviewHistory = [...hypothesis.reviewHistory, { reviewId, status, at: createdAt }];
@@ -553,6 +588,7 @@ export function applyGrowthHypothesisActions(
         id,
         agentId: state.agent?.id ?? "unknown",
         originatingPresenceId: presenceId,
+        ...(sandboxSessionId ? { sandboxSessionId } : {}),
         scope,
         ...(scope === "channel" && action.channelId ? { channelId: action.channelId } : {}),
         statement: action.statement.trim().slice(0, 1000),
@@ -570,7 +606,7 @@ export function applyGrowthHypothesisActions(
       return;
     }
     const hypothesis = action.hypothesisId ? byId.get(action.hypothesisId) : undefined;
-    if (!hypothesis) return;
+    if (!hypothesis || hypothesis.originatingPresenceId !== presenceId || !inScope(hypothesis)) return;
     if (action.action === "support") {
       // Effectiveness is never promoted from activity or operator preference.
       const attributable = supporting.filter((evidenceId) => attributedWorldOutcome(state, evidenceById.get(evidenceId)!, hypothesis));
@@ -595,7 +631,7 @@ function relevantHypotheses(state: OpenPresenceState, presence: Presence, object
   const query = tokens(objective);
   return (state.growthHypotheses ?? [])
     .filter((hypothesis) => hypothesis.status !== "retired" && hypothesis.status !== "disfavored")
-    .filter((hypothesis) => !sandboxSessionId || (hypothesis as GrowthHypothesis & { sandboxSessionId?: string }).sandboxSessionId === sandboxSessionId)
+    .filter((hypothesis) => hypothesis.agentId === state.agent?.id && hypothesis.sandboxSessionId === sandboxSessionId)
     // A historical hypothesis remains durable evidence, but it must not keep
     // steering current cognition once every linked outcome has aged out.
     .filter((hypothesis) => {
@@ -735,6 +771,53 @@ function visualAssetContext(state: OpenPresenceState, presenceId: string) {
   return `Authorized reusable visuals (ranked by observed reuse and verified performance; explicitly decorative or atmosphere-only media is excluded; evidence is descriptive, not causal):\n${lines.map(({ asset, usageCount, bestSignal, label }) => `- ${asset.id} · ${label.slice(0, 220)} · used ${usageCount} live time${usageCount === 1 ? "" : "s"}${bestSignal ? ` · best observed engagement signal ${bestSignal}` : ""}`).join("\n")}\nChoose media only when it materially improves this post and matches the template's visual guidance. Prefer a relevant previously useful asset over a new discovery; do not attach ads, generic decoration, or uninspected temporary discoveries.`;
 }
 
+export interface MediaPerformanceSummary {
+  profile: MediaEvidenceProfile;
+  publicationAgeSeconds: number;
+  samples: number;
+  averageImpressions: number;
+  averageEngagementSignal: number;
+  causalDecisionIds: string[];
+  evidenceIds: string[];
+}
+
+/** Keep relevance, visual role, and measured outcomes joined at equal age.
+ * These are scoped descriptive observations, never proof that media caused
+ * success or permission to relax visual relevance/rights boundaries. */
+export function summarizeMediaPerformance(state: OpenPresenceState, presenceId: string, sandboxSessionId?: string): MediaPerformanceSummary[] {
+  const grouped = new Map<string, { profile: MediaEvidenceProfile; age: number; decisions: Map<string, { impressions: number; signal: number; evidenceId: string; at: string }> }>();
+  for (const record of state.growthEvidenceRecords ?? []) {
+    if (record.agentId !== state.agent?.id || record.presenceId !== presenceId || record.sandboxSessionId !== sandboxSessionId || record.kind !== "WORLD_OUTCOME" || !record.verified || !record.mediaProfile || !evidenceIsCurrent(record) || record.causalDecisionIds?.length !== 1) continue;
+    const decision = state.socialDecisions.find(item => item.id === record.causalDecisionIds![0] && item.sessionId === sandboxSessionId && item.presenceId === presenceId);
+    if (!decision?.socialIntentId) continue;
+    const execution = state.executions.find(item => item.socialIntentId === decision.socialIntentId && item.sessionId === sandboxSessionId && item.presenceId === presenceId && item.status === "succeeded");
+    if (!execution || !state.outcomes.some(item => item.executionId === execution.id && item.sessionId === sandboxSessionId && item.status === "succeeded")) continue;
+    const mirror = state.mirrorObjects.find(item => item.originExecutionId === execution.id && item.sessionId === sandboxSessionId && item.presenceId === presenceId);
+    if (!mirror) continue;
+    const originMirrorId = (mirror as typeof mirror & { checkpointOriginId?: string }).checkpointOriginId;
+    for (const reference of record.sourceRefs.filter(item => item.kind === "publication_metric")) {
+      const metric = state.publicationMetricSnapshots.find(item => item.id === reference.id && item.presenceId === presenceId && (item.mirrorObjectId === mirror.id || item.mirrorObjectId === originMirrorId) && item.observationStatus !== "unavailable");
+      if (!metric || !Number.isFinite(metric.publicationAgeSeconds) || metric.publicationAgeSeconds < 0 || typeof metric.impressions !== "number" || !Number.isFinite(metric.impressions) || metric.impressions < 0) continue;
+      const profile = record.mediaProfile;
+      const key = `${metric.publicationAgeSeconds}:${JSON.stringify(profile)}`;
+      const group = grouped.get(key) ?? { profile, age: metric.publicationAgeSeconds, decisions: new Map() };
+      const prior = group.decisions.get(decision.id);
+      if (!prior || prior.at < metric.observedAt) group.decisions.set(decision.id, { impressions: metric.impressions, signal: engagementSignal(metric), evidenceId: record.id, at: metric.observedAt });
+      grouped.set(key, group);
+    }
+  }
+  return [...grouped.values()].map(group => {
+    const values = [...group.decisions.values()];
+    return { profile: group.profile, publicationAgeSeconds: group.age, samples: values.length, averageImpressions: Math.round(values.reduce((sum, sample) => sum + sample.impressions, 0) / values.length), averageEngagementSignal: Number((values.reduce((sum, sample) => sum + sample.signal, 0) / values.length).toFixed(2)), causalDecisionIds: [...group.decisions.keys()], evidenceIds: values.map(sample => sample.evidenceId) };
+  }).sort((left, right) => left.publicationAgeSeconds - right.publicationAgeSeconds || JSON.stringify(left.profile).localeCompare(JSON.stringify(right.profile)));
+}
+
+function mediaPerformanceContext(state: OpenPresenceState, presenceId: string, sandboxSessionId?: string) {
+  const summaries = summarizeMediaPerformance(state, presenceId, sandboxSessionId);
+  if (!summaries.length) return "No scoped verified media-versus-text performance comparison is available.";
+  return `Observed ${sandboxSessionId ? "Sandbox" : "live"} media performance (descriptive, not causal; compare only equal publication ages):\n${summaries.slice(0, 9).map(summary => `- ${summary.profile.mode}/${summary.profile.fit}/${summary.profile.relationship}/${summary.profile.semanticKind ?? "none"}: ${summary.samples} independent verified decision${summary.samples === 1 ? "" : "s"}, age ${summary.publicationAgeSeconds}s, average impressions ${summary.averageImpressions}, weighted engagement ${summary.averageEngagementSignal}${summary.samples < 2 ? "; single sample, do not generalize" : ""}.`).join("\n")}\nUse this evidence to compare a specifically relevant visual with text-only for the current idea. Arbitrary or decorative images cannot inherit results from a relevant chart. Performance never establishes that pixels support a claim, and never overrides Taste, source grounding, rights, or readiness.`;
+}
+
 function durablePreferenceContext(state: OpenPresenceState, presence: Presence) {
   const preferences = (state.preferenceEvidence ?? []).filter((item) => item.agentId === state.agent?.id
     && (item.scopeHint === "agent" || item.presenceId === presence.id)
@@ -758,7 +841,7 @@ export function compileSocialStrategyContext(state: OpenPresenceState, presence:
     }, [])
     .slice(0, 5);
   const requestedTemplate = situation.strategyTemplateId
-    ? (state.growthHypotheses ?? []).find((hypothesis) => hypothesis.id === situation.strategyTemplateId && hypothesis.originatingPresenceId === presence.id && (!situation.sandboxSessionId || (hypothesis as GrowthHypothesis & { sandboxSessionId?: string }).sandboxSessionId === situation.sandboxSessionId) && hypothesis.template && !["retired", "disfavored"].includes(hypothesis.status))
+    ? (state.growthHypotheses ?? []).find((hypothesis) => hypothesis.id === situation.strategyTemplateId && hypothesis.originatingPresenceId === presence.id && hypothesis.agentId === state.agent?.id && hypothesis.sandboxSessionId === situation.sandboxSessionId && hypothesis.template && !["retired", "disfavored"].includes(hypothesis.status))
     : undefined;
   const hypotheses = [
     ...(requestedTemplate ? [requestedTemplate] : []),
@@ -790,10 +873,17 @@ export function compileSocialStrategyContext(state: OpenPresenceState, presence:
   const patternText = candidates.length
     ? candidates.map((pattern) => `- ${pattern.id} · ${pattern.mechanism} · audience role: ${pattern.audienceRole}\n  useful when: ${pattern.usefulConditions.join("; ")}\n  weak when: ${pattern.weakConditions.join("; ")}\n  risks: ${pattern.risks.join("; ")}`).join("\n")
     : `- ${noPatternReason}`;
-  const performanceText = strategyPerformanceContext(state, presence.id);
+  const cautionText = candidates
+    .filter(pattern => learningAdjustmentForPattern(state, presence, pattern.id, situation.sandboxSessionId) < 0)
+    .map(pattern => {
+      const interpretation = state.growthHypotheses?.find(hypothesis => hypothesis.agentId === state.agent?.id && hypothesis.sandboxSessionId === situation.sandboxSessionId && ["weakened", "disfavored", "retired"].includes(hypothesis.status) && hypothesis.decisionTargets?.some(target => target.strategyId === pattern.id) && (hypothesis.scope === "agent" || hypothesis.scope === "channel" && hypothesis.channelId === presence.channel || hypothesis.scope === "presence" && hypothesis.originatingPresenceId === presence.id));
+      return `- ${pattern.id}: ${interpretation ? `${interpretation.status}: ${interpretation.reviewHistory.at(-1)?.statement ?? "Repeated, current, independently verified outcomes contradict the earlier support for this mechanism; compare the scoped measured performance table below."}` : "Repeated, current, independently verified outcomes contradict this mechanism in the present scope."} Prefer testing an alternative when suitable; this is empirical caution, not a prohibition or a change to identity or Taste.`;
+    })
+    .join("\n");
+  const performanceText = situation.sandboxSessionId ? sandboxStrategyPerformanceContext(state, presence.id, situation.sandboxSessionId) : strategyPerformanceContext(state, presence.id);
   const templateText = templates.length ? templates.map((h) => `- ${h.id} · ${h.template!.title} · ${h.template!.body} · ${h.status}/${h.confidence}${h.template!.sourceCount ? ` · abstracted from ${h.template!.sourceCount} observed source posts` : ""}${h.template!.audienceFit ? `\n  audience fit: ${h.template!.audienceFit}` : ""}${h.template!.visualGuidance ? `\n  visual guidance: ${h.template!.visualGuidance}` : ""}`).join("\n") : "- No reusable template applies.";
   const skillText = skills.length ? skills.flatMap((skill) => (skill.strategyContributions ?? []).map((contribution) => `- ${skill.id}/${contribution.id}: ${contribution.guidance}`)).join("\n") : "- No specialized strategy Skill applies.";
-  const visualText = visualAssetContext(state, presence.id);
+  const visualText = `${visualAssetContext(state, presence.id)}\n\n${mediaPerformanceContext(state, presence.id, situation.sandboxSessionId)}`;
   const preferenceText = durablePreferenceContext(state, presence);
   const growthText = `${hypotheses.length ? hypotheses.map((hypothesis) => `- ${hypothesis.id} · ${hypothesis.scope} · ${hypothesis.status} · ${hypothesis.statement}${hypothesis.mediaProfiles?.length ? ` · media evidence: ${hypothesis.mediaProfiles.map((profile) => `${profile.mode}/${profile.fit}/${profile.relationship}${profile.semanticKind ? `/${profile.semanticKind}` : ""}`).join(", ")}` : ""}`).join("\n") : "- No applicable structured Growth hypothesis."}\n\n${preferenceText}`;
   const growthProfile = deriveGrowthProfile(state, presence.id);
@@ -801,7 +891,7 @@ export function compileSocialStrategyContext(state: OpenPresenceState, presence:
   const recentText = Object.entries(recent).filter(([, count]) => count > 0).map(([mechanism, count]) => `${mechanism} ${count} of last ${Math.max(1, Object.values(recent).reduce((sum, value) => sum + value, 0))}`).join(", ") || "no selected strategy shape recorded";
   return {
     retrievalRun,
-    prompt: `SOCIAL STRATEGY INTELLIGENCE (possibilities, never instructions)\nChannel: ${presence.channel}\nPlaybook: ${selectedPlaybook ? `${selectedPlaybook.id} v${selectedPlaybook.version}` : "no built-in Playbook"}\nBefore choosing, compare relevant alternatives among the supplied patterns, especially a different mechanism when recent decisions repeat one. Variety is a consideration, never a quota or reason to publish irrelevant content.\nRecent strategy shape: ${recentText}\n${growthProfileText}\n${legacy ? `Legacy Channel guidance: ${legacy.text}\n` : ""}\nConsider up to five candidates, select none when appropriate, and never copy example wording.\n${patternText}\n\nRelevant Growth hypotheses (evidence, not policy):\n${growthText}\n\nReusable templates (structure only; ground every variable and never invent identity):\n${templateText}\n\n${performanceText}\n\n${visualText}\n\nIMAGE DECISION RULE: explicitly compare image versus text-only for every original post or quote. Attach one authorized visual only when it materially improves proof, comprehension, identity, or attention for this specific idea; prefer a relevant durable asset with verified reuse evidence, and stay text-only when no asset passes relevance, rights, readiness, and reuse checks. Do not attach ads, generic decoration, or uninspected temporary discoveries.\n\nCompatible strategy Skills (extensions, not replacements):\n${skillText}\n\nFor every act, declare strategyId from the supplied IDs and mechanismId from that pattern. If a requested template is in scope, preserve its exact ID in strategyTemplateId. If none fits, omit strategyId and give noStrategyReason. Missing selections or invented IDs require correction. Do not choose a pattern just to fill this field.`,
+    prompt: `SOCIAL STRATEGY INTELLIGENCE (possibilities, never instructions)\nChannel: ${presence.channel}\nPlaybook: ${selectedPlaybook ? `${selectedPlaybook.id} v${selectedPlaybook.version}` : "no built-in Playbook"}\nBefore choosing, compare relevant alternatives among the supplied patterns, especially a different mechanism when recent decisions repeat one. Variety is a consideration, never a quota or reason to publish irrelevant content.\nRecent strategy shape: ${recentText}\n${growthProfileText}\n${legacy ? `Legacy Channel guidance: ${legacy.text}\n` : ""}\nConsider up to five candidates, select none when appropriate, and never copy example wording.\n${patternText}\n\nRelevant Growth hypotheses (evidence, not policy):\n${growthText}\n\nMeasured strategy cautions (scoped counterevidence, not policy):\n${cautionText || "- No current repeated counterevidence."}\n\nReusable templates (structure only; ground every variable and never invent identity):\n${templateText}\n\n${performanceText}\n\n${visualText}\n\nIMAGE DECISION RULE: explicitly compare image versus text-only for every original post or quote. Attach one authorized visual only when it materially improves proof, comprehension, identity, or attention for this specific idea; prefer a relevant durable asset with verified reuse evidence, and stay text-only when no asset passes relevance, rights, readiness, and reuse checks. Do not attach ads, generic decoration, or uninspected temporary discoveries.\n\nCompatible strategy Skills (extensions, not replacements):\n${skillText}\n\nFor every act, declare strategyId from the supplied IDs and mechanismId from that pattern. If a requested template is in scope, preserve its exact ID in strategyTemplateId. If none fits, omit strategyId and give noStrategyReason. Missing selections or invented IDs require correction. Do not choose a pattern just to fill this field.`,
   };
 }
 
@@ -987,9 +1077,12 @@ export function reconcileSandboxPerformanceLearning(source: OpenPresenceState, p
       : contradictingDecisions.size >= 3
         ? "disfavored" as const
         : "weakened" as const;
+    const previousStatement = hypothesis.statement;
+    const nextStatement = `${patternId} is ${nextStatus} in this Sandbox scope after ${contradictingDecisions.size} independent measured decisions trailed a comparable alternative at age ${comparable.age}s: observed performance signal ${ownAverage.toFixed(1)} versus ${alternativeAverage.toFixed(1)}. Compare alternatives before reuse; these observations do not establish causality or change identity or Taste.`;
+    hypothesis.statement = nextStatement;
     hypothesis.status = nextStatus;
     hypothesis.updatedAt = observedAt;
-    hypothesis.reviewHistory = [...hypothesis.reviewHistory, { reviewId: `sandbox-performance:${sessionId}:${patternId}:${hypothesis.contradictingEvidenceIds.length}`, status: nextStatus, at: observedAt }];
+    hypothesis.reviewHistory = [...hypothesis.reviewHistory, { reviewId: `sandbox-performance:${sessionId}:${patternId}:${hypothesis.contradictingEvidenceIds.length}`, status: nextStatus, at: observedAt, previousStatement, statement: nextStatement }];
   }
   return state;
 }

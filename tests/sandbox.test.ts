@@ -7,6 +7,7 @@ import { GET as stateGet, POST as statePost } from "../app/api/state/route";
 import { addSandboxEvent, advanceSandboxTime, advanceSandboxTimeWithTemporalEvents, applyOperation, beginOriginalPostRehearsal, completeOriginalPostRehearsal, confirmAutoMode, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, recordPreferenceEvidence, recordPublicationMetricSnapshots, recordSocialDecision, resetPlaygroundSession, startPlaygroundSession, syncPlaygroundTime } from "../lib/runtime";
 import type { OpenPresenceState } from "../lib/types";
 import { SandboxTemporalKernel } from "../lib/sandbox-temporal";
+import { compileSocialStrategyContext, ensureGrowthEvidenceRecords, summarizeMediaPerformance } from "../lib/social-strategy";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -283,6 +284,26 @@ describe("Sandbox and Playground boundaries", () => {
     const metricEvidence = state.growthEvidenceRecords?.filter((record) => record.sourceRefs.some((source) => source.kind === "publication_metric"));
     expect(metricEvidence).toHaveLength(3);
     expect(metricEvidence?.every((record) => record.sandboxSessionId === session.id && record.causalDecisionIds?.length === 1)).toBe(true);
+    const comparison = summarizeMediaPerformance(state, presenceId, session.id);
+    expect(comparison).toHaveLength(3);
+    expect(comparison.map(item => item.profile.fit).sort()).toEqual(["irrelevant", "relevant", "unknown"]);
+    expect(comparison.every(item => item.samples === 1 && item.publicationAgeSeconds === 3600)).toBe(true);
+    expect(summarizeMediaPerformance(state, presenceId)).toEqual([]);
+    expect(summarizeMediaPerformance(state, presenceId, "other-session")).toEqual([]);
+    const nextContext = compileSocialStrategyContext(state, state.presence!, { invocation: "later media comparison", objective: "Explain a measured result", availableActions: ["original_post"], sandboxSessionId: session.id });
+    expect(nextContext.prompt).toContain("media/relevant/proof/chart");
+    expect(nextContext.prompt).toContain("media/irrelevant/decorative/photo");
+    expect(nextContext.prompt).toContain("text_only/unknown/unknown/none");
+    expect(nextContext.prompt).toContain("single sample, do not generalize");
+    const noVisualRole = structuredClone(state);
+    const unrelated = noVisualRole.perceptions.find(item => item.assetId === "learning-irrelevant-photo")!;
+    unrelated.result = { ...unrelated.result, visualRole: "none", decorative: undefined };
+    ensureGrowthEvidenceRecords(noVisualRole, presenceId);
+    expect(summarizeMediaPerformance(noVisualRole, presenceId, session.id).find(item => item.profile.semanticKind === "photo")?.profile.fit).toBe("irrelevant");
+    const unattributed = structuredClone(state);
+    unattributed.outcomes = [];
+    expect(summarizeMediaPerformance(unattributed, presenceId, session.id)).toEqual([]);
+
     const hypothesis = state.growthHypotheses?.find((item) => item.sandboxSessionId === session.id && item.patternIds.includes("social.x.v1.proof-led-original"));
     expect(hypothesis).toEqual(expect.objectContaining({ sandboxSessionId: session.id, status: "supported", decisionTargets: [expect.objectContaining({ strategyId: "social.x.v1.proof-led-original" })] }));
     expect(hypothesis?.mediaProfiles).toEqual(expect.arrayContaining([
@@ -475,6 +496,14 @@ describe("Sandbox and Playground boundaries", () => {
     expect(state.nativeConnections).toHaveLength(0);
   });
 
+  it("allows shared public topic vocabulary without copying private Assignment framing", () => {
+    let state = startPlaygroundSession(createAgent(input));
+    const session = state.playgroundSessions[0]!;
+    state = applyOperation(state, { type: "createAssignment", presenceId: state.presence!.id, sessionId: session.id, environment: "sandbox", instruction: "Invite AI builders to discuss a community project. Produce exactly 1 original X post." });
+    state = formSandboxIntent(state, { sessionId: session.id, affordance: "post", assignmentId: state.assignments[0]!.id, text: "AI builders: what community project taught you the most about testing real workflows?" });
+    expect(state.executions[0]!.failure?.code).not.toBe("ASSIGNMENT_TEXT_LEAKAGE");
+  });
+
   it("blocks Assignment wording from becoming the public opening", () => {
     let state = startPlaygroundSession(createAgent(input));
     const session = state.playgroundSessions[0]!;
@@ -657,11 +686,15 @@ describe("Sandbox and Playground boundaries", () => {
     state = formSandboxIntent(state, { sessionId: session.id, affordance: "post", text: "An approved rehearsal post." });
     const intent = state.socialIntents[0]!;
     const execution = state.executions[0]!;
+    state.operatorConversations = [{ id: "approval-conversation", agentId: state.agent!.id, presenceId: state.presence!.id, title: "Approval", createdAt: execution.createdAt, updatedAt: execution.updatedAt, messages: [
+      { id: "approval-request", role: "operator", content: "Post this in rehearsal.", timestamp: execution.createdAt },
+      ...["receipt-one", "receipt-two"].map(id => ({ id, role: "system" as const, replyToMessageId: "approval-request", timestamp: execution.createdAt, content: JSON.stringify({ tool: "social_action", executionIds: [execution.id], result: [{ executionId: execution.id, status: "awaiting-review" }] }) })),
+    ] }];
     writeState(state);
 
     const approve = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "approveExecution", id: execution.id }), headers: { "content-type": "application/json" } }));
     expect(approve.status).toBe(200);
-    expect((await approve.json()).executions.find((item: { id: string }) => item.id === execution.id)?.status).toBe("approved");
+    expect((await approve.json()).executions.find((item: { id: string }) => item.id === execution.id)?.status).toBe("succeeded");
 
     const execute = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "executeIntent", id: intent.id }), headers: { "content-type": "application/json" } }));
     const delivered = await execute.json();
@@ -669,6 +702,13 @@ describe("Sandbox and Playground boundaries", () => {
     expect(delivered.executions.find((item: { id: string }) => item.id === execution.id)?.status).toBe("succeeded");
     expect(delivered.mirrorObjects.filter((item: { originExecutionId?: string }) => item.originExecutionId === execution.id)).toHaveLength(1);
     expect(delivered.outcomes.filter((item: { executionId?: string }) => item.executionId === execution.id)).toHaveLength(1);
+    const followThrough = delivered.operatorConversations[0].messages.filter((message: { role: string }) => message.role === "presence");
+    expect(followThrough).toHaveLength(1);
+    expect(followThrough[0]).toMatchObject({ replyToMessageId: "approval-request", content: expect.stringContaining("Rehearsal action completed and verified") });
+    const duplicate = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "approveExecution", id: execution.id }), headers: { "content-type": "application/json" } }));
+    const repeated = await duplicate.json();
+    expect(repeated.outcomes.filter((item: { executionId?: string }) => item.executionId === execution.id)).toHaveLength(1);
+    expect(repeated.operatorConversations[0].messages.filter((message: { role: string }) => message.role === "presence")).toHaveLength(1);
   });
 
   it("confirms and delivers every pending Sandbox reply in one state transition", async () => {

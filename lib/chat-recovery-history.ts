@@ -11,7 +11,11 @@ export interface ChatRecoveryEntry {
 /** Render durable evidence in place; resolution never deletes the original failure. */
 export function chatRecoveryHistory(state: OpenPresenceState, presenceId: string): ChatRecoveryEntry[] {
   const incidents = (state.recoveryIncidents ?? []).filter((item) => item.presenceId === presenceId);
-  const entries: ChatRecoveryEntry[] = incidents.map((item) => ({
+  const visibleIncidents = incidents.filter((item) => item.operatorActionRequired || !(
+    /Stage ["']browser\.read["']/i.test(item.safeSummary)
+    || item.affectedRunIds.some((id) => (state.operationalRuns ?? []).some((run) => run.id === id && run.kind === "observation" && run.metadata?.browserRead === true))
+  ));
+  const entries: ChatRecoveryEntry[] = visibleIncidents.map((item) => ({
     id: `incident:${item.id}`, timestamp: item.openedAt, summary: item.safeSummary,
     title: item.state === "resolved" ? "Recovered" : item.operatorActionRequired ? "A task needs your attention" : "Recovering automatically",
     needsOperator: item.state !== "resolved" && item.operatorActionRequired,
@@ -24,14 +28,12 @@ export function chatRecoveryHistory(state: OpenPresenceState, presenceId: string
     entries.push({ id: `recovery:${run.id}`, timestamp: run.completedAt ?? run.updatedAt, summary: run.lastError,
       title: needsOperator ? "A task needs your attention" : run.status === "deferred" && assignment?.status === "active" ? "I’ll try again automatically" : "Earlier attempt did not finish", needsOperator });
   }
-  for (const run of state.operationalRuns ?? []) {
-    if (run.presenceId !== presenceId || run.stage !== "browser.read") continue;
-    entries.push({ id: run.id, timestamp: run.createdAt, title: "Trying the browser", needsOperator: false,
-      summary: run.state === "succeeded" ? "I used the signed-in browser to read X. No public action was taken." : run.state === "failed" ? run.lastErrorCode ?? "The browser read did not finish." : "The X API isn’t available for this read, so I’m checking through the signed-in browser." });
-  }
+  // Routine connector reads belong in Activity and the active turn's progress,
+  // not persistent supervisory interruptions. Actionable connection incidents
+  // above retain the user's recovery request and historical failure evidence.
   for (const event of state.events ?? []) {
-    if (event.presenceId !== presenceId || event.title !== "Browser fallback learned") continue;
-    entries.push({ id: event.id, timestamp: event.time, title: "Trying the browser", summary: event.detail, needsOperator: false });
+    if (event.presenceId !== presenceId || !["Browser fallback learned", "Browser route learned"].includes(event.title)) continue;
+    entries.push({ id: event.id, timestamp: event.time, title: "Browser route learned", summary: event.detail, needsOperator: false });
   }
   return entries.sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
 }

@@ -1,6 +1,6 @@
 import { recordPlaybookMilestones } from "./playbook-milestones";
 import { assertAssignmentWindowOpen } from "./assignment-timeframe";
-import type { ActionRecord, ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, AgendaHorizon, AgendaItem, AgendaCompilation, AgendaWorkItem, AgendaWatchingItem, Asset, Assignment, AssignmentDelegationPolicy, AssignmentPlan, AssignmentPreflight, AssignmentQuantityMode, AssignmentReadinessCheck, AssignmentRun, AssignmentPursuitWindow, AssignmentPursuitAction, AssignmentPursuitResourceBudget, AttentionTest, AttentionTestMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, ExplorationBrief, ExplorationFinding, ExplorationSession, ExplorationSessionStatus, FileKind, FileProposal, GhostProfile, GhostRepresentation, GrowthEvidenceRecord, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, OperatorDirective, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, ResourceUsageEvent, RuntimeScope, SandboxAssetInput, SelfDirectedAttentionPolicy, SocialAssetKind, SocialDecision, SocialDecisionConfidence, SocialDecisionKind, SocialIntent, SocialOrigin, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, PublicRequestType, PublicRequestDisposition, PresenceRequestPolicy, DelegationGrant, RelationshipPolicy, RelationshipLearningMode, RelationshipEngagementMode, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding, PublishingInitiative, PublishingInitiativeProgress, PublishingPlan, PublishingPlanDraft, PublishingPlanWorkEvent, PresenceCapability, PresenceCapabilityManifest, PublicationMetricSnapshot, PresenceAudienceSnapshot, CapabilityTrial } from "./types";
+import type { ActionRecord, ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, AgendaHorizon, AgendaItem, AgendaCompilation, AgendaWorkItem, AgendaWatchingItem, Asset, Assignment, AssignmentDelegationPolicy, AssignmentPlan, AssignmentPreflight, AssignmentQuantityMode, AssignmentReadinessCheck, AssignmentRun, AssignmentPursuitWindow, AssignmentPursuitAction, AssignmentPursuitResourceBudget, AttentionTest, AttentionTestMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, ExplorationBrief, ExplorationFinding, ExplorationSession, ExplorationSessionStatus, FileKind, FileProposal, GhostProfile, GhostRepresentation, GrowthEvidenceRecord, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, OperatorDirective, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, ResourceUsageEvent, RuntimeScope, SandboxAssetInput, SelfDirectedAttentionPolicy, SocialAssetKind, SocialDecision, SocialDecisionConfidence, SocialDecisionKind, SocialIntent, SocialOrigin, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, PublicRequestType, PublicRequestDisposition, PresenceRequestPolicy, DelegationGrant, RelationshipPolicy, RelationshipLearningMode, RelationshipEngagementMode, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding, PublishingInitiative, PublishingInitiativeProgress, PublishingPlan, PublishingPlanDraft, PublishingPlanWorkEvent, PresenceCapability, PresenceCapabilityManifest, PublicationMetricSnapshot, PresenceAudienceSnapshot, CapabilityTrial, XToolRoutePreference } from "./types";
 import { AGENT_CAPABILITY_DEFINITIONS, CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
 import { buildScenarioFromPrompt, builtinScenarioDefinitions, repairScenarioStimuli, scenarioFromImport, stableHash, validateScenarioFidelity } from "./scenarios";
 import { DEFAULT_PRESENCE_LANGUAGE, effectiveLanguagePolicy, EMPTY_LANGUAGE_POLICY, languageEligibleForObservation, languagesMatch, normalizeLanguagePolicy, normalizePresenceLanguage, normalizedObservedLanguage, validateLanguage } from "./language-policy";
@@ -12,7 +12,7 @@ import { applyConversationDisposition, conversationDispositionForAction, ensureC
 import { createPublicExpressionCandidate, PublicationSecurityError, verifyExecutionPermit } from "./publication-security";
 import { formatOneSentencePerLine, formatPublicExpression, observedSourceEchoReason, publicExpressionLeakageReason, unsupportedLeadingMention } from "./public-expression";
 import { normalizeMirrorObject } from "./mirror-content";
-import { bridgeExecutionStatus, chromeBrowserBridgeCapabilities } from "./bridge-contract";
+import { bridgeReadyForExpectedAccount, chromeBrowserBridgeCapabilities } from "./bridge-contract";
 import type { RelationshipVisibility } from "./types";
 import { addKnowledgeItem, archiveKnowledgeCollection, archiveKnowledgeDocument, archiveKnowledgeItem, createKnowledgeCollection, createKnowledgeDocument, migrateKnowledgeState, saveKnowledgeDocument, setKnowledgeAccess, setMindFileKnowledgeBinding, setKnowledgeBinding, updateKnowledgeCollection, uploadKnowledgeVersion } from "./knowledge";
 import { applyAssetLibraryOperation, assetReviewReason, authorizeAssetSelection, liveAssetReuseReason, normalizeAssetLibraryState, normalizeAssetReuseCooldownMonths } from "./asset-library";
@@ -32,7 +32,7 @@ import { recordLearningCounterfactualInPlace } from "./learning-runtime";
 import { recordAgentInitiatedUpdate } from "./operator-initiated-communication";
 import { SandboxTemporalKernel } from "./sandbox-temporal";
 import type { TemporalCausalParentType, TemporalEvent } from "./sandbox-temporal";
-import { assertSandboxWorldSnapshot, captureSandboxWorld, restoreSandboxWorld, sandboxWorldDigest, type SandboxWorldSnapshot } from "./sandbox-replay";
+import { assertSandboxWorldSnapshot, captureSandboxWorld, namespaceSandboxForkWorld, restoreSandboxWorld, sandboxWorldDigest, type SandboxWorldSnapshot } from "./sandbox-replay";
 import { appendTrajectoryEvent, rebuildOperationRecordsFromTrajectory, recordExecutionTransition, recordNoOpTrajectory } from "./trajectory";
 
 const now = () => new Date().toISOString();
@@ -365,13 +365,13 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
   // Planning readiness is stricter than a recent heartbeat. A browser body
   // may be alive but signed into the wrong or still-unverified account; such
   // a route must not be offered to cognition.
-  const bridgeConnected = Boolean(bridge && bridgeExecutionStatus(bridge) === "connected");
+  const bridgeConnected = Boolean(bridge && bridgeReadyForExpectedAccount(bridge, presence.handle));
   const nativeIdentityMatches = Boolean(native?.account?.username && normalizeHandleForComparison(native.account.username) === normalizeHandleForComparison(presence.handle));
   const nativeWritable = Boolean(native && nativeIdentityMatches && native.access === "read-write" && (native.status === "connected" || (native.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(native.healthMessage ?? native.deliveryError ?? ""))));
   const nativeActionSupported = (action: string) => ["post", "reply", "like", "repost", "quote", "follow", "delete"].includes(action);
   // When native X has a global delivery error (no credits, app permissions
   // misconfigured, or network failure), it cannot execute ANY write action.
-  // The execution router should fall back to the attached browser capability.
+  // The execution router may select the attached browser as an alternative tool.
   // Action-specific rejections (like "not permitted to perform this action"
   // for a specific reply) do NOT block all native write actions — they might
   // succeed for a different target post.
@@ -380,7 +380,7 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
     ? state.mirrorObjects.find((object) => object.presenceId === presence.id && object.externalRef.type === "x.post" && object.externalRef.id === context.target?.id)
     : undefined;
   const targetBlockedPresence = targetIsBlockedByPerson(state, presence.id, context?.target);
-  const browserRouteRequired = (action: string) => browserFallbackWasLearned(presence, `${presence.channel}.${action}`)
+  const browserRouteRequired = (action: string) => browserRouteWasLearned(presence, `${presence.channel}.${action}`)
     || (action === "reply" && Boolean(targetObject && !mirrorObjectIsOwnOrMentionsPresence(targetObject, presence.handle, native?.account?.id)));
   const nativeAction = (action: string) => Boolean(nativeWritable && !nativeGlobalDeliveryBlocked && nativeActionSupported(action) && !browserRouteRequired(action));
   const nativeReadable = Boolean(native && !xNativeWriteUnavailable(native) && nativeConnectionCanObserve(native, presence.handle));
@@ -494,12 +494,12 @@ function bridgeAdapterIsConnected(bridge: Bridge) {
 
 export function latestAudienceSnapshot(source: OpenPresenceState, presenceId: string) {
   const state = normalizeState(source);
-  return collapseAudienceSnapshots(state.audienceSnapshots.filter((item) => item.presenceId === presenceId && growthEvidenceIsInPresenceScope(state, presenceId, item.observedAt)))[0];
+  return collapseAudienceSnapshots(state.audienceSnapshots.filter((item) => item.presenceId === presenceId && item.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presenceId, item.observedAt)))[0];
 }
 
-export function audienceDeltas(source: OpenPresenceState, presenceId: string) {
+export function audienceDeltas(source: OpenPresenceState, presenceId: string, options?: { sandboxSessionId?: string }) {
   const state = normalizeState(source);
-  const snapshots = state.audienceSnapshots.filter((item) => item.presenceId === presenceId && growthEvidenceIsInPresenceScope(state, presenceId, item.observedAt)).sort((left, right) => new Date(left.observedAt).getTime() - new Date(right.observedAt).getTime());
+  const snapshots = state.audienceSnapshots.filter((item) => item.presenceId === presenceId && (options?.sandboxSessionId ? item.environment === "sandbox" && item.sessionId === options.sandboxSessionId : item.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presenceId, item.observedAt))).sort((left, right) => new Date(left.observedAt).getTime() - new Date(right.observedAt).getTime());
   const latest = snapshots.at(-1);
   const since = (days: number) => {
     if (!latest) return undefined;
@@ -872,7 +872,8 @@ function event(type: LiveEvent["type"], title: string, detail: string, tone: Liv
 
 export interface SocialDecisionInput {
   decision: SocialDecisionKind;
-  acts?: Array<{ decision: Exclude<SocialDecisionKind, "no_op">; text?: string; rationale?: string; strategyId?: string; mechanismId?: string; noStrategyReason?: string; learningHypothesisId?: string }>;
+  acts?: Array<{ decision: Exclude<SocialDecisionKind, "no_op">; text?: string; rationale?: string; strategyId?: string; mechanismId?: string; noStrategyReason?: string; learningHypothesisId?: string; routePreference?: XToolRoutePreference }>;
+  routePreference?: XToolRoutePreference;
   conversationDisposition?: import("./types").ConversationDisposition;
   focalMirrorObjectIds?: string[];
   origin?: SocialOrigin;
@@ -2296,7 +2297,9 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
 }
 
 function growthAssignmentFor(source: OpenPresenceState, presenceId: string, assignmentId?: string) {
-  const assignments = source.assignments.filter((assignment) => assignment.presenceId === presenceId && assignment.successEvidence?.kind === "metric_threshold" && !["cancelled", "completed"].includes(assignment.status));
+  const assignments = source.assignments.filter((assignment) => assignment.presenceId === presenceId
+    && (assignment.successEvidence?.kind === "metric_threshold" || assignment.origin === "publishing_initiative" && assignment.plan)
+    && !["cancelled", "completed"].includes(assignment.status));
   return assignmentId ? assignments.find((assignment) => assignment.id === assignmentId) : assignments.find((assignment) => ["active", "working", "accepted", "planning"].includes(assignment.status)) ?? assignments[0];
 }
 
@@ -2312,7 +2315,7 @@ export function deriveGrowthEvidenceSnapshot(source: OpenPresenceState, presence
   const inGrowthScope = (item: { environment?: string; sessionId?: string; observedAt?: string; occurredAt?: string }) => sandboxSessionId
     ? item.environment === "sandbox" && item.sessionId === sandboxSessionId
     : item.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presenceId, item.occurredAt ?? item.observedAt);
-  const audienceSnapshots = collapseAudienceSnapshots(state.audienceSnapshots.filter((s) => s.presenceId === presenceId && (sandboxSessionId ? inGrowthScope(s) : growthEvidenceIsInPresenceScope(state, presenceId, s.observedAt))));
+  const audienceSnapshots = collapseAudienceSnapshots(state.audienceSnapshots.filter((s) => s.presenceId === presenceId && inGrowthScope(s)));
   const publicationSnapshots = state.publicationMetricSnapshots.filter((s) => {
     if (s.presenceId !== presenceId || new Date(s.observedAt).getTime() < new Date(windowStart).getTime()) return false;
     const publication = state.mirrorObjects.find((item) => item.id === s.mirrorObjectId);
@@ -2332,7 +2335,7 @@ export function deriveGrowthEvidenceSnapshot(source: OpenPresenceState, presence
   const follows = verifiedExecutions.filter((execution) => state.socialIntents.find((intent) => intent.id === execution.socialIntentId)?.affordance === "follow").length;
   const totalActions = posts + replies + quotes + likes + follows || scopedMirror.filter((m) => m.actorPresenceId === presenceId).length;
 
-  const deltas = audienceDeltas(state, presenceId);
+  const deltas = audienceDeltas(state, presenceId, options);
   const topPostReach = publicationSnapshots.length ? Math.max(...publicationSnapshots.map((s) => s.impressions ?? 0)) : undefined;
   const impressionsList = publicationSnapshots.map((s) => s.impressions).filter((v): v is number => typeof v === "number");
   const medianPostReach = median(impressionsList);
@@ -2345,7 +2348,7 @@ export function deriveGrowthEvidenceSnapshot(source: OpenPresenceState, presence
   const daysObserved = earliestSnapshot ? Math.max(1, Math.round((nowDate.getTime() - new Date(earliestSnapshot.observedAt).getTime()) / 86_400_000)) : 1;
   const confidence: "low" | "medium" | "high" = daysObserved >= 7 && audienceSnapshots.length >= 5 ? "high" : daysObserved >= 3 ? "medium" : "low";
 
-  const watermark = presence?.growthEvidenceWatermark ?? (audienceSnapshots.length + publicationSnapshots.length + scopedMirror.length);
+  const watermark = (!sandboxSessionId ? presence?.growthEvidenceWatermark : undefined) ?? (audienceSnapshots.length + publicationSnapshots.length + scopedMirror.length);
   const sourceRefs = [...audienceSnapshots.map((s) => s.id), ...publicationSnapshots.map((s) => s.id), ...scopedMirror.slice(0, 20).map((m) => m.id)];
 
   return {
@@ -2457,7 +2460,7 @@ export function createGrowthReview(source: OpenPresenceState, assignment: Assign
   const audienceSnapshots = collapseAudienceSnapshots(state.audienceSnapshots.filter((s) => s.presenceId === assignment.presenceId && growthEvidenceIsInPresenceScope(state, assignment.presenceId, s.observedAt)));
   const recentMetrics = state.publicationMetricSnapshots.filter((s) => s.presenceId === assignment.presenceId && growthPublicationIsInPresenceScope(state, assignment.presenceId, s) && new Date(s.observedAt).getTime() >= new Date(periodStart).getTime());
 
-  const deltas = audienceDeltas(state, assignment.presenceId);
+  const deltas = audienceDeltas(state, assignment.presenceId, assignment.environment === "sandbox" ? { sandboxSessionId: assignment.sessionId } : undefined);
   const working: string[] = [];
   const uncertain: string[] = [];
   const weak: string[] = [];
@@ -2535,7 +2538,7 @@ export function createGrowthReview(source: OpenPresenceState, assignment: Assign
     assignment.plan = persistedAssignment.plan;
   }
 
-  if (presence) {
+  if (presence && assignment.environment !== "sandbox") {
     presence.lastTriagedEvidenceWatermark = snapshot.watermark;
   }
 
@@ -2563,9 +2566,12 @@ export function createGrowthReview(source: OpenPresenceState, assignment: Assign
   };
 
   const previousHypotheses = (state.growthHypotheses ?? []).map(item => ({ ...item }));
-  applyGrowthHypothesisActions(state, assignment.presenceId, reviewId, modelDecision?.hypothesisActions, periodEnd);
-  state = recordPlaybookMilestones(state, assignment.presenceId, previousHypotheses, reviewId, periodEnd);
-  applyGrowthInterpretation(state, persistedAssignment ?? assignment, review, newRevision);
+  const reviewSandboxSessionId = assignment.environment === "sandbox" ? assignment.sessionId : undefined;
+  if (assignment.environment !== "sandbox" || reviewSandboxSessionId) {
+    applyGrowthHypothesisActions(state, assignment.presenceId, reviewId, modelDecision?.hypothesisActions, periodEnd, reviewSandboxSessionId);
+  }
+  if (assignment.environment !== "sandbox") state = recordPlaybookMilestones(state, assignment.presenceId, previousHypotheses, reviewId, periodEnd);
+  if (assignment.environment !== "sandbox") applyGrowthInterpretation(state, persistedAssignment ?? assignment, review, newRevision);
   state.growthReviews.unshift(review);
   return state;
 }
@@ -3396,7 +3402,11 @@ export function assignmentPublicExpressionLeakageReason(assignment: Pick<Assignm
     }
   }
   const overlap = matched / Math.max(1, Math.min(sourceTokens.length, openingTokens.length));
-  if (longestRun >= 2 && (overlap >= 0.5 || matched >= 3)) {
+  // Shared topic vocabulary ("community project", "AI builders") is not
+  // private operating prose. Require a substantial copied phrase, or copied
+  // runtime framing, rather than rejecting a relevant expression for overlap.
+  const repeatsOperatingFrame = openingTokens.some(token => ["assignment", "sandbox", "canary", "exactly", "checkpoint"].includes(token) && sourceTokens.includes(token));
+  if ((longestRun >= 4 || repeatsOperatingFrame && longestRun >= 2) && (overlap >= 0.5 || matched >= 3)) {
     return "The public opening repeats private Assignment wording; rewrite it from the idea rather than the Assignment label.";
   }
   return undefined;
@@ -3935,26 +3945,8 @@ export function forkSandboxCheckpoint(source: OpenPresenceState, sessionId: stri
   const original = checkpoint.snapshot as SandboxWorldSnapshot;
   assertSandboxWorldSnapshot(original);
   const forkedSessionId = id("session");
-  const forkedAssignments = new Map(
-    (original.collections.assignments ?? []).flatMap((value) => {
-      if (!value || typeof value !== "object" || typeof (value as { id?: unknown }).id !== "string") return [];
-      const originalId = (value as { id: string }).id;
-      return [[originalId, `${originalId}:sandbox:${forkedSessionId}`] as const];
-    }),
-  );
-  const forked: SandboxWorldSnapshot = {
-    ...structuredClone(original),
-    session: { ...structuredClone(original.session), id: forkedSessionId, source: "replay", status: "active", updatedAt: now() },
-    collections: Object.fromEntries(Object.entries(original.collections).map(([key, values]) => [key, values.map((value) => {
-      if (!value || typeof value !== "object") return value;
-      const record: Record<string, unknown> = { ...(value as Record<string, unknown>), sessionId: forkedSessionId, sandboxSessionId: forkedSessionId };
-      if (key === "assignments" && typeof record.id === "string") record.id = forkedAssignments.get(record.id) ?? record.id;
-      for (const field of ["assignmentId", "parentAssignmentId"] as const) {
-        if (typeof record[field] === "string") record[field] = forkedAssignments.get(record[field]) ?? record[field];
-      }
-      return record;
-    })])),
-  };
+  const forked = namespaceSandboxForkWorld(original, forkedSessionId);
+  forked.session.updatedAt = now();
   forked.digest = sandboxWorldDigest(forked);
   return restoreSandboxWorld(source, forked, { restoreLearning: options.learning !== "removed", learningSessionId: forkedSessionId, namespaceUnscopedLearning: true });
 }
@@ -4901,7 +4893,10 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   if (activeOwner && state.presence?.id && !ownerByPresenceId.has(state.presence.id)) ownerByPresenceId.set(state.presence.id, activeOwner);
   const repairScopedAgentIds = (target: Record<string, unknown>, owners: Map<string, string>) => {
     for (const [key, value] of Object.entries(target)) {
-      if (!Array.isArray(value) || key === "presences" || key === "agents" || key === "agentWorkspaces") continue;
+      // Assets belong to an Agent; presenceId/accessScope only constrain
+      // eligibility. Rewriting an explicit foreign owner here would grant
+      // publication access to that Agent's bytes during a read.
+      if (!Array.isArray(value) || key === "presences" || key === "agents" || key === "agentWorkspaces" || key === "assets") continue;
       target[key] = value.map((item) => {
         if (!item || typeof item !== "object" || typeof (item as { presenceId?: unknown }).presenceId !== "string") return item;
         const presenceId = (item as { presenceId: string }).presenceId;
@@ -7259,26 +7254,67 @@ export function assignmentIsCurrentlyProcessing(assignment: Assignment, assignme
 
 function bridgeFor(state: OpenPresenceState, presenceId: string, affordance: string): Bridge | undefined { return state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.state !== "offline" && bridge.capabilities.affordances.includes(affordance)); }
 
-/** The user-attached browser is an execution capability, never the channel route. */
+/** The signed-in browser and X API are peer execution tools for the X channel. */
 export function browserBridgeFor(state: OpenPresenceState, presenceId: string, affordance: string): Bridge | undefined {
+  const presence = state.presences.find((item) => item.id === presenceId) ?? (state.presence?.id === presenceId ? state.presence : undefined);
+  if (!presence) return undefined;
   const supports = (bridge: Bridge) => bridge.state !== "offline" && bridge.capabilities.affordances.some((item) => item === affordance || item === affordance.replace(/^[^.]+\./, ""));
-  return state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.name.startsWith("OpenPresence Chrome") && supports(bridge))
-    ?? state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.name.startsWith("OpenPresence Chrome") && bridge.state !== "offline")
+  const readyForPresence = (bridge: Bridge) => bridge.presenceId === presenceId && bridgeReadyForExpectedAccount(bridge, presence.handle);
+  return state.bridges.find((bridge) => readyForPresence(bridge) && bridge.name.startsWith("OpenPresence Chrome") && supports(bridge))
+    ?? state.bridges.find((bridge) => readyForPresence(bridge) && bridge.name.startsWith("OpenPresence Chrome"))
     // Legacy browser bridges may not carry the current display name, but an arbitrary
     // external channel bridge must never be repurposed as an X browser capability.
-    ?? state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.name.startsWith("Chrome") && supports(bridge))
-    ?? state.bridges.find((bridge) => bridge.presenceId === presenceId && supports(bridge));
+    ?? state.bridges.find((bridge) => readyForPresence(bridge) && bridge.name.startsWith("Chrome") && supports(bridge))
+    ?? state.bridges.find((bridge) => readyForPresence(bridge) && supports(bridge));
 }
 
-function browserFallbackWasLearned(presence: Presence, affordance: string) {
+function browserRouteWasLearned(presence: Presence, affordance: string) {
   const normalized = affordance.replace(/^[^.]+\./, "");
-  // A learned fallback is a continuity hold until the operator explicitly
-  // checks the connection again. This prevents every new action from probing
-  // a provider that already reported a durable write boundary failure.
+  // The persisted field keeps its legacy name; semantically this is durable
+  // per-action route evidence until the operator explicitly checks the connection.
   return (presence.browserAccess?.learnedFallbacks ?? []).some((item) => item.action === affordance || item.action === normalized);
 }
 
-function rememberBrowserFallback(presence: Presence, affordance: string, reason: string) {
+function nativeHealthStillBlocksXApi(health: NonNullable<OpenPresenceState["dependencyHealth"]>[number] | undefined, nowMs = Date.now()) {
+  if (!health || health.state === "healthy") return false;
+  return !(health.state === "waiting" && health.circuitUntil && Date.parse(health.circuitUntil) <= nowMs);
+}
+
+function durableXToolPreference(state: OpenPresenceState, presence: Presence, affordance: string, preference?: XToolRoutePreference): XToolRoutePreference | undefined {
+  const nativeHealth = (state.dependencyHealth ?? []).find((item) => item.dependency === "native_x" && item.presenceId === presence.id);
+  const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.channelId === "x");
+  if (browserRouteWasLearned(presence, affordance) || presence.connectionMode === "bridge" || nativeHealthStillBlocksXApi(nativeHealth) || nativeConnection && xNativeWriteUnavailable(nativeConnection)) return "browser";
+  return preference;
+}
+
+export function chooseXWriter(state: OpenPresenceState, presence: Presence, affordance: string, routePreference?: XToolRoutePreference, preferBrowser = false) {
+  const nativeHealth = (state.dependencyHealth ?? []).find((item) => item.dependency === "native_x" && item.presenceId === presence.id);
+  const nativeConnection = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x");
+  const expiredRateLimit = nativeHealth?.state === "waiting" && Boolean(nativeHealth.circuitUntil && Date.parse(nativeHealth.circuitUntil) <= Date.now());
+  const apiRateLimited = nativeHealth?.state === "waiting" && Boolean(nativeHealth.circuitUntil && Date.parse(nativeHealth.circuitUntil) > Date.now())
+    || /rate limit|429|too many requests/i.test(`${nativeConnection?.healthMessage ?? ""} ${nativeConnection?.deliveryError ?? ""} ${nativeConnection?.observation?.error ?? ""}`) && !expiredRateLimit;
+  if (apiRateLimited) return { connector: undefined as Execution["connector"], bridge: undefined as Bridge | undefined, routeBlockedReason: "The X API is rate-limited. Wait for the limit to reset; the browser cannot be used to evade it." };
+
+  const learnedBrowserRoute = browserRouteWasLearned(presence, affordance);
+  const nativeHealthy = !nativeHealth || nativeHealth.state === "healthy" || expiredRateLimit;
+  const nativeAvailable = nativeHealthy && !learnedBrowserRoute && Boolean(nativeConnection
+    && nativeConnection.access === "read-write"
+    && !xNativeWriteUnavailable(nativeConnection)
+    && normalizeHandleForComparison(nativeConnection.account?.username) === normalizeHandleForComparison(presence.handle)
+    && (nativeConnection.status === "connected" || nativeConnection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(nativeConnection.healthMessage ?? nativeConnection.deliveryError ?? "")));
+  const browserCandidate = presence.browserAccess?.enabled === true ? browserBridgeFor(state, presence.id, affordance) : undefined;
+  const browserAvailable = Boolean(browserCandidate
+    && bridgeReadyForExpectedAccount(browserCandidate, presence.handle)
+    && browserCandidate.capabilities.affordances.some((item) => item === affordance || item === affordance.replace(/^[^.]+\./, "")));
+  const preferBrowserRoute = preferBrowser || routePreference === "browser" || presence.connectionMode === "bridge" || learnedBrowserRoute || nativeHealthStillBlocksXApi(nativeHealth);
+
+  if (preferBrowserRoute && browserAvailable) return { connector: browserCandidate!.kind, bridge: browserCandidate, routeBlockedReason: undefined };
+  if (nativeAvailable) return { connector: "native" as const, bridge: undefined, routeBlockedReason: undefined };
+  if (browserAvailable) return { connector: browserCandidate!.kind, bridge: browserCandidate, routeBlockedReason: undefined };
+  return { connector: undefined as Execution["connector"], bridge: undefined as Bridge | undefined, routeBlockedReason: undefined };
+}
+
+function rememberBrowserRoutePreference(presence: Presence, affordance: string, reason: string) {
   const learned = presence.browserAccess?.learnedFallbacks ?? [];
   const normalized = affordance.replace(/^[^.]+\./, "");
   const withoutDuplicate = learned.filter((item) => item.action !== affordance && item.action !== normalized);
@@ -7318,10 +7354,11 @@ export function xTargetAllowsQuotedExpression(source: OpenPresenceState, presenc
  */
 export function xQuoteTargetHasAvailableRoute(source: OpenPresenceState, presence: Presence, targetId: string) {
   if (xTargetAllowsQuotedExpression(source, presence, targetId)) return true;
+  if (presence.browserAccess?.enabled !== true) return false;
   const browserQuoteBridge = browserBridgeFor(source, presence.id, "quote");
   return Boolean(browserQuoteBridge
     && (browserQuoteBridge.name.startsWith("OpenPresence Chrome") || browserQuoteBridge.name.startsWith("Chrome"))
-    && bridgeExecutionStatus(browserQuoteBridge) === "connected");
+    && bridgeReadyForExpectedAccount(browserQuoteBridge, presence.handle));
 }
 
 function executionCanUseNativeX(state: OpenPresenceState, execution: Execution, presence: Presence) {
@@ -7345,11 +7382,11 @@ export function rerouteExecutionToBrowser(source: OpenPresenceState, executionId
   const affordance = execution.affordance.replace(/^x\./, "");
   const presence = state.presences.find((item) => item.id === execution.presenceId) ?? state.presence;
   const bridge = presence?.channel === "x"
-    ? browserBridgeFor(state, execution.presenceId, affordance)
+    ? presence.browserAccess?.enabled === true ? browserBridgeFor(state, execution.presenceId, affordance) : undefined
     : bridgeFor(state, execution.presenceId, affordance);
 
   if (presence) {
-    rememberBrowserFallback(presence, execution.affordance, message);
+    rememberBrowserRoutePreference(presence, execution.affordance, message);
     state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
     if (state.presence?.id === presence.id) state.presence = presence;
   }
@@ -7364,7 +7401,7 @@ export function rerouteExecutionToBrowser(source: OpenPresenceState, executionId
   const action = state.actions.find((item) => item.executionId === execution.id);
   if (action) {
     action.status = bridge ? "queued" : "review";
-    action.reason = `Rerouted to browser capability: ${message}`;
+    action.reason = `Routed through the signed-in browser: ${message}`;
   }
 
   if (execution.assignmentId) {
@@ -7378,10 +7415,10 @@ export function rerouteExecutionToBrowser(source: OpenPresenceState, executionId
   state.events.unshift(
     event(
       "execution",
-      "Browser fallback learned",
+      "Browser route learned",
       bridge
-        ? `Native ${presence?.channel ?? "channel"} access rejected this action (${message}). I’m trying the connected browser now. I’ll verify the result before marking this action complete.`
-        : `Native ${presence?.channel ?? "channel"} access rejected this action (${message}). The action remembers that it needs the browser when one is available.`,
+        ? `The X API could not perform this action (${message}). The Agent selected the connected browser tool to complete it and will verify the result before marking it complete.`
+        : `The X API could not perform this action (${message}). The action records that the browser tool is preferred when it is available.`,
       bridge ? "positive" : "warning",
       { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }
     )
@@ -7558,7 +7595,8 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
   const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
   const autobiographicalContext = sourceKind === "agent" ? retrievePublicSafeAutobiographicalContext(state, presence, `${text}\n${decisionInput?.summary ?? ""}`, Date.now()) : undefined;
   const autobiographicalEventIds = decisionInput?.autobiographicalEventIds ?? autobiographicalContext?.eventIds;
-  const effectiveDecisionInput = decisionInput ? { ...decisionInput, autobiographicalEventIds } : undefined;
+  const routePreference = durableXToolPreference(state, presence, "x.post", decisionInput?.routePreference);
+  const effectiveDecisionInput = decisionInput ? { ...decisionInput, routePreference, autobiographicalEventIds } : undefined;
   const operatorAssetOverride = operatorAssetOverrideApplies(assetIds, operatorAssetIds);
   const mediaReviewReason = publicationMediaReviewReason(state, presence.id, assetIds, operatorAssetOverride);
   const validAssetIds = authorizeAssetSelection(state, assetIds, { presenceId: presence.id, requireReady: !operatorAssetOverride && !mediaReviewReason, allowReviewable: Boolean(mediaReviewReason) });
@@ -7566,7 +7604,7 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
   const origin: SocialOrigin = standingIntentId ? { kind: "standing_intent", refId: standingIntentId } : sourceKind === "operator" ? { kind: "operator" } : { kind: "other" };
   publication.origin = origin;
   publication.autobiographicalEventIds = autobiographicalEventIds;
-  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.post", publicationId: publication.id, priority: 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, standingIntentId, origin, runId, autobiographicalEventIds, ...(sandboxSessionId ? { sessionId: sandboxSessionId } : {}) };
+  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.post", publicationId: publication.id, priority: 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, standingIntentId, origin, runId, routePreference, autobiographicalEventIds, ...(sandboxSessionId ? { sessionId: sandboxSessionId } : {}) };
   if (publication.publicExpression) publication.publicExpression.socialIntentId = socialIntent.id;
   state.socialIntents.unshift(socialIntent);
   const socialDecision = effectiveDecisionInput ? createSocialDecision(state, { ...effectiveDecisionInput, origin: effectiveDecisionInput.origin ?? origin }, socialIntent.id) : undefined;
@@ -7578,30 +7616,25 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
     recordNoOpTrajectory(state, { presenceId: presence.id, sessionId: sandboxSessionId, reason: "Posts are off in the Presence execution envelope." });
     return state;
   }
-  // Respect the Presence's selected live route. A healthy native connection
-  // may still be present for reads (or may be out of credits), but it must not
-  // silently override an operator-selected Bridge for public writes.
-  const useNativeRoute = presence.connectionMode !== "bridge";
-  const nativeX = useNativeRoute ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && !xNativeWriteUnavailable(connection) && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? "")))) : undefined;
-  const bridge = !nativeX ? bridgeFor(state, presence.id, "post") : undefined;
-  const connector = nativeX ? "native" as const : bridge ? bridge.kind : undefined;
+  const { connector, bridge, routeBlockedReason } = chooseXWriter(state, presence, "post", routePreference);
   const leakageReason = identityLeakageReason(state, presence, text);
   const autobiographicalSafetyReason = sourceKind === "agent" ? autobiographicalExpressionSafetyReason(state, presence.id, autobiographicalEventIds, text) : undefined;
   const publicExpressionReason = publicExpressionLeakageReason(text) ?? autobiographicalSafetyReason ?? liveAssetRepeatReason;
-  const reviewReason = leakageReason ?? mediaReviewReason;
-  const status = publicExpressionReason ? "blocked" : reviewReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
+  const reviewReason = routeBlockedReason ?? leakageReason ?? mediaReviewReason;
+  const status = routeBlockedReason || publicExpressionReason ? "blocked" : reviewReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
   const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.post", mode, status, attempts: 0, bridgeId: bridge?.id, connector, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: "x.post", text }), publication, reviewReason: publicExpressionReason ?? reviewReason, createdAt: formedAt, updatedAt: formedAt, environment, runId };
   execution.source = sourceKind;
+  if (routeBlockedReason) execution.failure = { code: "X_API_RATE_LIMITED", message: routeBlockedReason, retryable: false };
   if (publicExpressionReason) execution.failure = { code: autobiographicalSafetyReason ? "AUTOBIOGRAPHICAL_PRIVACY_BOUNDARY" : liveAssetRepeatReason ? "DUPLICATE_LIVE_ASSET" : "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionReason, retryable: false };
   state.executions.unshift(execution);
   recordFormedExecutionLifecycle(state, execution, sourceKind === "operator" ? "operator" : "agent");
   const reason = standingIntentId ? "Jenny evaluated a Calendar standing intention and handed the resulting Social Intent to the Presence execution envelope." : "The operator asked Jenny to introduce this Presence through the native X connector.";
-  state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: publicExpressionReason ? "failed" : reviewReason ? "review" : mode === "review" ? "review" : "queued", reason: publicExpressionReason ?? reviewReason ?? reason, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
-  state.events.unshift(event("decision", liveAssetRepeatReason ? "Live media blocked" : publicExpressionReason ? "Public text boundary blocked" : mediaReviewReason ? "Media publication needs review" : leakageReason ? "Identity disclosure needs review" : standingIntentId ? "A Calendar post intention was formed" : "A post intention was formed", publicExpressionReason ?? reviewReason ?? (connector ? (standingIntentId ? `${presence.name} judged the standing intention worthwhile and handed it to the native X connector.` : `${presence.name} formed an X post from the conversation and handed it to the Presence execution envelope.`) : `${presence.name} formed an X post, but no write-enabled X connector is available.`), publicExpressionReason || reviewReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id }));
+  state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: routeBlockedReason || publicExpressionReason ? "failed" : reviewReason ? "review" : mode === "review" ? "review" : "queued", reason: routeBlockedReason ?? publicExpressionReason ?? reviewReason ?? reason, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
+  state.events.unshift(event("decision", routeBlockedReason ? "X action held for rate limit" : liveAssetRepeatReason ? "Live media blocked" : publicExpressionReason ? "Public text boundary blocked" : mediaReviewReason ? "Media publication needs review" : leakageReason ? "Identity disclosure needs review" : standingIntentId ? "A Calendar post intention was formed" : "A post intention was formed", routeBlockedReason ?? publicExpressionReason ?? reviewReason ?? (connector ? `${presence.name} selected the ${connector === "native" ? "X API" : "signed-in browser"} tool for this post.` : `${presence.name} formed an X post, but neither X tool is ready.`), routeBlockedReason || publicExpressionReason || reviewReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id }));
   return state;
 }
 
-export function formStandingPostIntent(source: OpenPresenceState, text: string, standingIntentId: string) {
+export function formStandingPostIntent(source: OpenPresenceState, text: string, standingIntentId: string, requestedRoutePreference?: XToolRoutePreference) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const standing = state.standingIntents.find((item) => item.id === standingIntentId);
   const presence = standing
@@ -7613,10 +7646,11 @@ export function formStandingPostIntent(source: OpenPresenceState, text: string, 
   const formedAt = now();
   const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
   const affordance = `${presence.channel}.post`;
+  const routePreference = presence.channel === "x" ? durableXToolPreference(state, presence, affordance, requestedRoutePreference) : requestedRoutePreference;
   const publication = makePublication(state, text.trim(), affordance, "agent_model");
   const origin: SocialOrigin = { kind: "standing_intent", refId: standingIntentId };
   publication.origin = origin;
-  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance, publicationId: publication.id, priority: 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, standingIntentId, origin, environment: presence.environment ?? "live" };
+  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance, publicationId: publication.id, priority: 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, standingIntentId, origin, environment: presence.environment ?? "live", routePreference };
   if (publication.publicExpression) publication.publicExpression.socialIntentId = socialIntent.id;
   state.socialIntents.unshift(socialIntent);
   const mode = presence.execution.post ?? "off";
@@ -7626,12 +7660,14 @@ export function formStandingPostIntent(source: OpenPresenceState, text: string, 
     recordNoOpTrajectory(state, { presenceId: presence.id, reason: "Posts are off in the Presence execution envelope." });
     return state;
   }
-  const nativeX = presence.channel === "x" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && !xNativeWriteUnavailable(connection) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? "")))) : undefined;
-  const bridge = nativeX ? undefined : bridgeFor(state, presence.id, "post");
-  const simulated = !bridge && !nativeX && presence.channel === "x" && isTestRuntime();
-  const connector = nativeX ? "native" as const : bridge ? bridge.kind : simulated ? "simulated" as const : undefined;
-  const status = simulated ? (mode === "auto" ? "succeeded" : mode === "review" ? "awaiting-review" : "awaiting-manual") : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
+  const xRoute = presence.channel === "x" ? chooseXWriter(state, presence, "post", routePreference) : undefined;
+  const bridge = xRoute ? xRoute.bridge : bridgeFor(state, presence.id, "post");
+  const simulated = !bridge && !xRoute?.connector && presence.channel === "x" && isTestRuntime();
+  const connector = xRoute?.connector ?? bridge?.kind ?? (simulated ? "simulated" as const : undefined);
+  const routeBlockedReason = xRoute?.routeBlockedReason;
+  const status = routeBlockedReason ? "blocked" : simulated ? (mode === "auto" ? "succeeded" : mode === "review" ? "awaiting-review" : "awaiting-manual") : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
   const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance, mode, status, attempts: simulated && mode === "auto" ? 1 : 0, bridgeId: bridge?.id, connector, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance, text }), publication, createdAt: formedAt, updatedAt: formedAt, executedAt: simulated && mode === "auto" ? formedAt : undefined, environment };
+  if (routeBlockedReason) execution.failure = { code: "X_API_RATE_LIMITED", message: routeBlockedReason, retryable: false };
   state.executions.unshift(execution);
   recordFormedExecutionLifecycle(state, execution);
   if (simulated && mode === "auto") {
@@ -7642,7 +7678,7 @@ export function formStandingPostIntent(source: OpenPresenceState, text: string, 
     const detail = status === "awaiting-connector" ? "The standing intention is waiting for an authorized channel connection." : status === "queued" ? `The ${presence.channel} publication is ready for its authorized connector.` : "Jenny formed a social intention that expires in 45 minutes.";
     state.events.unshift(event("execution", status === "queued" ? "Queued for channel delivery" : "Calendar intention awaiting review", detail, "neutral", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
   }
-  state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: simulated && mode === "auto" ? "executed" : mode === "review" ? "review" : "queued", reason: "Jenny evaluated a Calendar standing intention and handed the resulting Social Intent to the Presence execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
+  state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: routeBlockedReason ? "failed" : simulated && mode === "auto" ? "executed" : mode === "review" ? "review" : "queued", reason: routeBlockedReason ?? "Jenny evaluated a Calendar standing intention and handed the resulting Social Intent to the Presence execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
   return state;
 }
 
@@ -7695,7 +7731,7 @@ function missingDirectSocialContextRefs(state: OpenPresenceState, targetObject: 
     && (candidate.environment === targetObject.environment || (targetObject.environment === "live" && candidate.environment === undefined))));
 }
 
-export function formXReplyIntent(source: OpenPresenceState, text: string, parentId: string, operatorDirectiveId?: string, assignmentId?: string, assetIds: string[] = [], decisionInput?: SocialDecisionInput, operatorAssetIds: string[] = []) {
+export function formXReplyIntent(source: OpenPresenceState, text: string, parentId: string, operatorDirectiveId?: string, assignmentId?: string, assetIds: string[] = [], decisionInput?: SocialDecisionInput, operatorAssetIds: string[] = [], routePreference?: XToolRoutePreference) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   // Assignment workers can finish after the operator has switched the active
   // Presence. Public actions must stay owned by the Assignment's Presence,
@@ -7727,7 +7763,8 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
   const autobiographicalContext = !operatorDirectiveId ? retrievePublicSafeAutobiographicalContext(state, presence, `${text}\n${decisionInput?.summary ?? ""}`, Date.now()) : undefined;
   const autobiographicalEventIds = decisionInput?.autobiographicalEventIds ?? autobiographicalContext?.eventIds;
-  const effectiveDecisionInput = decisionInput ? { ...decisionInput, autobiographicalEventIds } : undefined;
+  const selectedRoutePreference = durableXToolPreference(state, presence, "x.reply", routePreference ?? decisionInput?.routePreference);
+  const effectiveDecisionInput = decisionInput ? { ...decisionInput, routePreference: selectedRoutePreference, autobiographicalEventIds } : undefined;
   const assignment = assignmentId ? state.assignments.find((item) => item.id === assignmentId) : undefined;
   if (assignment?.assetConstraint?.required && !assetIds.length) throw new Error("This Assignment requires an Asset from its Collection.");
   const operatorAssetOverride = operatorAssetOverrideApplies(assetIds, operatorAssetIds);
@@ -7744,7 +7781,7 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   publication.assignmentId = assignmentId;
   publication.invocationId = decisionInput?.invocationId;
   publication.autobiographicalEventIds = autobiographicalEventIds;
-  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.reply", target, publicationId: publication.id, priority: 60, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId, assignmentId, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId, attentionEpisodeId: decisionInput?.attentionEpisodeId, autobiographicalEventIds };
+  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.reply", target, publicationId: publication.id, priority: 60, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, source: operatorDirectiveId ? "operator" : "agent", routePreference: selectedRoutePreference, operatorDirectiveId, conversationEpisodeId, assignmentId, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId, attentionEpisodeId: decisionInput?.attentionEpisodeId, autobiographicalEventIds };
   if (publication.publicExpression) publication.publicExpression.socialIntentId = socialIntent.id;
   state.socialIntents.unshift(socialIntent);
   const socialDecision = effectiveDecisionInput ? createSocialDecision(state, { ...effectiveDecisionInput, focalMirrorObjectIds: effectiveDecisionInput.focalMirrorObjectIds ?? (parentObject ? [parentObject.id] : []), origin: effectiveDecisionInput.origin ?? origin }, socialIntent.id) : undefined;
@@ -7765,25 +7802,24 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
     recordNoOpTrajectory(state, { presenceId: presence.id, reason: "Replies are off in the Presence execution envelope." });
     return state;
   }
-  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.status === "connected" && connection.access === "read-write" && !xNativeWriteUnavailable(connection) && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle));
-  const learnedBrowserFallback = browserFallbackWasLearned(presence, "x.reply");
+  const learnedBrowserRoute = browserRouteWasLearned(presence, "x.reply");
+  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x");
   const observedNonMentionReply = Boolean(parentObject && !mirrorObjectIsOwnOrMentionsPresence(parentObject, presence.handle, nativeX?.account?.id));
-  const browserFallbackRequired = observedNonMentionReply || learnedBrowserFallback;
-  const bridge = browserFallbackRequired || !nativeX ? browserBridgeFor(state, presence.id, "reply") : undefined;
-  const connector = browserFallbackRequired && bridge ? "bridge" as const : nativeX ? "native" as const : bridge ? bridge.kind : undefined;
+  const { connector, bridge, routeBlockedReason } = chooseXWriter(state, presence, "reply", selectedRoutePreference, observedNonMentionReply || learnedBrowserRoute);
   const leakageReason = identityLeakageReason(state, presence, text);
   const runtimeLeakageReasonValue = runtimeContextLeakageReason(text);
   const autobiographicalSafetyReason = !operatorDirectiveId ? autobiographicalExpressionSafetyReason(state, presence.id, autobiographicalEventIds, text) : undefined;
   const mentionGroundingReason = !operatorDirectiveId ? expressionMentionGroundingReason(state, presence, target, text) : undefined;
   const sourceEchoReason = !operatorDirectiveId ? expressionSourceEchoReason(state, presence, target, text) : undefined;
   const publicExpressionReason = publicExpressionLeakageReason(text) ?? autobiographicalSafetyReason ?? mentionGroundingReason ?? sourceEchoReason;
-  const reviewReason = leakageReason ?? runtimeLeakageReasonValue ?? mediaReviewReason;
-  const status = publicExpressionReason ? "blocked" : reviewReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
+  const reviewReason = routeBlockedReason ?? leakageReason ?? runtimeLeakageReasonValue ?? mediaReviewReason;
+  const status = routeBlockedReason || publicExpressionReason ? "blocked" : reviewReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
   const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.reply", mode, status, attempts: 0, bridgeId: bridge?.id, connector, target, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: "x.reply", target, text }), publication, reviewReason: publicExpressionReason ?? reviewReason, createdAt: formedAt, updatedAt: formedAt, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId, assignmentId, environment, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId, attentionEpisodeId: decisionInput?.attentionEpisodeId };
+  if (routeBlockedReason) execution.failure = { code: "X_API_RATE_LIMITED", message: routeBlockedReason, retryable: false };
   if (publicExpressionReason) execution.failure = { code: autobiographicalSafetyReason ? "AUTOBIOGRAPHICAL_PRIVACY_BOUNDARY" : mentionGroundingReason ? "UNSUPPORTED_LEADING_MENTION" : sourceEchoReason ? "SOURCE_EXPRESSION_ECHO" : "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionReason, retryable: false };
   state.executions.unshift(execution);
   recordFormedExecutionLifecycle(state, execution, operatorDirectiveId ? "operator" : "agent");
-  state.actions.unshift({ id: id("act"), intent: "reply", target: parentId, summary: text.trim(), status: publicExpressionReason ? "failed" : reviewReason ? "review" : mode === "review" ? "review" : "queued", reason: publicExpressionReason ?? reviewReason ?? (operatorDirectiveId ? "The operator directed Jenny to enter this conversation; Jenny supplied the expression through the Presence execution envelope." : "Jenny chose to continue a relevant conversation through the Presence execution envelope."), createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
+  state.actions.unshift({ id: id("act"), intent: "reply", target: parentId, summary: text.trim(), status: routeBlockedReason || publicExpressionReason ? "failed" : reviewReason ? "review" : mode === "review" ? "review" : "queued", reason: routeBlockedReason ?? publicExpressionReason ?? reviewReason ?? (operatorDirectiveId ? "The operator directed Jenny to enter this conversation; Jenny supplied a contextual reply for the Presence execution envelope." : "Jenny chose to continue a relevant conversation through the Presence execution envelope."), createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
   state.events.unshift(event("decision", publicExpressionReason ? "Public text boundary blocked" : mediaReviewReason ? "Media publication needs review" : operatorDirectiveId ? "Jenny expressed the requested reply" : "A reply intention was formed", publicExpressionReason ?? reviewReason ?? (connector ? (operatorDirectiveId ? "The operator set the social act; Jenny supplied a contextual reply for the Presence execution envelope." : "Jenny found a relevant X conversation and handed a contextual reply to the Presence execution envelope.") : "Jenny found a relevant X conversation, but no write-enabled X connector is available."), publicExpressionReason || reviewReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId }));
   return state;
 }
@@ -7804,7 +7840,7 @@ function ownXPostForPresence(state: OpenPresenceState, presence: Presence, targe
 }
 
 /** Form a deletion intent for one of this Presence's own live X posts or replies. */
-export function formXDeleteIntent(source: OpenPresenceState, input: { target: EntityRef; presenceId?: string; source?: "agent" | "operator"; origin?: SocialOrigin; decision?: SocialDecisionInput; runId?: string; invocationId?: string; attentionEpisodeId?: string }) {
+export function formXDeleteIntent(source: OpenPresenceState, input: { target: EntityRef; presenceId?: string; source?: "agent" | "operator"; origin?: SocialOrigin; decision?: SocialDecisionInput; routePreference?: XToolRoutePreference; runId?: string; invocationId?: string; attentionEpisodeId?: string }) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = (input.presenceId ? state.presences.find((item) => item.id === input.presenceId) : undefined) ?? state.presence;
   if (!state.agent || !presence || presence.status !== "live" || presence.channel !== "x" || !input.target.id) return state;
@@ -7821,7 +7857,8 @@ export function formXDeleteIntent(source: OpenPresenceState, input: { target: En
   const runId = input.runId ?? input.decision?.runId;
   const invocationId = input.invocationId ?? input.decision?.invocationId;
   const attentionEpisodeId = input.attentionEpisodeId ?? input.decision?.attentionEpisodeId;
-  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.delete", target: input.target, priority: 90, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, environment, source: input.source ?? "agent", runId, invocationId, attentionEpisodeId };
+  const routePreference = durableXToolPreference(state, presence, "x.delete", input.routePreference ?? input.decision?.routePreference);
+  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.delete", target: input.target, priority: 90, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, environment, source: input.source ?? "agent", routePreference, runId, invocationId, attentionEpisodeId };
   state.socialIntents.unshift(socialIntent);
   const socialDecision = input.decision ? createSocialDecision(state, { ...input.decision, decision: "delete", focalMirrorObjectIds: input.decision.focalMirrorObjectIds ?? [targetObject.id], origin: input.decision.origin ?? origin, runId: runId ?? input.decision.runId, invocationId: invocationId ?? input.decision.invocationId }, socialIntent.id) : undefined;
   if (socialDecision) state.socialDecisions.unshift(socialDecision);
@@ -7832,11 +7869,10 @@ export function formXDeleteIntent(source: OpenPresenceState, input: { target: En
     recordNoOpTrajectory(state, { presenceId: presence.id, reason: "Delete own posts & replies is off in the Presence execution envelope." });
     return state;
   }
-  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && !xNativeWriteUnavailable(connection) && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""))));
-  const bridge = !nativeX ? browserBridgeFor(state, presence.id, "delete") : undefined;
-  const connector = nativeX ? "native" as const : bridge ? bridge.kind : undefined;
-  const status = mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
-  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.delete", mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: input.target, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: "x.delete", target: input.target }), reviewReason: `Delete ${targetObject.objectType === "reply" ? "this reply" : "this post"} from X. The original remains in OpenPresence history.`, createdAt: formedAt, updatedAt: formedAt, environment, source: input.source ?? "agent", runId, invocationId, attentionEpisodeId };
+  const { connector, bridge, routeBlockedReason } = chooseXWriter(state, presence, "delete", routePreference);
+  const status = routeBlockedReason ? "blocked" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
+  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.delete", mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: input.target, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: "x.delete", target: input.target }), reviewReason: routeBlockedReason ?? `Delete ${targetObject.objectType === "reply" ? "this reply" : "this post"} from X. The original remains in OpenPresence history.`, createdAt: formedAt, updatedAt: formedAt, environment, source: input.source ?? "agent", runId, invocationId, attentionEpisodeId };
+  if (routeBlockedReason) execution.failure = { code: "X_API_RATE_LIMITED", message: routeBlockedReason, retryable: false };
   state.executions.unshift(execution);
   recordFormedExecutionLifecycle(state, execution, input.source === "operator" ? "operator" : "agent");
   state.actions.unshift({ id: id("act"), intent: "delete", target: input.target.id, summary: `Delete ${targetObject.objectType === "reply" ? "reply" : "post"}`, status: mode === "review" ? "review" : "queued", reason: "The Presence selected its own X content for deletion after confirming the durable mirror target.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
@@ -7844,7 +7880,7 @@ export function formXDeleteIntent(source: OpenPresenceState, input: { target: En
   return state;
 }
 
-export function formXActionIntent(source: OpenPresenceState, input: { affordance: "x.like" | "x.repost" | "x.quote" | "x.follow"; target: EntityRef; text?: string; assignmentId?: string; assetIds?: string[]; operatorAssetIds?: string[]; decision?: SocialDecisionInput; source?: "agent" | "operator"; attentionTestId?: string; capabilityTrialId?: string; origin?: SocialOrigin; runId?: string; invocationId?: string; attentionEpisodeId?: string }) {
+export function formXActionIntent(source: OpenPresenceState, input: { affordance: "x.like" | "x.repost" | "x.quote" | "x.follow"; target: EntityRef; text?: string; assignmentId?: string; assetIds?: string[]; operatorAssetIds?: string[]; decision?: SocialDecisionInput; routePreference?: XToolRoutePreference; source?: "agent" | "operator"; attentionTestId?: string; capabilityTrialId?: string; origin?: SocialOrigin; runId?: string; invocationId?: string; attentionEpisodeId?: string }) {
   const timedAssignment = source.assignments.find((item) => item.id === input.assignmentId);
   if (timedAssignment) assertAssignmentWindowOpen(timedAssignment);
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
@@ -7864,10 +7900,12 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
   // but the signed-in Chrome body is an independent authorized route. Keep
   // the native target restriction while allowing a verified browser quote to
   // be formed when that route is actually available.
-  const browserQuoteBridge = requiresExpression && !nativeTargetAllowed ? browserBridgeFor(state, presence.id, "quote") : undefined;
+  const browserQuoteBridge = requiresExpression && !nativeTargetAllowed && presence.browserAccess?.enabled === true
+    ? browserBridgeFor(state, presence.id, "quote")
+    : undefined;
   const browserQuoteRouteReady = Boolean(browserQuoteBridge
     && (browserQuoteBridge.name.startsWith("OpenPresence Chrome") || browserQuoteBridge.name.startsWith("Chrome"))
-    && bridgeExecutionStatus(browserQuoteBridge) === "connected");
+    && bridgeReadyForExpectedAccount(browserQuoteBridge, presence.handle));
   if (requiresExpression && !nativeTargetAllowed && !browserQuoteRouteReady) return state;
   const environment = "live" as const;
   if (hasExistingPublicAction(state, { presenceId: presence.id, environment, affordance: input.affordance, target: input.target, text: input.text })) return state;
@@ -7885,7 +7923,8 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
   const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
   const autobiographicalContext = requiresExpression && input.source !== "operator" ? retrievePublicSafeAutobiographicalContext(state, presence, `${input.text ?? ""}\n${input.decision?.summary ?? ""}`, Date.now()) : undefined;
   const autobiographicalEventIds = input.decision?.autobiographicalEventIds ?? autobiographicalContext?.eventIds;
-  const effectiveDecision = input.decision ? { ...input.decision, autobiographicalEventIds } : undefined;
+  const routePreference = durableXToolPreference(state, presence, input.affordance, input.routePreference ?? input.decision?.routePreference);
+  const effectiveDecision = input.decision ? { ...input.decision, routePreference, autobiographicalEventIds } : undefined;
   const origin: SocialOrigin = input.origin ?? input.decision?.origin ?? (input.assignmentId ? { kind: "assignment", refId: input.assignmentId } : { kind: "inbound_social", refId: input.target.id });
   const assignment = input.assignmentId ? state.assignments.find((item) => item.id === input.assignmentId) : undefined;
   if (assignment?.assetConstraint?.required && !(input.assetIds ?? []).length) throw new Error("This Assignment requires an Asset from its Collection.");
@@ -7898,7 +7937,7 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
   const runId = input.runId ?? input.decision?.runId;
   const invocationId = input.invocationId ?? input.decision?.invocationId;
   const attentionEpisodeId = input.attentionEpisodeId ?? input.decision?.attentionEpisodeId;
-  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: input.affordance, target: input.target, publicationId: publication?.id, priority: capability === "follow" ? 35 : 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, assignmentId: input.assignmentId, environment: "live", source: input.source ?? "agent", attentionTestId: input.attentionTestId, capabilityTrialId: trial?.id, runId, invocationId, attentionEpisodeId, autobiographicalEventIds };
+  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: input.affordance, target: input.target, publicationId: publication?.id, priority: capability === "follow" ? 35 : 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, assignmentId: input.assignmentId, environment: "live", source: input.source ?? "agent", routePreference, attentionTestId: input.attentionTestId, capabilityTrialId: trial?.id, runId, invocationId, attentionEpisodeId, autobiographicalEventIds };
   if (timedAssignment?.timeframe?.deadline && Date.parse(timedAssignment.timeframe.deadline) < Date.parse(expiresAt)) socialIntent.validity.expiresAt = timedAssignment.timeframe.deadline;
   if (publication?.publicExpression) publication.publicExpression.socialIntentId = socialIntent.id;
   state.socialIntents.unshift(socialIntent);
@@ -7911,13 +7950,8 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
     recordNoOpTrajectory(state, { presenceId: presence.id, reason: `${capability} is off in the Presence execution envelope.` });
     return state;
   }
-  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && !xNativeWriteUnavailable(connection) && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""))));
-  // The Native API gets the first attempt. A browser route is selected only
-  // after this exact affordance has learned that native delivery fails.
-  const browserFallbackRequired = (!nativeTargetAllowed && requiresExpression) || browserFallbackWasLearned(presence, input.affordance);
-  const connectedNative = browserFallbackRequired ? undefined : nativeX;
-  const bridge = browserFallbackRequired || !nativeX ? browserBridgeFor(state, presence.id, capability) : undefined;
-  const connector = browserFallbackRequired && bridge ? "bridge" as const : connectedNative ? "native" as const : bridge ? bridge.kind : undefined;
+  const browserRouteRequired = (!nativeTargetAllowed && requiresExpression) || browserRouteWasLearned(presence, input.affordance);
+  const { connector, bridge, routeBlockedReason } = chooseXWriter(state, presence, capability, routePreference, browserRouteRequired);
   const autobiographicalSafetyReason = publication && input.source !== "operator" ? autobiographicalExpressionSafetyReason(state, presence.id, autobiographicalEventIds, input.text!.trim()) : undefined;
   const mentionGroundingReason = publication && input.source !== "operator"
     ? expressionMentionGroundingReason(state, presence, input.target, input.text!.trim())
@@ -7926,13 +7960,14 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
     ? expressionSourceEchoReason(state, presence, input.target, input.text!.trim())
     : undefined;
   const leakageReason = publication ? publicExpressionLeakageReason(input.text!.trim()) ?? autobiographicalSafetyReason ?? mentionGroundingReason ?? sourceEchoReason ?? liveAssetRepeatReason : undefined;
-  const reviewReason = leakageReason ?? mediaReviewReason;
-  const status = leakageReason ? "blocked" : reviewReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
+  const reviewReason = routeBlockedReason ?? leakageReason ?? mediaReviewReason;
+  const status = routeBlockedReason || leakageReason ? "blocked" : reviewReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
   const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: input.affordance, mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: input.target, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: input.affordance, target: input.target, text: input.text }), publication, reviewReason, createdAt: formedAt, updatedAt: formedAt, assignmentId: input.assignmentId ?? trial?.assignmentId, environment, source: input.source ?? "agent", attentionTestId: input.attentionTestId, capabilityTrialId: trial?.id, runId, invocationId, attentionEpisodeId };
+  if (routeBlockedReason) execution.failure = { code: "X_API_RATE_LIMITED", message: routeBlockedReason, retryable: false };
   if (leakageReason) execution.failure = { code: autobiographicalSafetyReason ? "AUTOBIOGRAPHICAL_PRIVACY_BOUNDARY" : mentionGroundingReason ? "UNSUPPORTED_LEADING_MENTION" : sourceEchoReason ? "SOURCE_EXPRESSION_ECHO" : liveAssetRepeatReason ? "DUPLICATE_LIVE_ASSET" : "PUBLIC_TEXT_INTERNAL_MARKER", message: leakageReason, retryable: false };
   state.executions.unshift(execution);
   recordFormedExecutionLifecycle(state, execution, input.source === "operator" ? "operator" : "agent");
-  state.actions.unshift({ id: id("act"), intent: capability as "like" | "repost" | "quote" | "follow", target: input.target.id, summary: input.text?.trim() ?? capability, status: leakageReason ? "failed" : reviewReason ? "review" : mode === "review" ? "review" : "queued", reason: leakageReason ?? reviewReason ?? `The Presence formed a ${capability} action through the live X execution envelope.`, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
+  state.actions.unshift({ id: id("act"), intent: capability as "like" | "repost" | "quote" | "follow", target: input.target.id, summary: input.text?.trim() ?? capability, status: routeBlockedReason || leakageReason ? "failed" : reviewReason ? "review" : mode === "review" ? "review" : "queued", reason: routeBlockedReason ?? leakageReason ?? reviewReason ?? `The Presence formed a ${capability} action through the live X execution envelope.`, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
   state.events.unshift(event("decision", leakageReason ? "Public action blocked" : mediaReviewReason ? "Media publication needs review" : `X ${capability} intention formed`, leakageReason ?? reviewReason ?? `${capability} is ready for the authorized X connector.`, leakageReason || reviewReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id, runId, invocationId }));
   return state;
 }
@@ -8071,7 +8106,7 @@ export function completeNativeExecution(source: OpenPresenceState, executionId: 
 
 /**
  * Record an X API-confirmed result for a previously unresolved reply. The
- * writer may have been Native X or the browser capability fallback; the API is the
+ * writer may have been the X API or the browser tool; the API is the
  * authority for whether the public X object exists. This transition is
  * intentionally idempotent so reconciliation cannot create duplicate
  * outcomes.
@@ -9777,14 +9812,20 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       if (execution?.status === "awaiting-review") {
         const approvedAt = now();
         execution.status = "approved";
+        execution.reviewReason = undefined;
+        execution.failure = undefined;
         execution.updatedAt = approvedAt;
         const assetIds = execution.publication?.assetIds ?? [];
         if (execution.publication && assetIds.length) {
-          execution.publication.operatorAssetApproval = {
+          const approval = {
             assetIds: [...assetIds],
+            assetHashes: Object.fromEntries(assetIds.flatMap(assetId => { const asset = state.assets.find(item => item.id === assetId); const hash = asset?.storage?.exactHash ?? asset?.checksum; return hash ? [[assetId, hash]] : []; })),
             reason: "The operator reviewed the proposed expression and selected media for this exact publication.",
             at: approvedAt,
           };
+          execution.publication.operatorAssetApproval = approval;
+          const canonicalPublication = state.publications.find((publication) => publication.id === execution.publication?.id);
+          if (canonicalPublication) canonicalPublication.operatorAssetApproval = approval;
         }
         recordExecutionTransition(state, execution, {
           eventType: "permission.decided",
@@ -9898,21 +9939,39 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       const execution = state.executions.find((item) => item.id === operation.id);
       const bridgePreWriteFailure = execution?.connector === "bridge"
         && ["ACCOUNT_MISMATCH", "ACCOUNT_NOT_READY", "INVALID_PROVENANCE", "TARGET_NOT_VISIBLE"].includes(execution.failure?.code ?? "");
+      let exactMediaPreWriteRetry = false;
+      let exactMediaNeedsFreshReview = false;
+      if (execution?.connector === "bridge" && execution.status === "failed" && ["BROWSER_CONNECTOR_UNAVAILABLE", "UNSUPPORTED_ASSET", "ASSET_UPLOAD_FAILED"].includes(execution.failure?.code ?? "") && !execution.executedAt && !state.outcomes.some((outcome) => outcome.executionId === execution.id)) {
+        const publication = execution.publication;
+        const expression = publication?.publicExpression;
+        const approval = publication?.operatorAssetApproval;
+        try {
+          verifyExecutionPermit(execution, expression, { allowExpiredForPreWriteRetry: true });
+          const selected = publication?.assetIds ?? [];
+          authorizeAssetSelection(state, selected, { presenceId: execution.presenceId, requireReady: false, allowReviewable: true });
+          const exactApprovedPayload = Boolean(approval && selected.length && approval.assetIds.length === selected.length && selected.every((assetId) => approval.assetIds.includes(assetId))
+            && expression?.mediaIds.length === selected.length && expression.mediaIds.every((assetId) => selected.includes(assetId) && state.assets.some((asset) => asset.id === assetId && asset.agentId === expression.agentId))
+            && publication?.payload && typeof publication.payload === "object" && !Array.isArray(publication.payload) && publication.payload.text === expression.text && execution.socialIntentId === expression.socialIntentId);
+          exactMediaPreWriteRetry = exactApprovedPayload && selected.every(assetId => Boolean(approval?.assetHashes?.[assetId]) && state.assets.some(asset => asset.id === assetId && (asset.storage?.exactHash ?? asset.checksum) === approval?.assetHashes?.[assetId]));
+          exactMediaNeedsFreshReview = exactApprovedPayload && !approval?.assetHashes;
+        } catch { /* A mutated or unsigned publication requires fresh review. */ }
+      }
       const targetLanguageCanRefresh = execution?.failure?.code === "TARGET_LANGUAGE_MISMATCH" && execution.target?.type === "x.post";
-      if (!execution || !["failed", "blocked", "expired"].includes(execution.status) || execution.externalRef || (!bridgePreWriteFailure && !targetLanguageCanRefresh && execution.failure?.retryable === false) || execution.failure?.reviewedAt) return state;
+      if (execution?.publication?.assetIds.length && ["BROWSER_CONNECTOR_UNAVAILABLE", "UNSUPPORTED_ASSET", "ASSET_UPLOAD_FAILED"].includes(execution.failure?.code ?? "") && !exactMediaPreWriteRetry && !exactMediaNeedsFreshReview) return state;
+      if (!execution || !["failed", "blocked", "expired"].includes(execution.status) || execution.externalRef || (!bridgePreWriteFailure && !exactMediaPreWriteRetry && !exactMediaNeedsFreshReview && !targetLanguageCanRefresh && execution.failure?.retryable === false) || execution.failure?.reviewedAt) return state;
       const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
       if (!intent || intent.state !== "active") return state;
       if (intent.validity.expiresAt && new Date(intent.validity.expiresAt).getTime() <= Date.now()) return state;
-      const nextStatus = execution.mode === "auto" ? (execution.connector ? "queued" : "awaiting-connector") : execution.mode === "review" ? "awaiting-review" : "awaiting-manual";
+      const nextStatus = exactMediaNeedsFreshReview ? "awaiting-review" : exactMediaPreWriteRetry ? "queued" : execution.mode === "auto" ? (execution.connector ? "queued" : "awaiting-connector") : execution.mode === "review" ? "awaiting-review" : "awaiting-manual";
       execution.status = nextStatus;
       execution.failure = undefined;
       execution.retryAt = execution.connector === "native" && execution.mode === "auto"
         ? new Date(Date.now() + nativeRetryBackoffMs(execution)).toISOString()
         : undefined;
-      execution.reviewReason = undefined;
+      execution.reviewReason = exactMediaNeedsFreshReview ? "Review this saved post and image once more. The earlier approval did not record the image's immutable bytes, so OpenPresence needs fresh approval before sending it." : undefined;
       execution.lease = undefined;
       execution.executedAt = undefined;
-      if (bridgePreWriteFailure) {
+      if (bridgePreWriteFailure || exactMediaPreWriteRetry || exactMediaNeedsFreshReview) {
         execution.permit = undefined;
         if (execution.publication?.publicExpression) {
           execution.publication = {

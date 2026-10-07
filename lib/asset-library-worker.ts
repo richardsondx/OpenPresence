@@ -3,7 +3,7 @@ import { watch } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { readStateForContext, WorkspaceConflictError, writeState } from "./db";
-import { assetSourceErrorMessage, ingestLibraryImages } from "./asset-library";
+import { assetPerceptionNeedsReview, assetSourceErrorMessage, ingestLibraryImages } from "./asset-library";
 import { fetchPublicAsset, putAssetBytes } from "./asset-store";
 import { detectLibraryMedia } from "./asset-media";
 import { inspectDiscoveredAsset } from "./perception-runtime";
@@ -101,7 +101,7 @@ async function processOne(agentId: string, assetId: string) {
           environment: "live",
         };
         next.perceptions.unshift(perception);
-        nextAsset.metadataReview = { status: run.error ? "open" : "resolved" };
+        nextAsset.metadataReview = { status: run.error || assetPerceptionNeedsReview(run.result.uncertainty) ? "open" : "resolved" };
         nextAsset.perception = { observation: run.result.observation, likelyMeaning: run.result.interpretation, visibleText: run.result.visibleText ? [run.result.visibleText] : undefined, uncertainty: [run.result.uncertainty] };
         nextAsset.status = "ready";
       } else {

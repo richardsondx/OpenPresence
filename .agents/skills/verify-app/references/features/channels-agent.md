@@ -54,3 +54,19 @@ For portfolio switching, use the expanded or collapsed rail's `button.portfolio-
 - Avatar editing lives in Agent settings → Identity & Brain. The curated mark and signature color are persisted on the Agent; a verified external platform avatar may still appear in Public history because it represents the observed actor there.
 - The expanded Agent rail exposes presence-scoped `Awake`/`Asleep` controls; use the row's separate Agent select button to change context, and the status control to pause or wake without selecting another Agent.
 - The current default editor opens with `Custom` execution details visible, exposing the full Off/Manual/Review/Auto matrix. This is a high-value simplification-review target, not a proof that all four modes should be removed.
+
+The X API and signed-in Browser are peer tools for reading and acting in the X channel; neither is a substitute for the model-provider API that powers cognition. `tests/browser-channel-read.test.ts` proves authenticated read completion, expected-account matching, and interrupted-lease recovery; `tests/bridge-retry.test.ts` proves a waiting execution is rebound to its selected Browser route after expected-account verification, while stale identity is rejected again at claim and acknowledgement. A live Chrome/X read additionally requires the unpacked extension to be loaded, a connected verified account matching the selected Presence handle, and browser access enabled. A stale `verified` flag for a different handle is not ready: reject it before starting a read or public action. The extension must reuse an already-loaded matching X page and renew its short read lease while active so an MV3 worker restart can reclaim the same read without creating a duplicate public action.
+
+Public Chat research is a separate read-only browser capability. With browser
+access enabled, `search_web`/`read_web` may start the managed browser and use an
+isolated research context without X cookies or verified X identity. An absent
+Tavily key must route to that browser when it is launchable. Verify an actual
+natural Chat request, source-text receipts, truthful route/provenance, reload,
+and absence of public executions. Browser search summaries establish leads,
+not page reading. The browser never substitutes for the configured AI runtime.
+
+Chat approval regression: `tests/e2e/chat-publication-review.spec.ts` requires an
+explicit isolated `OPENPRESENCE_E2E_DB_PATH`. Pending review preview/buttons must
+be visible without expanding any details; one review per execution; approve via
+actual public operation, scoped simulated outcome, grounded follow-through,
+reload and repeat-approval idempotency. A simulated outcome proves no live post.

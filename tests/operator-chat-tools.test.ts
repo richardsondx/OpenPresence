@@ -4,6 +4,7 @@ import { queueOperatorAssignmentRetry } from "../lib/assignment-recovery";
 import { applyOperation, createAgent, startPlaygroundSession, addSandboxEvent } from "../lib/runtime";
 import { saveNativeXCredentials, upsertNativeXConnection } from "../lib/x";
 import { materializeOperatorChatAttachments } from "../lib/operator-chat";
+import { saveProviderSecret } from "../lib/db";
 
 function fixture() {
   return createAgent({ name: "Tool Test", description: "Useful social judgment", mode: "agent", handle: "@tool_test", accent: "#777777" });
@@ -18,6 +19,41 @@ function connected() {
 }
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 describe("Chat runtime tools", () => {
+  it("returns unused media choices without creating an intent for a previously published image", async () => {
+    const { state, presenceId } = connected();
+    state.presence!.environment = "live";
+    state.presences.find(item => item.id === presenceId)!.environment = "live";
+    const timestamp = new Date().toISOString();
+    for (const id of ["used-image", "fresh-image"]) state.assets.push({
+      id, agentId: state.agent!.id, presenceId, type: "image", sourceId: "library",
+      accessScope: { mode: "selected_presences", presenceIds: [presenceId] },
+      description: "Useful image", status: "ready", metadataReview: { status: "resolved" },
+      provenance: { origin: "operator_upload", importedAt: timestamp }, createdAt: timestamp, updatedAt: timestamp,
+    } as never);
+    state.assetUsages.push({ id: "prior-use", assetId: "used-image", agentId: state.agent!.id, presenceId,
+      publicationId: "prior-publication", socialIntentId: "prior-intent", channelId: "x", environment: "live", usageType: "new", publishedAt: timestamp });
+    const intentsBefore = state.socialIntents.length;
+    const result = await executeChatRuntimeTool(state, presenceId, { kind: "social_action", action: "post", text: "A useful idea.", assetIds: ["used-image"] }, "reuse-recovery");
+    expect(result.result).toMatchObject({ status: "media-unavailable", delivered: false, requiresUserAction: false, alternatives: [expect.objectContaining({ assetId: "fresh-image" })] });
+    expect(result.deliveryExecutionIds).toEqual([]);
+    expect(result.state.socialIntents).toHaveLength(intentsBefore);
+    expect(result.state.executions).toHaveLength(0);
+    const selected = await executeChatRuntimeTool(result.state, presenceId, { kind: "social_action", action: "post", text: "A useful idea with the fresh image.", assetIds: ["fresh-image"] }, "reuse-recovery");
+    expect(selected.state.executions[0]?.publication?.assetIds).toEqual(["fresh-image"]);
+    const exact = await executeChatRuntimeTool(state, presenceId, { kind: "social_action", action: "post", text: "Use this image.", assetIds: ["used-image"] }, "exact-selection", { operatorAttachments: [{ id: "attached", name: "Selected image", kind: "image", existingAssetId: "used-image" }] });
+    expect(exact.result).toMatchObject({ status: "media-unavailable", requiresUserAction: true });
+    expect(exact.state.executions).toHaveLength(0);
+  });
+  it("blocks configured secrets before any public query or page request", async () => {
+    const { state, presenceId } = connected();
+    const provider = state.providerConnections[0];
+    saveProviderSecret(provider.id, "private-key-do-not-transmit");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(executeChatRuntimeTool(state, presenceId, { kind: "search_web", query: "Explain private-key-do-not-transmit" }, "private-research")).rejects.toThrow("cannot transmit private credentials");
+    await expect(executeChatRuntimeTool(state, presenceId, { kind: "read_web", url: "https://example.com/?q=test-token-secret" }, "private-research")).rejects.toThrow("cannot transmit private credentials");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it("returns the Agent-scoped recorded usage ledger without probing or mutating X", async () => {
     const initial = fixture();
     const presenceId = initial.presence!.id;
@@ -194,6 +230,44 @@ describe("Chat runtime tools", () => {
     expect(approvedExecution.status).toBe("approved");
     expect(approvedExecution.publication?.operatorAssetApproval).toMatchObject({ assetIds: ["reference-image-review"] });
     expect(approved.trajectoryEvents).toEqual(expect.arrayContaining([expect.objectContaining({ eventType: "permission.decided", operationId: approvedExecution.operationId, payload: expect.objectContaining({ status: "AUTHORIZED", approvedAssetIds: ["reference-image-review"] }) })]));
+  });
+
+  it("routes an eligible but visually uncertain library image to publication review without sending it", async () => {
+    const initial = connected();
+    const state = applyOperation(initial.state, { type: "setPresence", patch: { connectionMode: "native", status: "live", execution: { post: "auto" } } });
+    const timestamp = new Date().toISOString();
+    state.assets.push({
+      id: "uncertain-library-image",
+      agentId: state.agent!.id,
+      presenceId: initial.presenceId,
+      accessScope: { mode: "selected_presences", presenceIds: [initial.presenceId] },
+      type: "image",
+      sourceId: "operator-library",
+      retention: "preserved",
+      reusePermission: "ready_to_use",
+      description: "Colorful illustrated scene",
+      dataUrl: "data:image/png;base64,AAAA",
+      mimeType: "image/png",
+      status: "ready",
+      metadataReview: { status: "resolved" },
+      perception: { observation: "A colorful illustrated scene.", uncertainty: ["high"] },
+      provenance: { origin: "operator_upload", importedAt: timestamp },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    } as never);
+
+    const result = await executeChatRuntimeTool(state, initial.presenceId, {
+      kind: "social_action",
+      action: "post",
+      text: "A small visual note from the work.",
+      assetIds: ["uncertain-library-image"],
+    }, "uncertain-library-media-run");
+    const execution = result.state.executions[0];
+
+    expect(result.deliveryExecutionIds).toEqual([execution?.id]);
+    expect(execution).toMatchObject({ status: "awaiting-review", reviewReason: expect.stringContaining("visual metadata is needs review") });
+    expect(execution?.publication?.assetIds).toEqual(["uncertain-library-image"]);
+    expect(result.state.outcomes).toHaveLength(0);
   });
 
   it("materializes a raw operator upload into a scoped durable Asset", async () => {

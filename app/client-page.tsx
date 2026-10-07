@@ -4,8 +4,9 @@ import { SocialPlaybook } from "./social-playbook";
 import "./tasks-view.css";
 import { TaskCalendar } from "./task-calendar";
 
+import { projectWorkJourneys, type WorkJourney } from "@/lib/work-journey";
 import { useWorkspaceSurface } from "@/lib/use-workspace-surface";
-import { compareRecentChatAssignments, chatToolReceipt, inspectionReportSummary, legacyInspectionEvidence, legacyOperatorChatFailureMessage, toolActivitySummary } from "@/lib/chat-activity-presentation";
+import { compareRecentChatAssignments, chatRetryNeedsProviderAction, chatToolReceipt, inspectionReportSummary, legacyInspectionEvidence, legacyOperatorChatFailureMessage, toolActivitySummary } from "@/lib/chat-activity-presentation";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { orderedOperatorChatMessages } from "@/lib/operator-chat-history";
 import { useOperatorChatOutbox } from "@/lib/use-operator-chat-outbox";
@@ -92,7 +93,7 @@ import {
 } from "lucide-react";
 import { AGENT_CAPABILITY_DEFINITIONS, CHANNEL_CAPABILITIES, isAgentCapabilityEnabled, simulationForChannel } from "@/lib/types";
 import { detectLibraryMedia, supportedLibraryMediaLabel } from "@/lib/asset-media";
-import { assetPostingUnavailableUntil, deriveAssetReadiness } from "@/lib/asset-library";
+import { assetIsAvailableForPublication, assetPostingUnavailableUntil, deriveAssetReadiness, isLibraryAsset } from "@/lib/asset-library";
 import { bridgeAdapterPrompt, bridgeAdapterStatusLabel, bridgeApiExamples, bridgeEnvironmentExample, bridgeExecutionStatus, bridgeExecutionStatusLabel, bridgeIdentityReady } from "@/lib/bridge-contract";
 import { latestPerception } from "@/lib/perception";
 import { attentionGovernorSnapshot } from "@/lib/attention-governor";
@@ -1769,31 +1770,6 @@ function AgentPortfolio({
 
 type InspectorPanel = "today" | "needs_you" | "settings";
 
-const activityLineageKeys = ["runId", "executionId", "invocationId", "attentionEpisodeId", "sourceTemporalEventId", "intentId", "decisionId", "outcomeId", "sessionId", "sourceObjectId"] as const;
-
-type ActivityTimelinePhase = "started" | "step" | "tool" | "completed";
-
-function activityTimelinePhase(event: LiveEvent): ActivityTimelinePhase {
-  const title = event.title.toLocaleLowerCase();
-  if (/\b(start|started|begin|began|queued|requested|resumed|woke|joined)\b/.test(title)) return "started";
-  if (/\b(complet|deliver|verif|publish|finish|succeed|restored|closed|settled)\w*\b/.test(title)) return "completed";
-  if (/\b(search|read|load|call|list|create|update|inspect|check|fetch|query|download|generate)\w*\b/.test(title)) return "tool";
-  return "step";
-}
-
-function activityTimelineLabel(phase: ActivityTimelinePhase) {
-  return phase === "started" ? "Started" : phase === "completed" ? "Completed" : phase === "tool" ? "Tool call" : "Step";
-}
-
-function relatedActivityEvents(events: LiveEvent[], selectedEvent: LiveEvent) {
-  const links = activityLineageKeys
-    .map((key) => [key, selectedEvent[key]] as const)
-    .filter((entry): entry is readonly [typeof activityLineageKeys[number], string] => Boolean(entry[1]));
-  return events
-    .filter((candidate) => candidate.id === selectedEvent.id || links.some(([key, value]) => candidate[key] === value))
-    .sort((left, right) => left.time.localeCompare(right.time));
-}
-
 function ContextInspector({ panel, state, presence, onClose, onPanelChange, onNavigate }: {
   panel: InspectorPanel;
   state: OpenPresenceState;
@@ -1802,23 +1778,43 @@ function ContextInspector({ panel, state, presence, onClose, onPanelChange, onNa
   onPanelChange: (panel: InspectorPanel) => void;
   onNavigate: (view: View, assignmentId?: string) => void;
 }) {
+  const [selectedJourneyId, setSelectedJourneyId] = useState<string | null>(null);
   const inspectorRef = useRef<HTMLElement>(null);
   const closeRef = useRef(onClose);
   useEffect(() => { closeRef.current = onClose; }, [onClose]);
   const closeInspector = useCallback(() => closeRef.current(), []);
-  useWorkspaceSurface(inspectorRef, true, closeInspector, 768);
+  useWorkspaceSurface(inspectorRef, !selectedJourneyId, closeInspector, 768);
   const agent = state.agent!;
   const assignments = state.assignments.filter((task) => task.presenceId === presence.id);
   const blocked = assignments.filter((task) => ["needs_operator", "blocked", "failed", "expired_incomplete"].includes(task.status));
   const working = assignments.filter((task) => assignmentIsOpen(task) && (getAssignmentProcessingState(task, state.assignmentRuns).isProcessing || ["working", "awaiting_execution"].includes(task.status)));
   const approvals = state.executions.filter((execution) => execution.presenceId === presence.id && execution.status === "awaiting-review");
   const proposals = state.proposals.filter((proposal) => proposal.status === "pending");
-  const [selectedEvent, setSelectedEvent] = useState<LiveEvent | null>(null);
-  const todayKey = new Date().toLocaleDateString("en-CA");
-  const todayEvents = state.events
-    .filter((event) => event.presenceId === presence.id && new Date(event.time).toLocaleDateString("en-CA") === todayKey)
-    .sort((left, right) => right.time.localeCompare(left.time));
-  const eventDetails = selectedEvent ? relatedActivityEvents(state.events, selectedEvent) : [];
+  const [journeySnapshot, setJourneySnapshot] = useState<OpenPresenceState | null>(null);
+  const [journeyLoadError, setJourneyLoadError] = useState(false);
+  useEffect(() => {
+    if (state.responseProjection === "chat" || !state.responseProjection) return;
+    const controller = new AbortController();
+    let pending = false;
+    const load = async () => {
+      if (pending || !browserDocumentIsVisible()) return;
+      pending = true;
+      try {
+        const query = new URLSearchParams({ projection: "chat", agentId: agent.id, presenceId: presence.id });
+        const response = await fetchRuntime(`/api/state?${query}`, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error("Could not load work history");
+        const snapshot = await response.json() as OpenPresenceState;
+        if (!controller.signal.aborted && snapshot.agent?.id === agent.id && snapshot.presence?.id === presence.id) { setJourneySnapshot(snapshot); setJourneyLoadError(false); }
+      } catch { if (!controller.signal.aborted) setJourneyLoadError(true); }
+      finally { pending = false; }
+    };
+    void load();
+    const timer = window.setInterval(() => void load(), 3000);
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, [agent.id, presence.id, state.responseProjection]);
+  const journeyState = state.responseProjection === "chat" || !state.responseProjection ? state : journeySnapshot ?? state;
+  const journeys = projectWorkJourneys(journeyState, presence.id);
+  const selectedJourney = journeys.find((journey) => journey.id === selectedJourneyId);
   const taskRow = (task: Assignment, label: string) => <button type="button" className="inspector-list-row" key={task.id} onClick={() => onNavigate("schedule", task.id)}><span className={`inspector-status-dot ${label === "Working" ? "is-live" : "is-warn"}`} /><span><strong>{task.title ?? task.instruction}</strong><small>{label}</small></span><ChevronRight size={16} /></button>;
   return <>
   <aside ref={inspectorRef} className="workspace-context-inspector agent-activity-inspector" aria-label={`${panel === "settings" ? "About" : panel === "needs_you" ? "Needs you" : "Today"} inspector`}>
@@ -1829,8 +1825,10 @@ function ContextInspector({ panel, state, presence, onClose, onPanelChange, onNa
       <button type="button" aria-label="About" title="About" aria-pressed={panel === "settings"} onClick={() => onPanelChange("settings")}><Settings2 size={20} /></button>
     </nav>
     {panel === "today" ? <>
-      <section className="inspector-section inspector-today-section"><div className="inspector-section-heading"><div><h3>Today</h3><p>What {agent.name} has done so far.</p></div><span className="inspector-count">{todayEvents.length}</span></div>
-        {todayEvents.length > 0 ? <div className="inspector-today-list">{todayEvents.slice(0, 12).map((event) => <button type="button" className="inspector-today-row" key={event.id} onClick={() => setSelectedEvent(event)}><span className={`inspector-event-icon inspector-event-icon-${event.type}`} aria-hidden="true">{event.type === "execution" ? <Globe2 size={16} /> : event.type === "decision" ? <Brain size={16} /> : event.type === "learning" ? <Sparkles size={16} /> : event.type === "memory" ? <BookOpen size={16} /> : <Terminal size={16} />}</span><span><strong>{event.title}</strong><small>{event.detail}</small><time dateTime={event.time}>{formatTime(event.time)}</time></span><ChevronRight size={15} /></button>)}</div> : <div className="inspector-quiet"><Activity size={24} /><h3>No work recorded yet</h3><p>When {agent.name} observes, decides, or acts, the receipt will appear here.</p></div>}
+      <section className="inspector-section inspector-today-section"><div className="inspector-section-heading"><div><h3>Today</h3><p>What {agent.name} is working on and how it went.</p></div><span className="inspector-count">{journeys.length}</span></div>
+        {journeyLoadError && <p role="status" className="agent-activity-detail-hint">Work history couldn’t refresh. Showing the available records.</p>}
+        {journeys.length > 0 ? <div className="inspector-today-list">{journeys.map((journey) => <button type="button" className="inspector-today-row" key={journey.id} onClick={() => setSelectedJourneyId(journey.id)}><span className={`inspector-event-icon inspector-event-icon-${journey.kind === "chat" ? "decision" : "system"}`} aria-hidden="true">{journey.status === "working" ? <LoaderCircle size={16} className="spin" /> : journey.status === "failed" || journey.status === "needs_you" ? <CircleAlert size={16} /> : journey.status === "completed" ? <Check size={16} /> : <Terminal size={16} />}</span><span><strong>{journey.title}</strong><small>{journey.summary}</small><span className={`inspector-journey-status is-${journey.status}`}>{journey.label} · {journey.steps.length} {journey.steps.length === 1 ? "step" : "steps"}</span><time dateTime={journey.time}>{formatTime(journey.time)}</time></span><ChevronRight size={15} /></button>)}</div> : <div className="inspector-quiet"><Activity size={24} /><h3>No work recorded yet</h3><p>Requests, tool calls, and their results will appear here as {agent.name} works.</p></div>}
+
       </section>
       <div className="inspector-shortcuts"><button onClick={() => onNavigate("live")}><ArrowUpRight size={18} /> Open full activity <ChevronRight size={16} /></button></div>
     </> : panel === "needs_you" ? <>
@@ -1848,44 +1846,29 @@ function ContextInspector({ panel, state, presence, onClose, onPanelChange, onNa
       <div className="inspector-shortcuts"><button onClick={() => onNavigate("brain")}><Settings2 size={18} /> Agent settings <ChevronRight size={16} /></button><button onClick={() => onNavigate("knowledge")}><BookOpen size={18} /> Knowledge <ChevronRight size={16} /></button><button onClick={() => onNavigate("rehearsal")}><FlaskConical size={18} /> Test agent <ChevronRight size={16} /></button><button onClick={() => onNavigate("usage")}><BarChart3 size={18} /> Usage <ChevronRight size={16} /></button></div>
     </>}
   </aside>
-  {selectedEvent && <AgentActivityDetailDialog key={selectedEvent.id} agentName={agent.name} event={selectedEvent} details={eventDetails} onClose={() => setSelectedEvent(null)} />}
+  {selectedJourney && <AgentActivityDetailDialog key={selectedJourney.id} agentName={agent.name} journey={selectedJourney} onClose={() => setSelectedJourneyId(null)} />}
   </>;
 }
 
-function AgentActivityDetailDialog({ agentName, event, details, onClose }: { agentName: string; event: LiveEvent; details: LiveEvent[]; onClose: () => void }) {
-  const [expandedStepId, setExpandedStepId] = useState(event.id);
-  useEffect(() => {
-    const onKeyDown = (keyEvent: KeyboardEvent) => { if (keyEvent.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
-  const hasCompletion = details.some((item) => activityTimelinePhase(item) === "completed");
-  const hasStart = details.some((item) => activityTimelinePhase(item) === "started");
-  const statusLabel = hasCompletion ? "Completed" : hasStart ? "In progress" : "Recorded activity";
-  return <div className="modal-backdrop agent-activity-detail-backdrop" role="presentation" onMouseDown={(mouseEvent) => { if (mouseEvent.target === mouseEvent.currentTarget) onClose(); }}>
-    <section className="agent-activity-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-activity-detail-title">
-      <header><div><span className="inspector-detail-status">{statusLabel}</span><h2 id="agent-activity-detail-title">{event.title}</h2><p>{agentName} · {formatDateTime(event.time)}</p></div><button type="button" className="icon-button" aria-label="Close activity details" onClick={onClose}><X size={18} /></button></header>
-      <section className="agent-activity-detail-summary"><span className="inspector-event-icon inspector-event-icon-system"><Terminal size={16} /></span><div><strong>Summary</strong><p>{event.detail || "No additional summary was recorded."}</p></div></section>
-      <div className="agent-activity-detail-timeline" aria-label="Activity timeline"><strong>Run timeline</strong><p className="agent-activity-detail-hint">Select a step to see what happened and any recorded context.</p>{details.map((item, index) => {
-        const phase = activityTimelinePhase(item);
-        const expanded = expandedStepId === item.id;
-        const technicalContext = activityLineageKeys
-          .map((key) => [key, item[key]] as const)
-          .filter((entry): entry is readonly [typeof activityLineageKeys[number], string] => Boolean(entry[1]));
-        const icon = phase === "started" ? <Play size={13} /> : phase === "completed" ? <Check size={14} /> : phase === "tool" ? <Terminal size={13} /> : <Circle size={9} />;
-        return <div className={`agent-activity-detail-step is-${phase}${expanded ? " is-expanded" : ""}`} key={item.id}>
-          <span className="agent-activity-detail-rail" aria-hidden="true"><span className="agent-activity-detail-marker">{icon}</span>{index < details.length - 1 && <span className="agent-activity-detail-line" />}</span>
-          <div className="agent-activity-detail-step-content">
-            <button type="button" className="agent-activity-detail-step-button" aria-expanded={expanded} aria-controls={`activity-step-${item.id}`} onClick={() => setExpandedStepId(expanded ? "" : item.id)}>
-              <span><small>{activityTimelineLabel(phase)}</small><strong>{item.title}</strong><time dateTime={item.time}>{formatDateTime(item.time)}</time></span><ChevronDown size={15} aria-hidden="true" />
-            </button>
-            {expanded && <div className="agent-activity-detail-step-output" id={`activity-step-${item.id}`}>
-              <div><strong>{phase === "completed" ? "Outcome" : phase === "tool" ? "What this checked" : "What happened"}</strong><p>{item.detail || "No additional context was recorded."}</p></div>
-              {technicalContext.length > 0 && <details><summary>Technical context</summary><dl>{technicalContext.map(([key, value]) => <div key={key}><dt>{key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase())}</dt><dd>{value}</dd></div>)}</dl></details>}
-            </div>}
-          </div>
-        </div>;
-      })}</div>
+function AgentActivityDetailDialog({ agentName, journey, onClose }: { agentName: string; journey: WorkJourney; onClose: () => void }) {
+  const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
+  const closeDialog = useCallback(() => closeRef.current(), []);
+  useWorkspaceSurface(dialogRef, true, closeDialog, Number.POSITIVE_INFINITY);
+  const selectedStep = journey.steps.find((step) => step.id === selectedStepId);
+  const evidenceText = (value: unknown) => typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  return <div className="modal-backdrop agent-activity-detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section ref={dialogRef} className="agent-activity-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-activity-detail-title">
+      <header><div><span className={`inspector-detail-status is-${journey.status}`}>{journey.label}</span><h2 id="agent-activity-detail-title">{journey.title}</h2><p>{agentName} · {formatDateTime(journey.time)}</p></div><button type="button" className="icon-button" aria-label="Close activity details" onClick={onClose}><X size={18} /></button></header>
+      <div className="agent-activity-journey-layout">
+        <nav className="agent-activity-detail-timeline" aria-label="Activity timeline"><button type="button" className={`journey-summary-button${!selectedStep ? " is-selected" : ""}`} aria-pressed={!selectedStep} onClick={() => setSelectedStepId(null)}>Summary</button><p className="agent-activity-detail-hint">Select a step to see its request and result.</p>{journey.steps.map((step, index) => <div className={`agent-activity-detail-step is-${step.kind} is-${step.status}${selectedStep?.id === step.id ? " is-selected" : ""}`} key={step.id}>
+          <span className="agent-activity-detail-rail" aria-hidden="true"><span className="agent-activity-detail-marker">{step.status === "failed" || step.status === "needs_you" ? <CircleAlert size={14} /> : step.status === "completed" ? <Check size={14} /> : step.kind === "tool" ? <Terminal size={13} /> : <Circle size={9} />}</span>{index < journey.steps.length - 1 && <span className="agent-activity-detail-line" />}</span>
+          <button type="button" className="agent-activity-detail-step-button" aria-pressed={selectedStep?.id === step.id} onClick={() => setSelectedStepId(step.id)}><span><small>{step.kind === "tool" ? "Tool call" : step.kind === "request" ? "Request" : "Update"} · {step.status.replaceAll("_", " ")}</small><strong>{step.title}</strong><time dateTime={step.time}>{formatTime(step.time)}</time></span><ChevronRight size={15} /></button>
+        </div>)}</nav>
+        <section className="agent-activity-journey-evidence" aria-label="Selected work step" aria-live="polite">{selectedStep ? <><h3>{selectedStep.title}</h3><p>{selectedStep.detail || "No additional detail was recorded."}</p>{selectedStep.input !== undefined && <div className="journey-tool-evidence"><h4>Request</h4><pre>{evidenceText(selectedStep.input)}</pre></div>}{selectedStep.output !== undefined && <div className="journey-tool-evidence"><h4>Result</h4><pre>{evidenceText(selectedStep.output)}</pre></div>}{selectedStep.lineage && Object.keys(selectedStep.lineage).length > 0 && <details className="journey-technical-context"><summary>Technical context</summary><dl>{Object.entries(selectedStep.lineage).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></details>}</> : <><h3>Summary</h3><p>{journey.summary || "No summary was recorded."}</p><small>{journey.steps.filter((step) => step.kind === "tool").length} recorded tool calls</small></>}</section>
+      </div>
     </section>
   </div>;
 }
@@ -2365,7 +2348,7 @@ function AgentWorkspaceShell({
       document.documentElement.style.setProperty("--chat-viewport-height", `${viewport?.height ?? window.innerHeight}px`);
       document.documentElement.classList.toggle("chat-keyboard-open", window.innerWidth < 768 && window.innerHeight - (viewport?.height ?? window.innerHeight) > 120);
     };
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { setAgentMenuOpen(false); setInspector(null); } };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented && !document.querySelector(".agent-activity-detail-dialog")) { setAgentMenuOpen(false); setInspector(null); } };
     updateViewport();
     viewport?.addEventListener("resize", updateViewport);
     window.addEventListener("keydown", escape);
@@ -6433,14 +6416,17 @@ function ArtifactsView({ state, refreshState, mutate, setView }: { state: OpenPr
 function AssetsView({ state, refreshState, embedded = false }: { state: OpenPresenceState; refreshState: () => Promise<OpenPresenceState>; embedded?: boolean }) {
   const agent = state.agent;
   const presence = state.presence ?? state.presences[0];
-  const [mediaView, setMediaView] = useState<"activity" | "about">("about");
+  // Artifacts is the durable reuse library. Mirror attachments and web search
+  // previews remain working memory for the social decision that inspected
+  // them; they must not become Agent-owned Artifacts merely because the
+  // runtime has an Asset record for the observed pixels.
   // Older workspaces stored Presence-bound visuals under the Agent that
-  // originally created the Presence. Keep that durable library visible while
-  // the Agent/Presence model is converged, without broadening access beyond
-  // the active Presence.
+  // originally created the Presence. Keep those durable library items visible
+  // while the Agent/Presence model is converged, without broadening access
+  // beyond the active Presence.
   const presenceAssetOwnerIds = new Set(state.assets.filter((asset) => asset.presenceId === presence?.id).map((asset) => asset.agentId));
   const agentScopeIds = new Set([agent?.id, ...presenceAssetOwnerIds].filter((id): id is string => Boolean(id)));
-  const assets = [...state.assets.filter((asset) => agentScopeIds.has(asset.agentId) && !asset.archivedAt && ["image", "gif", "video"].includes(asset.type))].sort((left, right) => {
+  const assets = [...state.assets.filter((asset) => agentScopeIds.has(asset.agentId) && !asset.archivedAt && ["image", "gif", "video"].includes(asset.type) && isLibraryAsset(asset))].sort((left, right) => {
     // Open on visuals the operator can actually use. Remote X discoveries can
     // expire or require a provider session, so locally uploaded files lead
     // the library while preserving recent order within each group.
@@ -6467,15 +6453,8 @@ function AssetsView({ state, refreshState, embedded = false }: { state: OpenPres
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const collectionMemberships = state.assetCollectionMemberships ?? [];
-  const isDiscoveredOnX = (asset: typeof assets[number]) => {
-    const origin = asset.provenance.origin.toLowerCase();
-    return asset.retention !== "preserved" && (origin === "discovered" || origin === "native-x" || origin === "x-bridge" || origin === "mirror_observation" || asset.provenance.publisher?.toLowerCase() === "x");
-  };
-  const mediaForView = (asset: typeof assets[number]) => mediaView === "activity" ? isDiscoveredOnX(asset) : !isDiscoveredOnX(asset);
-  const activityAssets = assets.filter(isDiscoveredOnX);
-  const aboutAssets = assets.filter((asset) => !isDiscoveredOnX(asset));
   const inSelectedCollection = (asset: typeof assets[number]) => !selectedCollectionId || collectionMemberships.some((membership) => membership.collectionId === selectedCollectionId && membership.assetId === asset.id && !membership.removedAt);
-  const scopedAssets = assets.filter((asset) => mediaForView(asset) && inSelectedCollection(asset));
+  const scopedAssets = assets.filter(inSelectedCollection);
   const selected = scopedAssets.find((asset) => asset.id === selectedId);
   const detailRef = useRef<HTMLElement>(null);
   const closeDetail = useCallback(() => setSelectedId(null), []);
@@ -6523,6 +6502,8 @@ function AssetsView({ state, refreshState, embedded = false }: { state: OpenPres
     if (options.sourceName) form.append("sourceName", options.sourceName);
     if (options.filePaths) form.append("filePaths", JSON.stringify(options.filePaths));
     form.append("analysisPolicy", policy);
+    if (agent?.id) form.append("agentId", agent.id);
+    if (presence?.id) form.append("presenceId", presence.id);
     if (selectedCollectionId) form.append("collectionId", selectedCollectionId);
     const payload = await new Promise<{ assets?: Array<{ id: string }>; queuedAssetIds?: string[]; error?: string }>((resolve, reject) => {
       const request = new XMLHttpRequest();
@@ -6612,11 +6593,11 @@ function AssetsView({ state, refreshState, embedded = false }: { state: OpenPres
   const readiness = (asset: typeof assets[number]) => {
     if (asset.status === "failed") return "Failed";
     if (asset.retention === "ephemeral") return "Temporary";
-    if (asset.status === "queued" || asset.status === "processing") return "Processing";
-    if (asset.archivedAt || (!asset.storage?.storeKey && !asset.storagePath && !asset.dataUrl && !asset.provenance.sourceUrl)) return "Unavailable";
-    if (asset.metadataReview?.status === "open") return "Needs review";
-    if (asset.metadataReview?.status === "resolved") return "Ready";
-    if (asset.perception?.observation && !asset.perception.uncertainty?.some((item) => /uncertain|insufficient|unknown|high|poor|incomplete|unreadable/i.test(item))) return "Ready";
+    const readiness = deriveAssetReadiness(state, asset);
+    if (readiness === "ready") return "Ready";
+    if (readiness === "processing") return "Processing";
+    if (readiness === "failed") return "Failed";
+    if (readiness === "unavailable") return "Unavailable";
     return "Needs review";
   };
   const eligibleForPresence = (asset: typeof assets[number]) => !presence || asset.accessScope?.mode !== "selected_presences" || asset.accessScope.presenceIds.includes(presence.id);
@@ -6626,10 +6607,9 @@ function AssetsView({ state, refreshState, embedded = false }: { state: OpenPres
   const postedAssetCooldown = (asset: typeof assets[number]) => assetPostingUnavailableUntil(state, asset, presence?.id);
   const readyCount = scopedAssets.filter((asset) => eligibleForPresence(asset) && !postedAssetCooldown(asset) && readiness(asset) === "Ready").length;
   const reviewCount = scopedAssets.filter((asset) => eligibleForPresence(asset) && !postedAssetCooldown(asset) && readiness(asset) === "Needs review").length;
-  const temporaryCount = scopedAssets.filter((asset) => asset.retention === "ephemeral").length;
   const usedCount = scopedAssets.filter((asset) => usage(asset.id) > 0).length;
   const unavailableCount = scopedAssets.filter((asset) => eligibleForPresence(asset) && Boolean(postedAssetCooldown(asset))).length;
-  const fileNameFor = (asset: typeof assets[number]) => asset.sourceOccurrences?.[0]?.fileName ?? asset.description ?? (isDiscoveredOnX(asset) ? "Discovered visual" : "Imported visual");
+  const fileNameFor = (asset: typeof assets[number]) => asset.sourceOccurrences?.[0]?.fileName ?? asset.description ?? "Imported visual";
   const titleFor = (asset: typeof assets[number]) => {
     const observationText = (asset.perception?.observation ?? perceptionFor(asset)?.result.observation)?.trim();
     if (!observationText) return asset.description?.trim() || fileNameFor(asset);
@@ -6665,11 +6645,7 @@ function AssetsView({ state, refreshState, embedded = false }: { state: OpenPres
   return <div className={`page assets-page${embedded ? " agent-settings-embedded-view" : ""}`}>
     <PageHeader eyebrow={`${agent?.name ?? "Agent"} · Visual memory`} title="Media" description={`Images, videos, and files for ${agent?.name ?? "your Agent"}.`} actions={<><input ref={fileInputRef} className="sandbox-file-input" type="file" accept="*/*" multiple aria-label="Upload assets" onChange={(event) => void upload(event.target.files)} /><Button type="button" variant="primary" onClick={() => fileInputRef.current?.click()} disabled={busy === "upload"}><Plus size={14} /> {busy === "upload" ? "Uploading…" : "Add media"}</Button></>} />
     {error && <div className="toast-error" role="alert"><CircleAlert size={16} /> {error}</div>}
-    <div className="media-source-toggle" role="group" aria-label="Media view">
-      <button type="button" className={mediaView === "about" ? "active" : ""} aria-pressed={mediaView === "about"} onClick={() => { setMediaView("about"); setResults(null); setSelectedId(null); }}><FolderOpen size={16} aria-hidden="true" /><span>Media library<small>User-added + intentionally saved · {aboutAssets.length}</small></span></button>
-      <button type="button" className={mediaView === "activity" ? "active" : ""} aria-pressed={mediaView === "activity"} onClick={() => { setMediaView("activity"); setResults(null); setSelectedId(null); }}><Globe2 size={16} aria-hidden="true" /><span>Recent discoveries<small>Agent working memory · {activityAssets.length}</small></span></button>
-    </div>
-    <details className="friendly-disclosure media-library-status"><summary>{scopedAssets.length} {scopedAssets.length === 1 ? "item" : "items"} · {temporaryCount ? `${temporaryCount} temporary` : `${readyCount} ready`}{reviewCount ? ` · ${reviewCount} need review` : ""}</summary><p>{mediaView === "activity" ? "Temporary evidence is inspected in post context and expires unless intentionally preserved." : `${unavailableCount} unavailable to publish · ${usedCount} used in verified publications`}</p></details>
+    <details className="friendly-disclosure media-library-status"><summary>{scopedAssets.length} {scopedAssets.length === 1 ? "item" : "items"} · {readyCount} ready{reviewCount ? ` · ${reviewCount} need review` : ""}</summary><p>{unavailableCount} unavailable to publish · {usedCount} used in verified publications. Web discoveries stay in post context unless the Agent intentionally keeps one for reuse.</p></details>
     <div className={`assets-layout ${!selected ? "assets-layout-empty" : ""}`}>
       <main className="assets-main">
         <section className="assets-panel assets-toolbar-panel">
@@ -6678,7 +6654,7 @@ function AssetsView({ state, refreshState, embedded = false }: { state: OpenPres
           <div className="asset-library-scope"><label>Folder<select aria-label="Asset folder" value={selectedCollectionId} onChange={(event) => { setSelectedCollectionId(event.target.value); setResults(null); setSelectedId(null); }}><option value="">All assets</option>{collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select></label><details className="asset-new-folder"><summary>New folder</summary><form className="asset-scope-create" onSubmit={(event) => void createCollection(event)}><label htmlFor="new-asset-folder">New folder</label><div><input id="new-asset-folder" aria-label="New asset folder" placeholder="e.g. Product launch" value={collectionName} onChange={(event) => setCollectionName(event.target.value)} /><Button type="submit" variant="secondary" disabled={!collectionName.trim() || busy === "createAssetCollection"}><Plus size={14} /> Create</Button></div></form></details></div>
           <div className="assets-summary"><span>{visibleAssets.length} shown</span>{results && <span className="assets-summary-filter">Search results</span>}<span>{agent?.name ?? "Agent"} · {presence?.name ?? "Active Presence"}</span>{selectedCollection && <span>Folder: {selectedCollection.name}</span>}</div>
         </section>
-        <section className="assets-panel" aria-labelledby="assets-library-title"><div className="assets-section-heading"><div><SectionEyebrow>{mediaView === "activity" ? "Working memory" : "Durable media"}</SectionEyebrow><h2 id="assets-library-title">{mediaView === "activity" ? "Recent discoveries" : `${agent?.name ?? "Agent"}'s media library`}</h2><p className="muted">{mediaView === "activity" ? "The Agent can inspect media attached to an X post while deciding what to do. These discoveries expire unless the Agent intentionally keeps one for a concrete reuse reason." : "User-added visuals and discoveries intentionally kept for future reference. Saved third-party media is reference-only until reuse is approved."}</p></div><div className="asset-library-heading-actions"><span className="asset-library-count">{visibleAssets.length} {visibleAssets.length === 1 ? "visual" : "visuals"}</span></div></div>
+        <section className="assets-panel" aria-labelledby="assets-library-title"><div className="assets-section-heading"><div><SectionEyebrow>Durable media</SectionEyebrow><h2 id="assets-library-title">{agent?.name ?? "Agent"}&apos;s media library</h2><p className="muted">User-added visuals and discoveries intentionally kept for future reference. Saved third-party media is reference-only until reuse is approved. Web images merely inspected during research are not collected here.</p></div><div className="asset-library-heading-actions"><span className="asset-library-count">{visibleAssets.length} {visibleAssets.length === 1 ? "visual" : "visuals"}</span></div></div>
           <div className="asset-card-grid">{visibleAssets.map((asset) => { const eligible = eligibleForPresence(asset); const unavailableUntil = postedAssetCooldown(asset); const availableForPosting = eligible && !unavailableUntil; return <button type="button" className={`asset-card ${selected?.id === asset.id ? "selected" : ""} ${!availableForPosting ? "asset-card-ineligible" : ""} ${unavailableUntil ? "asset-card-cooldown" : ""}`} key={asset.id} onClick={() => setSelectedId(asset.id)}><div className={`asset-card-preview ${unavailableUntil ? "asset-card-preview-cooldown" : ""}`}>{availableForPosting ? previewFor(asset, titleFor(asset)) : unavailableUntil ? <><div className="asset-card-preview-media">{previewFor(asset, titleFor(asset))}</div><div className="asset-card-preview-overlay" aria-hidden="true"><ShieldCheck size={22} /><span>Unavailable until {new Date(unavailableUntil).toLocaleDateString()}</span></div></> : <><ShieldCheck size={22} /><span>Unavailable to {presence?.name ?? "this Presence"}</span></>}</div><div className="asset-card-body"><div className="asset-card-topline"><strong title={fileNameFor(asset)}>{titleFor(asset)}</strong><span className={`asset-status asset-status-${(availableForPosting ? readiness(asset) : "Unavailable").toLowerCase().replaceAll(" ", "-")}`}>{availableForPosting ? readiness(asset) : "Unavailable"}</span></div><p>{unavailableUntil ? `Published by ${presence?.name ?? "this Presence"}; held from posting until ${new Date(unavailableUntil).toLocaleDateString()}.` : eligible ? (asset.perception?.observation ?? "Asset metadata is waiting for review.") : "This visual is Agent-owned but outside the active Presence scope."}</p><small>{fileNameFor(asset)} · Used {usage(asset.id)}×</small></div></button>; })}{!visibleAssets.length && <div className={`assets-empty ${assets.length ? "assets-empty-filtered" : "assets-empty-first-run"}`}><div className="assets-empty-mark"><Layers size={24} strokeWidth={1.7} /></div><div className="assets-empty-copy"><strong>{assets.length ? "No assets match that search" : `No assets for ${agent?.name ?? "this Agent"} yet`}</strong><p>{assets.length ? "Try a different search, or clear the filter." : `Add assets so ${agent?.name ?? "this Agent"} can find the right visual when a post needs one.`}</p></div>{!assets.length && <div className="assets-empty-actions"><Button type="button" variant="primary" onClick={() => fileInputRef.current?.click()}><Plus size={14} /> Add assets</Button><Button type="button" variant="secondary" onClick={() => folderInputRef.current?.click()}><FolderOpen size={14} /> Choose a folder</Button></div>}</div>}</div>
         </section>
         <details className="friendly-disclosure"><summary>Import a folder</summary>        <section className="assets-panel"><div className="assets-section-heading"><div><SectionEyebrow>Add assets{selectedCollection ? ` to ${selectedCollection.name}` : ` to ${agent?.name ?? "this Agent"}`}</SectionEyebrow><h2>Choose a folder</h2><p className="muted">Select a folder from your computer. Its images are copied into this Agent&apos;s library and analyzed with vision so the Agent can reuse them when creating posts.</p></div><FolderOpen size={20} /></div>{importProgressPanel}<form className="asset-folder-form" onSubmit={(event) => void connectFolder(event)}><input ref={folderInputRef} className="sandbox-file-input" type="file" accept="*/*" multiple aria-label="Choose a folder of assets" onChange={(event) => { selectFolder(event.target.files); event.target.value = ""; }} {...({ webkitdirectory: "", directory: "" } as unknown as React.InputHTMLAttributes<HTMLInputElement>)} /><div className={`asset-folder-picker ${selectedFolderFiles.length ? "selected" : ""}`}><FolderOpen size={18} /><span><strong>{selectedFolderName || "No folder selected"}</strong><small>{selectedFolderFiles.length ? `${selectedFolderFiles.length} asset${selectedFolderFiles.length === 1 ? "" : "s"} ready to add` : "Click Choose folder to browse your computer"}</small></span><Button type="button" variant="secondary" onClick={() => folderInputRef.current?.click()} disabled={busy === "folder"}><FolderOpen size={14} /> Choose folder</Button></div><label>Vision analysis<select value={policy} onChange={(event) => setPolicy(event.target.value as typeof policy)}><option value="analyze-new">Analyze new files</option><option value="analyze-existing-and-new">Analyze all files</option></select></label><Button type="submit" variant="secondary" disabled={busy === "folder" || !selectedFolderFiles.length}>{busy === "folder" ? "Adding…" : "Add folder"}</Button></form></section></details>
@@ -7295,14 +7271,14 @@ function OperatorChatActionTimelineEvent({ event }: { event: OperatorConversatio
   </div>;
 }
 
-function OperatorChatAttachmentPreview({ attachments, heading = "Image to review", detail = "Use it only if it strengthens the post" }: { attachments: PresenceChatAttachment[]; heading?: string; detail?: string }) {
+function OperatorChatAttachmentPreview({ attachments, heading = "Image to review", detail = "Use it only if it strengthens the post", compact = false }: { attachments: PresenceChatAttachment[]; heading?: string; detail?: string; compact?: boolean }) {
   const visualAttachments = attachments.filter((attachment) => ["image", "gif", "chart"].includes(attachment.kind));
   if (!visualAttachments.length) return null;
-  return <section className="operator-chat-decision-media" aria-label="Image available for this decision" data-testid="operator-chat-decision-media">
-    <div className="operator-chat-decision-media-heading">
+  return <section className={`operator-chat-decision-media${compact ? " is-compact" : ""}`} aria-label="Image available for this decision" data-testid="operator-chat-decision-media">
+    {!compact && <div className="operator-chat-decision-media-heading">
       <strong>{heading}</strong>
       <span>{detail}</span>
-    </div>
+    </div>}
     <div className="operator-chat-decision-media-grid">
       {visualAttachments.map((attachment) => {
         const source = attachment.existingAssetId
@@ -7310,7 +7286,7 @@ function OperatorChatAttachmentPreview({ attachments, heading = "Image to review
           : attachment.dataUrl ?? attachment.sourceUrl;
         return <figure key={attachment.id} className="operator-chat-decision-media-item">
           {source ? <img src={source} alt={attachment.name} /> : <div className="operator-chat-decision-media-missing">Preview unavailable</div>}
-          <figcaption>{attachment.name}</figcaption>
+          {!compact && <figcaption>{attachment.name}</figcaption>}
         </figure>;
       })}
     </div>
@@ -7332,44 +7308,46 @@ function executionReviewAttachments(state: OpenPresenceState, execution: OpenPre
   });
 }
 
-function OperatorChatMessageBody({ message, state, mutate, onOpenReview }: { message: OperatorConversationMessage; state: OpenPresenceState; mutate: Mutate; onOpenReview?: () => void }) {
+function OperatorChatMessageBody({ message, state, mutate, reviewExecutionIds: visibleReviewIds }: { message: OperatorConversationMessage; state: OpenPresenceState; mutate: Mutate; onOpenReview?: () => void; reviewExecutionIds?: string[] }) {
+  const [reviewingExecutionId, setReviewingExecutionId] = useState<string>();
   const receipt = chatToolReceipt(message);
   if (receipt) {
-    const result = Array.isArray(receipt.result) ? receipt.result.map((item) => {
-      if (!item || typeof item !== "object") return item;
-      const execution = state.executions.find((candidate) => candidate.id === item.executionId);
-      return execution ? { ...item, status: execution.status, failure: execution.failure, verified: execution.status === "succeeded" && state.outcomes.some((outcome) => outcome.executionId === execution.id && outcome.status === "succeeded") } : item;
-    }) : receipt.result;
+    const projectExecution = (item: unknown) => {
+      if (!item || typeof item !== "object" || !("executionId" in item)) return item;
+      const execution = state.executions.find((candidate) => candidate.id === item.executionId && candidate.presenceId === state.presence?.id);
+      return execution ? { ...item, status: execution.status, reviewReason: execution.reviewReason, failure: execution.failure, verified: execution.status === "succeeded" && state.outcomes.some((outcome) => outcome.executionId === execution.id && outcome.socialIntentId === execution.socialIntentId && outcome.presenceId === execution.presenceId && outcome.status === "succeeded" && outcome.environment === execution.environment && outcome.sessionId === execution.sessionId) } : item;
+    };
+    const result = Array.isArray(receipt.result) ? receipt.result.map(projectExecution) : projectExecution(receipt.result);
     const activity = toolActivitySummary({ ...receipt, result });
-    const reviewExecutionIds = Array.isArray(result)
-      ? result.flatMap((item) => item && typeof item === "object" && "executionId" in item && typeof item.executionId === "string" ? [item.executionId] : [])
-      : [];
+    const reviewExecutionIds = (Array.isArray(result) ? result : [result]).flatMap((item) => item && typeof item === "object" && "executionId" in item && typeof item.executionId === "string" ? [item.executionId] : []);
     const reviewExecutions = reviewExecutionIds
-      .map((executionId) => state.executions.find((execution) => execution.id === executionId))
-      .filter((execution): execution is OpenPresenceState["executions"][number] => execution?.status === "awaiting-review");
-    return <details className="operator-chat-tool" data-testid="operator-chat-tool">
-      <summary><span className={`operator-chat-tool-icon${activity.failed ? " is-failed" : ""}`} aria-hidden="true">{activity.failed ? <CircleAlert size={15} /> : ["Awaiting verification", "Needs review"].includes(activity.status) ? <Clock3 size={15} /> : <Check size={15} />}</span><span className="operator-chat-tool-title">{activity.title}</span><span className="operator-chat-tool-status">{activity.status}</span><time dateTime={message.timestamp}>{formatTime(message.timestamp)}</time><ChevronDown size={13} className="operator-chat-tool-chevron" aria-hidden="true" /></summary>
-      <div className="operator-chat-tool-result">
-        <p>{activity.summary}</p>
-        {activity.limit && <p className="operator-chat-tool-limit">{activity.limit}</p>}
-        {reviewExecutions.map((execution) => {
+      .map((executionId) => state.executions.find((execution) => execution.id === executionId && execution.presenceId === state.presence?.id))
+      .filter((execution): execution is OpenPresenceState["executions"][number] => Boolean(execution?.publication));
+    const hasPendingPublication = reviewExecutions.some(execution => execution.status === "awaiting-review");
+    const toolHeading = <><span className={`operator-chat-tool-icon${activity.failed ? " is-failed" : ""}`} aria-hidden="true">{activity.failed ? <CircleAlert size={15} /> : ["Awaiting verification", "Needs review", "Ready to send", "Sending"].includes(activity.status) ? <Clock3 size={15} /> : <Check size={15} />}</span><span className="operator-chat-tool-title">{activity.title}</span><span className="operator-chat-tool-status">{activity.status}</span><time dateTime={message.timestamp}>{formatTime(message.timestamp)}</time></>;
+    const toolResult = <div className="operator-chat-tool-result"><p>{activity.summary}</p>{activity.limit && <p className="operator-chat-tool-limit">{activity.limit}</p>}<details className="operator-chat-technical"><summary>Technical details</summary><pre>{JSON.stringify({ ...receipt, result }, null, 2)}</pre></details></div>;
+    return <>{!hasPendingPublication && (activity.status === "Needs review" ? <section className="operator-chat-tool is-review" data-testid="operator-chat-tool"><div className="operator-chat-tool-heading">{toolHeading}</div>{toolResult}</section> : <details className="operator-chat-tool" data-testid="operator-chat-tool">
+      <summary>{toolHeading}<ChevronDown size={13} className="operator-chat-tool-chevron" aria-hidden="true" /></summary>
+      {toolResult}
+    </details>)}
+        {reviewExecutions.filter((execution) => !visibleReviewIds || visibleReviewIds.includes(execution.id)).map((execution) => {
           const attachments = executionReviewAttachments(state, execution);
+          const needsReview = execution.status === "awaiting-review";
+          const verified = execution.status === "succeeded" && state.outcomes.some(outcome => outcome.executionId === execution.id && outcome.socialIntentId === execution.socialIntentId && outcome.presenceId === execution.presenceId && outcome.status === "succeeded" && outcome.environment === execution.environment && outcome.sessionId === execution.sessionId);
           const proposedText = execution.publication?.payload && typeof execution.publication.payload === "object" && "text" in execution.publication.payload && typeof execution.publication.payload.text === "string" ? execution.publication.payload.text : undefined;
-          return <section className="operator-chat-review-card" key={execution.id} data-testid="operator-chat-publication-review">
-            <div className="operator-chat-review-heading"><strong>{attachments.length ? "Review image and approve publication" : "Review and approve publication"}</strong><span>Needs you</span></div>
+          return <section className="operator-chat-review-card" key={execution.id} data-testid={needsReview ? "operator-chat-publication-review" : "operator-chat-publication-preview"}>
+            <div className="operator-chat-review-heading"><strong>{needsReview ? "Review post" : "Saved publication"}</strong><span>{needsReview ? "Needs review" : verified ? "Verified" : ["failed", "blocked", "cancelled", "expired"].includes(execution.status) ? "Not completed" : "Not yet verified"}</span></div>
             {proposedText && <blockquote>{proposedText}</blockquote>}
-            {attachments.length > 0 && <OperatorChatAttachmentPreview attachments={attachments} heading="Image to review" detail="This exact media is attached to the proposed publication" />}
-            <p className="operator-chat-review-reason">{execution.reviewReason ?? "The Presence is waiting for your approval before delivery."}</p>
-            <div className="operator-chat-review-actions">
-              <Button type="button" variant="primary" data-testid={`operator-chat-approve-${execution.id}`} onClick={() => void mutate({ type: "approveExecution", id: execution.id })}>Approve publication</Button>
-              <Button type="button" variant="secondary" data-testid={`operator-chat-cancel-${execution.id}`} onClick={() => void mutate({ type: "cancelExecution", id: execution.id })}>Cancel</Button>
-              {onOpenReview && <Button type="button" variant="ghost" onClick={onOpenReview}>Open Review</Button>}
-            </div>
+            {attachments.length > 0 && <OperatorChatAttachmentPreview attachments={attachments} heading="Selected image" compact />}
+            {needsReview && <p className="operator-chat-review-reason">{!execution.reviewReason || /visual metadata|Selected media needs your review/i.test(execution.reviewReason) ? "Approve to publish this post." : execution.reviewReason}</p>}
+            {needsReview && <div className="operator-chat-review-actions">
+              <Button type="button" variant="primary" data-testid={`operator-chat-approve-${execution.id}`} disabled={Boolean(reviewingExecutionId)} onClick={() => { setReviewingExecutionId(execution.id); void mutate({ type: "approveExecution", id: execution.id }).finally(() => setReviewingExecutionId(undefined)); }}>{reviewingExecutionId === execution.id ? "Approving…" : "Approve publication"}</Button>
+              <Button type="button" variant="secondary" data-testid={`operator-chat-cancel-${execution.id}`} disabled={Boolean(reviewingExecutionId)} onClick={() => void mutate({ type: "cancelExecution", id: execution.id })}>Cancel</Button>
+            </div>}
+            {needsReview && <details className="operator-chat-technical"><summary>Technical details</summary><pre>{JSON.stringify({ ...receipt, result }, null, 2)}</pre></details>}
           </section>;
         })}
-        <details className="operator-chat-technical"><summary>Technical details</summary><pre>{JSON.stringify({ ...receipt, result }, null, 2)}</pre></details>
-      </div>
-    </details>;
+    </>;
   }
   const inspection = message.role === "presence" ? legacyInspectionEvidence(message.content) : undefined;
   if (inspection) return <div className="operator-chat-inspection" data-testid="operator-chat-inspection"><p>{inspectionReportSummary(inspection)}</p><details className="operator-chat-technical"><summary>Saved evidence</summary><pre>{JSON.stringify(inspection, null, 2)}</pre></details></div>;
@@ -7391,6 +7369,9 @@ function operatorChatWorkLabel(stage: string | undefined) {
   if (stage === "operator_chat.inspect_execution") return "Verifying delivery";
   if (stage === "operator_chat.refresh_channel") return "Refreshing channel evidence";
   if (stage === "operator_chat.search_posts") return "Searching posts";
+  if (stage === "operator_chat.search_web") return "Searching public sources";
+  if (stage === "operator_chat.read_web") return "Reading a public source";
+  if (stage === "operator_chat.continuing") return "Continuing your request automatically · gathered evidence is saved";
   if (stage === "operator_chat.inspect_post") return "Reading the post you shared";
   if (stage === "operator_chat.watch") return "Saving your watch";
   if (stage === "operator_chat.assignment") return "Creating the responsibility";
@@ -7706,7 +7687,7 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const mediaDialogRef = useRef<HTMLDialogElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
-  const availableMedia = state.assets.filter((asset) => asset.agentId === state.agent?.id && asset.provenance.origin.toLowerCase() === "operator_upload" && ["image", "gif"].includes(asset.type) && asset.status === "ready" && !asset.archivedAt && (asset.accessScope?.mode === "all_agent_presences" || (asset.accessScope?.mode === "selected_presences" ? asset.accessScope.presenceIds.includes(presence.id) : !asset.presenceId || asset.presenceId === presence.id)) && (!asset.environment || asset.environment === (presence.environment ?? "live")));
+  const availableMedia = state.assets.filter((asset) => (asset.publicationAvailability?.presenceId === presence.id ? asset.publicationAvailability.available : assetIsAvailableForPublication(state, asset, presence.id)) && asset.agentId === state.agent?.id && isLibraryAsset(asset) && asset.provenance.origin.toLowerCase() === "operator_upload" && ["image", "gif"].includes(asset.type) && !asset.archivedAt && (asset.accessScope?.mode === "all_agent_presences" || (asset.accessScope?.mode === "selected_presences" ? asset.accessScope.presenceIds.includes(presence.id) : !asset.presenceId || asset.presenceId === presence.id)) && (!asset.environment || asset.environment === (presence.environment ?? "live")));
   useEffect(() => { if (mediaPickerOpen) mediaDialogRef.current?.showModal(); else mediaDialogRef.current?.close(); }, [mediaPickerOpen]);
 
   const endRef = useRef<HTMLDivElement>(null);
@@ -7842,9 +7823,20 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
             ? item.attachments?.length ? item.attachments : repliedToMessage?.attachments ?? []
             : [];
           const receiptAttachments = item.attachments?.filter((attachment) => !decisionAttachments.some((decisionAttachment) => decisionAttachment.id === attachment.id)) ?? [];
+          const ownedPublicationIds = state.executions.filter((execution) => execution.presenceId === presence.id && execution.publication && visibleMessages.find((candidate) => {
+              const candidateReceipt = chatToolReceipt(candidate);
+              const results = Array.isArray(candidateReceipt?.result) ? candidateReceipt.result : candidateReceipt?.result ? [candidateReceipt.result] : [];
+              return results.some((result) => result && typeof result === "object" && "executionId" in result && result.executionId === execution.id);
+            })?.id === item.id).map((execution) => execution.id);
+          const receiptResults = receipt ? Array.isArray(receipt.result) ? receipt.result : [receipt.result] : [];
+          const duplicatePendingReview = receiptResults.length > 0 && receiptResults.every(result => {
+            if (!result || typeof result !== "object" || !("executionId" in result)) return false;
+            return state.executions.some(execution => execution.id === result.executionId && execution.presenceId === presence.id && execution.publication && execution.status === "awaiting-review");
+          }) && ownedPublicationIds.length === 0;
+          if (duplicatePendingReview && !anchoredAssignment && !anchoredActions.length && !receiptAttachments.length) return null;
           return <Fragment key={item.id}><article className={`operator-chat-message is-${item.role}${isToolActivity ? " is-tool-activity" : ""}`}>
             {!isToolActivity && <div className="operator-chat-message-meta"><strong>{item.role === "operator" ? "You" : item.role === "presence" ? presence.name : "OpenPresence"}</strong><span>{formatTime(item.timestamp)}</span></div>}
-            <OperatorChatMessageBody message={item} state={state} mutate={mutate} onOpenReview={() => setView("review")} />
+            <OperatorChatMessageBody message={item} state={state} mutate={mutate} onOpenReview={() => setView("review")} reviewExecutionIds={ownedPublicationIds} />
             {acknowledgedReaction && <OperatorChatReaction reaction={acknowledgedReaction} />}
             {item.role === "presence" && decisionAttachments.length ? <OperatorChatAttachmentPreview attachments={decisionAttachments} heading={item.choices?.length ? "Image to review" : "Attached artifact"} detail={item.choices?.length ? "Use it only if it strengthens the post" : "Recovered from the Agent’s authorized artifact library"} /> : null}
             {item.role === "presence" && item.choices?.length ? <div className="operator-chat-choices" role="group" aria-label="Choose an option">{item.choices.map((choice, index) => {
@@ -7852,7 +7844,9 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
               const selected = allVisibleMessages.some((message) => message.clientRequestId?.startsWith(`choice:${item.id}:`));
               return <button type="button" key={requestId} disabled={selected} onClick={() => outbox.enqueue({ id: `pending_${requestId}`, role: "operator", content: `I choose “${choice.label}” from your previous options. Keep the existing constraints.\n\n${choice.content}`, timestamp: new Date().toISOString(), clientRequestId: requestId, threadId: operatorThread.id, inputAttachments: [] })}>{choice.label}{allVisibleMessages.some((message) => message.clientRequestId === requestId) ? " · Selected" : ""}</button>;
             })}</div> : null}
-            {failedChatRun && <div className="operator-chat-message-actions operator-chat-retry-actions" role="status"><span className="operator-chat-retry-label">Response not completed</span><button type="button" className="operator-chat-retry-button" disabled={Boolean(activeOperatorRun)} onClick={() => void mutate({ type: "retryOperatorChat", presenceId: presence.id, messageId: item.id })}><RotateCcw size={13} aria-hidden="true" /> Retry response</button></div>}
+            {failedChatRun && <div className="operator-chat-message-actions operator-chat-retry-actions" role="status"><span className="operator-chat-retry-label">{chatRetryNeedsProviderAction(state, presence.id) ? "Model provider needs attention" : "Response not completed"}</span>{chatRetryNeedsProviderAction(state, presence.id)
+              ? <button type="button" className="operator-chat-retry-button" onClick={() => setView("brain")}>Open Provider access</button>
+              : <button type="button" className="operator-chat-retry-button" disabled={Boolean(activeOperatorRun)} onClick={() => void mutate({ type: "retryOperatorChat", presenceId: presence.id, messageId: item.id })}><RotateCcw size={13} aria-hidden="true" /> Retry response</button>}</div>}
             {item.role === "operator" && <OperatorChatLinkPreview content={item.content} />}
             {receiptAttachments.length ? <div className="operator-chat-attachments chat-media-receipts">{receiptAttachments.map((attachment) => <div key={attachment.id}>{["image", "gif", "chart"].includes(attachment.kind) && (attachment.existingAssetId || attachment.dataUrl) ? <img src={attachment.existingAssetId ? `/api/assets/${encodeURIComponent(attachment.existingAssetId)}` : attachment.dataUrl} alt={attachment.name} /> : <FileText size={22} />}<span>{attachment.name}</span></div>)}</div> : null}
             {item.role === "operator" && nudge && <div className="operator-chat-message-actions">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status) && <span className={`operator-nudge-status is-${nudge.status}`} role="status">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status)}</span>}{nudge.status === "failed" && !nudge.privateConversation && !nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "retryPresenceNudge", presenceId: presence.id, nudgeId: nudge.id })}>Retry look</button>}{!nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "createAssignmentFromNudge", presenceId: presence.id, nudgeId: nudge.id })}>Take this on</button>}</div>}
@@ -7913,12 +7907,12 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
     <dialog ref={mediaDialogRef} className="chat-media-dialog" aria-labelledby="chat-media-title" onCancel={() => setMediaPickerOpen(false)} onClose={() => setMediaPickerOpen(false)}>
       <div className="chat-media-heading"><div><h2 id="chat-media-title">Add an image</h2><p>Upload a new image, or choose one you added to the Media library.</p></div><button type="button" aria-label="Close media picker" onClick={() => setMediaPickerOpen(false)}><X size={20} /></button></div>
       <button type="button" className="button" onClick={() => { setMediaPickerOpen(false); uploadInputRef.current?.click(); }}><Plus size={18} /> Upload an image</button>
-      <h3>Your uploaded images</h3>
-      <div className="chat-media-grid">{availableMedia.map((asset) => { const readiness = deriveAssetReadiness(state, asset); const readinessLabel = readiness === "ready" ? "Ready to use" : readiness === "processing" ? "Processing visual metadata" : "Needs visual review"; return <button type="button" key={asset.id} disabled={attachments.length >= 12 || attachments.some((item) => item.existingAssetId === asset.id)} title={readiness === "ready" ? undefined : "Available for private context; public publishing waits until visual metadata is resolved."} onClick={() => {
+      <h3>Available uploaded images</h3>
+      <div className="chat-media-grid">{availableMedia.map((asset) => { const readiness = deriveAssetReadiness(state, asset); const readinessLabel = readiness === "ready" ? "Ready to use" : readiness === "processing" ? "Processing visual metadata" : readiness === "needs_review" ? "Needs visual review" : "Unavailable"; return <button type="button" key={asset.id} disabled={attachments.length >= 12 || attachments.some((item) => item.existingAssetId === asset.id)} title={readiness === "ready" ? undefined : "Available for private context; public publishing may need review."} onClick={() => {
         setAttachments((items) => [...items, { name: (asset.description ?? `${asset.type} attachment`).slice(0, 160), kind: asset.type === "chart" ? "image" : asset.type === "pdf" ? "document" : asset.type, existingAssetId: asset.id }]);
         setMediaPickerOpen(false); composerRef.current?.focus();
       }}><AssetMediaPreview asset={asset} alt={asset.description ?? asset.type} source={asset.storage?.storeKey || asset.storagePath ? `/api/assets/${asset.id}` : asset.dataUrl ?? asset.provenance.sourceUrl} /><span>{asset.description ?? asset.type}</span><small className={`chat-media-readiness is-${readiness}`}>{readinessLabel}</small></button>; })}</div>
-      {!availableMedia.length && <p>No uploaded images yet. Add one in Media, then it will appear here.</p>}
+      {!availableMedia.length && <p>No uploaded images are available for a new post. Upload another image or review your library in Media.</p>}
     </dialog>
   </div>;
 }
@@ -11933,7 +11927,7 @@ function FailedAttemptsReview({
     const payloadText = payload && typeof payload === "object" && !Array.isArray(payload) && "text" in payload && typeof payload.text === "string" ? payload.text : undefined;
     return execution.publication?.publicExpression?.text ?? payloadText ?? object?.content?.text ?? "No expression text was recorded.";
   };
-  const routeLabel = (execution: OpenPresenceState["executions"][number]) => execution.connector === "bridge" ? "Browser capability fallback" : execution.connector === "native" ? "Native X API" : "Connector not recorded";
+  const routeLabel = (execution: OpenPresenceState["executions"][number]) => execution.connector === "bridge" ? "Signed-in browser" : execution.connector === "native" ? "Native X API" : "Connector not recorded";
   const browserFailures = failedExecutions.filter((e) => e.connector === "bridge" || /composer|input failed|dom|extension/i.test(e.failure?.message || ""));
   const rateLimitFailures = failedExecutions.filter((e) => /429|rate limit|too many requests/i.test(e.failure?.message || ""));
   const authFailures = failedExecutions.filter((e) => /auth|session expired|login required/i.test(e.failure?.message || ""));
@@ -12347,8 +12341,8 @@ function ExecutionQueueSummary({
       : `${verificationPending} action${verificationPending === 1 ? " is" : "s are"} waiting for the channel to verify the public result.`
     : bridgePending > 0
     ? bridgeStatus === "connected"
-      ? `${bridgePending} browser fallback action${bridgePending === 1 ? " is" : "s are"} waiting for the next browser check${nextQueueCountdown ? ` in ${nextQueueCountdown}` : ""}.`
-      : `${bridgePending} browser fallback action${bridgePending === 1 ? " is" : "s are"} waiting because the browser is ${bridgeIdentityPending ? "connected but the signed-in account is not verified" : bridge ? bridgeStatus === "stale" ? "stale" : "not checked in" : "not connected"}.`
+      ? `${bridgePending} browser-routed action${bridgePending === 1 ? " is" : "s are"} waiting for the next browser check${nextQueueCountdown ? ` in ${nextQueueCountdown}` : ""}.`
+      : `${bridgePending} browser-routed action${bridgePending === 1 ? " is" : "s are"} waiting because the browser is ${bridgeIdentityPending ? "connected but the signed-in account is not verified" : bridge ? bridgeStatus === "stale" ? "stale" : "not checked in" : "not connected"}.`
     : connectorlessPending > 0
       ? `${connectorlessPending} action${connectorlessPending === 1 ? " is" : "s are"} waiting for an authorized connector.`
       : nativePending > 0
@@ -12364,12 +12358,12 @@ function ExecutionQueueSummary({
       </div>
       <div className="execution-queue-counts" aria-label="Queue counts by route">
         <span className="execution-queue-count execution-queue-count-native"><span aria-hidden="true" />Native X · {nativePending}</span>
-        <span className="execution-queue-count execution-queue-count-bridge"><span aria-hidden="true" />Browser capability fallback · {bridgePending}</span>
+        <span className="execution-queue-count execution-queue-count-bridge"><span aria-hidden="true" />Signed-in browser · {bridgePending}</span>
         <span className="execution-queue-count execution-queue-count-review"><span aria-hidden="true" />Verifying on X · {verificationPending}</span>
         <span className="execution-queue-count execution-queue-count-review"><span aria-hidden="true" />Needs review · {reviewPending}</span>
       </div>
       <p>{queueDetail}</p>
-      {bridgePending > 0 && <small>Native access handles the normal route. The browser fallback is used for actions this Presence has learned cannot be completed natively.</small>}
+      {bridgePending > 0 && <small>The X API and signed-in browser are both execution tools. The Agent can select either per action; saved route knowledge helps avoid repeating known failures.</small>}
       {nativePending > 0 && <small>One queued Native X action is processed per Check now or automatic attention cycle.</small>}
       {verificationBlockedByCredits && <small>X verification will not retry while credits are exhausted. Restore X API access, then use Check X outcomes; no reply is being retried from this state.</small>}
       {canCheckX && staleXReplies.length > 0 && (
@@ -12377,7 +12371,7 @@ function ExecutionQueueSummary({
           <div className="execution-queue-action-row">
             <div>
               <strong>Reconcile unresolved X replies</strong>
-              <small>The channel connector checks the exact account, target, and expression before changing any status. This checks both native and browser fallback attempts.</small>
+              <small>The channel connector checks the exact account, target, and expression before changing any status. This checks actions sent through either the X API or signed-in browser.</small>
             </div>
             <div className="execution-queue-action-buttons">
               <button type="button" className="execution-queue-action-button" disabled={reconcileMode !== "idle"} aria-busy={reconcileMode !== "idle"} onClick={() => void reconcileX(false)}>
@@ -16293,7 +16287,7 @@ function ChromeConnectionPanel({
       {launchFeedback && <div className={`connection-feedback ${launchFeedback.tone === "error" ? "is-error" : "is-success"}`} role={launchFeedback.tone === "error" ? "alert" : "status"}>{launchFeedback.message}</div>}
       <div className="chrome-connection-status" role="status">
         <span className={`live-pill ${connected && !identityMismatch && !identityUnknown ? "" : "paused"}`}><span className="status-dot" /> {status}</span>
-        <span className="chrome-connection-status-copy">{!extensionEnabled ? "Enable browser hands for this Presence when an action needs them." : identityMismatch ? `${activeBridge?.accountIdentity?.message ?? `X is signed in to the wrong account.`} No live work can be claimed until ${presence.handle} is signed in.` : identityUnknown ? `${activeBridge?.accountIdentity?.message ?? `The controlled browser is live, but ${presence.handle} has not been verified.`} Delivery will resume automatically after account verification.` : connected ? `The controlled browser is connected as ${presence.handle} and ready when a browser fallback is learned or needed.` : activeBridge?.lastHeartbeatAt ? `The server last received a Chrome heartbeat at ${formatTime(activeBridge.lastHeartbeatAt)}. This session is disconnected or stale; open controlled Chrome to reconnect it.` : activeBridge ? "A controlled session is registered, but the server has not received a heartbeat. Open controlled Chrome to reconnect it." : "Chrome hands are enabled, but no controlled Chrome session is open. Click Open controlled Chrome to connect."}</span>
+        <span className="chrome-connection-status-copy">{!extensionEnabled ? "Enable browser access for this Presence so the Agent can use the browser as an X tool." : identityMismatch ? `${activeBridge?.accountIdentity?.message ?? `X is signed in to the wrong account.`} No live work can be claimed until ${presence.handle} is signed in.` : identityUnknown ? `${activeBridge?.accountIdentity?.message ?? `The controlled browser is live, but ${presence.handle} has not been verified.`} Delivery will resume automatically after account verification.` : connected ? `The controlled browser is connected as ${presence.handle} and available as an X tool alongside the API.` : activeBridge?.lastHeartbeatAt ? `The server last received a Chrome heartbeat at ${formatTime(activeBridge.lastHeartbeatAt)}. This session is disconnected or stale; open controlled Chrome to reconnect it.` : activeBridge ? "A controlled session is registered, but the server has not received a heartbeat. Open controlled Chrome to reconnect it." : "Chrome access is enabled, but no controlled Chrome session is open. Click Open controlled Chrome to connect."}</span>
         {activeBridge && <Button type="button" variant="ghost" disabled={refreshing} onClick={() => void refresh()}><RotateCcw size={13} /> {refreshing ? "Refreshing…" : "Refresh status"}</Button>}
       </div>
       <small className="chrome-connection-safety"><ShieldCheck size={13} /> No account credentials are stored in OpenPresence or the extension. Before a write, the tab checks the selected account and verifies the resulting post.</small>

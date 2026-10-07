@@ -20,6 +20,16 @@ describe("Social Strategy Intelligence", () => {
     expect(empty.retrievalRun.noPatternReason).toContain("No Playbook pattern");
   });
 
+  it("offers invite-expertise for an original unresolved question while preserving its fit boundaries", () => {
+    const state = createAgent(input);
+    const context = compileSocialStrategyContext(state, state.presence!, { invocation: "test", objective: "Ask a concrete unresolved question so builders can exchange expertise", availableActions: ["original_post"] });
+    const pattern = context.retrievalRun.consideredPatterns.find(item => item.id === "social.x.v1.invite-expertise");
+    expect(pattern?.supportedActs).toContain("original_post");
+    expect(pattern?.usefulConditions).toContain("a real unresolved question is present");
+    expect(pattern?.weakConditions).toContain("the question is rhetorical");
+    expect(context.retrievalRun.consideredPatterns.some(item => item.id === "social.x.v1.quiet-appreciation")).toBe(false);
+  });
+
   it("keeps legacy playbook prose advisory and filters invented strategy IDs", () => {
     const state = createAgent(input);
     state.channelDefinitions[0]!.playbook = "Legacy channel guidance stays prose.";
@@ -121,9 +131,9 @@ describe("Social Strategy Intelligence", () => {
       sandboxSessionId: "session-1",
       createdAt: new Date().toISOString(),
     } satisfies GrowthEvidenceRecord));
-    applyGrowthHypothesisActions(state, presenceId, "review-1", [{ action: "support", hypothesisId, evidenceIds: ["outcome-1"] }]);
+    applyGrowthHypothesisActions(state, presenceId, "review-1", [{ action: "support", hypothesisId, evidenceIds: ["outcome-1"] }], new Date().toISOString(), "session-1");
     expect(state.growthHypotheses[0]?.status).toBe("weakened");
-    applyGrowthHypothesisActions(state, presenceId, "review-2", [{ action: "support", hypothesisId, evidenceIds: ["outcome-1", "outcome-2"] }]);
+    applyGrowthHypothesisActions(state, presenceId, "review-2", [{ action: "support", hypothesisId, evidenceIds: ["outcome-1", "outcome-2"] }], new Date().toISOString(), "session-1");
     expect(state.growthHypotheses[0]?.status).toBe("supported");
   });
 

@@ -1,0 +1,23 @@
+{
+  "schema": "openpresence.v2.contract-cases.v1",
+  "cases": [
+    {"id":"discovery", "invariant":"Actual initialize, tools/list and resources/read succeed; skill version is retrievable; supported tool names match callable schemas."},
+    {"id":"no-authority", "invariant":"No MCP tool can publish, send, schedule host work, or enable the standalone worker."},
+    {"id":"authentication", "invariant":"Missing, malformed, expired and revoked credentials disclose no private tool/resource data."},
+    {"id":"tenant-isolation", "invariant":"One authorized identity cannot select, infer or mutate another identity's workspace through tool args, resources, receipts or errors."},
+    {"id":"schema-error", "invariant":"Malformed inputs fail explicitly without writes or provider requests."},
+    {"id":"conflict", "invariant":"Stale expectedRevision cannot overwrite a newer confirmed profile."},
+    {"id":"idempotency", "invariant":"Identical retried writes produce one persisted mutation; reusing a key with a changed payload fails explicitly."},
+    {"id":"restart", "invariant":"Profile, scope, feedback, voice history and host-plan references survive process/database reopen."},
+    {"id":"scope", "invariant":"A channel-only voice correction affects no other channel and does not rewrite host private identity."},
+    {"id":"undo", "invariant":"Restoring a previous voice produces an auditable revision and restores exactly the selected scoped values."},
+    {"id":"schedule-truth", "invariant":"Growth recommendation lacks confirmed task status until a host receipt exists; cancellation is reconciled without rescheduling."},
+    {"id":"receipt-truth", "invariant":"Host-reported publication remains reported; queued state never becomes published; self-supplied verified flags cannot create independently verified outcome."},
+    {"id":"private-knowledge", "invariant":"Internal-only sources are excluded from public context before tool results are constructed."},
+    {"id":"provider-unavailable", "invariant":"An unavailable Evidence8 service reports its failure without invented visuals, pixels, source claims or readiness."},
+    {"id":"provenance", "invariant":"Visual candidates retain publisher/source/date and unknown interpretation or rights; metadata completeness never implies inspection."},
+    {"id":"learning-lineage", "invariant":"Outcome observations retain age, scope, source and evidence type; unverified host observations never silently become confirmed world evidence."},
+    {"id":"contradiction", "invariant":"Conflicting observations remain inspectable; empirical strategy changes do not rewrite identity/Taste."},
+    {"id":"holdout-separation", "invariant":"Only inputs.json can enter generation cognition; private grading and deterministic assertions cannot become MCP resources or tool context."}
+  ]
+}

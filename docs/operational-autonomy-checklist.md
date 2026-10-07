@@ -7,7 +7,7 @@ Verified against the implementation on 2026-08-20.
 - [x] Phase 0: Operational axioms are present in both philosophy documents.
 - [x] Phase 1: Operational run, wake, dependency, incident, heartbeat, and browser-body persistence exists; leases and due-wake claims are atomic; the Node temporal engine starts at runtime boot.
 - [x] Phase 2: Root-cause classification, incident aggregation, immutable recovery-attempt logs, bounded recovery budgets, cooldown/waiting, and `Needs You` escalation exist.
-- [x] Phase 3: Native-first routing is enforced at the execution boundary; native-capable actions do not fall back to a browser while Native X is unhealthy; provider 429s create durable reset wakes.
+- [x] Phase 3: The X API and signed-in browser are peer execution tools; route preferences and known API health are honored per action, and provider 429s create durable reset wakes that the browser cannot bypass.
 - [x] Phase 4: Uncertain writes use normalized payload, parent, media, Presence, and time-window fingerprints before retry; ambiguous writes remain isolated or escalate.
 - [x] Phase 5-6: Managed persistent browser profiles and the ten-step recovery ladder exist, including identity validation and post-recovery reconsideration.
 - [x] Phase 7: Headed browser setup, expected-identity verification, and profile sealing are exposed through Settings APIs.

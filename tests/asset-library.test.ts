@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { appendAssetOccurrence, assetHistory, assetIsEligibleForPresence, assetPostingUnavailableUntil, assetSourceErrorMessage, assetUsageSummary, authorizeAssetSelection, deriveAssetReadiness, ingestLibraryImages, liveAssetReuseReason, normalizeAssetLibraryState, readEligibleAsset, searchEligibleAssets } from "../lib/asset-library";
+import { assetIsAvailableForPublication, appendAssetOccurrence, assetHistory, assetIsEligibleForPresence, assetPostingUnavailableUntil, assetReviewReason, assetSourceErrorMessage, assetUsageSummary, authorizeAssetSelection, deriveAssetReadiness, ingestLibraryImages, isLibraryAsset, liveAssetReuseReason, normalizeAssetLibraryState, readEligibleAsset, searchEligibleAssets } from "../lib/asset-library";
 import { applyOperation, createAgent, normalizeState } from "../lib/runtime";
+import { createOperatorNudge, projectOperatorChatAssetAvailability } from "../lib/operator-chat";
 import type { Asset } from "../lib/types";
 
 const input = { name: "Jenny", description: "A careful visual Agent.", mode: "agent" as const, handle: "@jenny", accent: "#D68754" };
@@ -54,6 +55,20 @@ describe("Agent-scoped Asset Library", () => {
     expect(deriveAssetReadiness(resolved, resolved.assets[0]!)).toBe("ready");
   });
 
+  it("keeps automated high-uncertainty perception in review even when its legacy review flag says resolved", () => {
+    const state = stateWithAssets();
+    const asset = state.assets[0]!;
+    asset.metadataReview = { status: "resolved" };
+    asset.perception = { observation: "A colorful illustration with a character.", uncertainty: ["high"] };
+
+    expect(deriveAssetReadiness(state, asset)).toBe("needs_review");
+    expect(searchEligibleAssets(state, "illustration", { presenceId: state.presence!.id })[0]?.readiness).toBe("needs_review");
+
+    asset.metadataReview = { status: "open" };
+    asset.perception.uncertainty = ["low"];
+    expect(deriveAssetReadiness(state, asset)).toBe("needs_review");
+  });
+
   it("does not treat an open metadata edit as approval and preserves it on approve", () => {
     const state = stateWithAssets();
     const assetId = state.assets[0]!.id;
@@ -62,6 +77,34 @@ describe("Agent-scoped Asset Library", () => {
     const approved = applyOperation(edited, { type: "approveAssetMetadata", assetId });
     expect(deriveAssetReadiness(approved, approved.assets[0]!)).toBe("ready");
     expect(approved.assetMetadataEdits?.[0]?.observation).toBe("A blue square with a revised mark.");
+  });
+
+  it("keeps unresolved reference media blocked for direct selection but permits an explicit publication review", () => {
+    const state = stateWithAssets();
+    const asset = state.assets[0]!;
+    asset.reusePermission = "reference_only";
+    asset.metadataReview = { status: "open" };
+    asset.perception = undefined;
+
+    expect(assetReviewReason(state, asset.id, { presenceId: state.presence!.id })).toContain("needs explicit reuse approval");
+    expect(() => authorizeAssetSelection(state, [asset.id], { presenceId: state.presence!.id })).toThrow(/explicit reuse approval/);
+    expect(() => authorizeAssetSelection(state, [asset.id], { presenceId: state.presence!.id, requireReady: false, allowReviewable: true })).not.toThrow();
+  });
+
+  it("keeps observed web media out of the durable library until it is intentionally preserved", () => {
+    const state = stateWithAssets();
+    const observed = { ...state.assets[0]!, id: "observed-web", retention: "ephemeral" as const, provenance: { ...state.assets[0]!.provenance, origin: "discovered" } };
+    const preserved = { ...observed, id: "preserved-web", retention: "preserved" as const, preservationReason: "Reuse for the next evidence-backed post" };
+
+    expect(isLibraryAsset(observed)).toBe(false);
+    expect(isLibraryAsset(preserved)).toBe(true);
+  });
+
+  it("keeps an uploaded visual in the Agent library while vision processing is pending", () => {
+    const state = stateWithAssets();
+    const uploaded = { ...state.assets[0]!, id: "uploaded-pending", status: "processing" as const, retention: undefined, provenance: { ...state.assets[0]!.provenance, origin: "operator_upload" } };
+    normalizeAssetLibraryState({ ...state, assets: [uploaded] });
+    expect(isLibraryAsset(uploaded)).toBe(true);
   });
 
   it("preserves same-Agent source occurrences while repeated scans remain idempotent", () => {
@@ -96,7 +139,7 @@ describe("Agent-scoped Asset Library", () => {
 
     state.assetUsages = [];
     state.executions = [{ id: "in-flight", socialIntentId: "intent", presenceId: state.presence!.id, affordance: "x.post", mode: "auto", status: "queued", attempts: 0, idempotencyKey: "key", environment: "live", publication: { id: "pub-in-flight", format: "x.media-post", payload: { text: "Queued" }, assetIds: [prior.id], links: [], createdAt: "2026-08-28T00:00:00.000Z", environment: "live" }, createdAt: "2026-08-28T00:00:00.000Z", updatedAt: "2026-08-28T00:00:00.000Z" } as never];
-    expect(liveAssetReuseReason(state, state.presence!.id, [candidate.id])).toContain("already published");
+    expect(liveAssetReuseReason(state, state.presence!.id, [candidate.id])).toContain("active live publication");
   });
 
   it("removes a posted library asset from Agent candidates for the Presence cooldown", () => {
@@ -107,11 +150,60 @@ describe("Agent-scoped Asset Library", () => {
     expect(state.presence!.assetReuseCooldownMonths).toBe(6);
     expect(assetPostingUnavailableUntil(state, "jenny-asset", presenceId, "2026-09-01T00:00:00.000Z")).toBe("2027-02-28T00:00:00.000Z");
     expect(searchEligibleAssets(state, "", { presenceId })).toEqual([]);
-    expect(readEligibleAsset(state, "jenny-asset", presenceId)).toBeUndefined();
+    expect(readEligibleAsset(state, "jenny-asset", presenceId)).toMatchObject({ assetId: "jenny-asset", publicationAvailability: { available: false } });
     expect(() => authorizeAssetSelection(state, ["jenny-asset"], { presenceId })).toThrow(/unavailable for posting/);
 
     const immediateReuse = { ...state, presence: { ...state.presence!, assetReuseCooldownMonths: 0 }, presences: state.presences.map((presence) => ({ ...presence, assetReuseCooldownMonths: 0 })) };
     expect(searchEligibleAssets(immediateReuse, "", { presenceId })).toHaveLength(1);
+  });
+
+  it.each(["exact", "source", "perceptual"])("filters %s aliases of posted images from fresh live candidates", kind => {
+    const state = stateWithAssets();
+    state.presence!.environment = "live";
+    state.presences[0]!.environment = "live";
+    const prior = image(state.agent!.id, "used-visual");
+    const alias = image(state.agent!.id, "alias-visual");
+    const fresh = image(state.agent!.id, "fresh-visual");
+    if (kind === "exact") alias.storage!.exactHash = prior.storage!.exactHash;
+    if (kind === "source") { alias.provenance.sourceUrl = "https://images.example/a.png"; prior.provenance.sourceUrl = alias.provenance.sourceUrl; }
+    if (kind === "perceptual") { prior.storage!.perceptualHash = "0000000011111111"; alias.storage!.perceptualHash = "0000000011111110"; }
+    state.assets = [alias, prior, fresh];
+    state.assetUsages = [{ id: "verified-use", assetId: prior.id, agentId: state.agent!.id, presenceId: state.presence!.id, publicationId: "used-publication", channelId: "x", environment: "live", usageType: "new", publishedAt: new Date().toISOString() }];
+    expect(searchEligibleAssets(state, "", { presenceId: state.presence!.id }).map(item => item.assetId)).toEqual([fresh.id]);
+    expect(readEligibleAsset(state, alias.id, state.presence!.id)).toMatchObject({ assetId: alias.id, publicationAvailability: { available: false } });
+    expect(assetIsAvailableForPublication(state, fresh, state.presence!.id)).toBe(true);
+    state.presence!.environment = "sandbox";
+    state.presences[0]!.environment = "sandbox";
+    expect(assetIsAvailableForPublication(state, alias, state.presence!.id)).toBe(true);
+  });
+
+  it("filters the exact pending image and permits it after canceled work or expired cooldown", () => {
+    const state = stateWithAssets();
+    state.presence!.environment = "live"; state.presences[0]!.environment = "live";
+    const asset = state.assets[0]!;
+    state.executions = [{ id: "pending", socialIntentId: "intent", presenceId: state.presence!.id, affordance: "x.post", mode: "auto", status: "queued", attempts: 0, idempotencyKey: "pending", environment: "live", publication: { id: "pending-publication", format: "x.media-post", payload: { text: "Pending" }, assetIds: [asset.id], links: [], createdAt: new Date().toISOString() }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    expect(searchEligibleAssets(state, "")).toHaveLength(0);
+    state.executions[0]!.status = "cancelled";
+    expect(searchEligibleAssets(state, "")).toHaveLength(1);
+    state.executions[0]!.status = "succeeded";
+    state.presence!.assetReuseCooldownMonths = 0; state.presences[0]!.assetReuseCooldownMonths = 0;
+    expect(searchEligibleAssets(state, "")).toHaveLength(1);
+  });
+
+  it("keeps used/reference images readable for private Chat and refreshes attached publication availability", () => {
+    const state = stateWithAssets();
+    state.presence!.environment = "live"; state.presences[0]!.environment = "live";
+    const asset = state.assets[0]!;
+    state.assetUsages = [{ id: "live-use", assetId: asset.id, agentId: state.agent!.id, presenceId: state.presence!.id, publicationId: "past-publication", channelId: "x", environment: "live", usageType: "new", publishedAt: new Date().toISOString() }];
+    const result = createOperatorNudge(state, { presenceId: state.presence!.id, content: "What is in this picture?", privateConversation: true, attachments: [{ existingAssetId: asset.id, name: "Context image", kind: "image" }] });
+    const attachment = result.state.operatorConversations!.flatMap(item => item.messages).find(item => item.role === "operator" && item.content === "What is in this picture?")!.attachments![0]!;
+    expect(attachment.publicationAvailability).toMatchObject({ available: false, unavailableUntil: expect.any(String) });
+    expect(readEligibleAsset(result.state, asset.id, state.presence!.id)?.observation).toContain("blue square");
+    state.assetUsages = [];
+    asset.reusePermission = "reference_only";
+    expect(readEligibleAsset(state, asset.id, state.presence!.id)).toMatchObject({ assetId: asset.id, publicationAvailability: { available: false } });
+    expect(projectOperatorChatAssetAvailability(state, state.presence!.id, asset.id)).toMatchObject({ available: false, reason: expect.stringContaining("reuse approval") });
+    expect(state.presence!.assetReuseCooldownMonths).toBe(6);
   });
 
   it("normalizes newly added library collections and processing jobs", () => {

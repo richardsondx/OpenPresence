@@ -5,6 +5,16 @@ import { acknowledgeExecution, claimExecutions, createBridgeWithKey, heartbeatBr
 import { readBridgeById, readBridgeCredentialMetadata, readState, readStateVersion, writeState } from "../lib/db";
 import { nextObservationAt } from "../lib/native-x";
 
+// A verified account alone does not prove the current Chrome adapter can act.
+function verifiedBrowserAdapters(accountIdentity: import("../lib/types").Bridge["accountIdentity"]) {
+  return [{ executorId: "openpresence-chrome-test", version: "1.0.0", protocolVersion: 2, probed: true,
+    observedAt: accountIdentity!.observedAt,
+    accountIdentity,
+    capabilities: { channelRead: true, mediaUpload: true, verification: true,
+      affordances: ["post", "reply", "quote", "repost", "like", "follow", "delete"] },
+  }];
+}
+
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
 describe("Fresh Presence authority", () => {
@@ -1379,7 +1389,7 @@ describe("OpenPresence runtime boundaries", () => {
     let state = createAgent(input);
     state.presence!.execution.quote = "auto";
     state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
-    state.bridges = [{ id: "bridge-1", presenceId: state.presence!.id, name: "OpenPresence Chrome · Genny", kind: "bridge", channelId: "x", state: "online", capabilities: { inbound: true, reconcile: true, affordances: ["quote", "reply"], formats: ["x.quote", "x.reply"], metrics: [] }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state.bridges = [{ id: "bridge-1", presenceId: state.presence!.id, name: "OpenPresence Chrome · Genny", kind: "bridge", channelId: "x", state: "online", lastHeartbeatAt: new Date().toISOString(), accountIdentity: { username: "jenny_ai", status: "verified", observedAt: new Date().toISOString() }, browserAdapters: verifiedBrowserAdapters({ username: "jenny_ai", status: "verified", observedAt: new Date().toISOString() }), capabilities: { inbound: true, reconcile: true, affordances: ["quote", "reply"], formats: ["x.quote", "x.reply"], metrics: [] }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     state = recordNativeMirror(state, { connectionId: "native-x", presenceId: state.presence!.id, post: { id: "unmentioned-post", text: "A post without mentioning the handle.", authorId: "author-99", authorUsername: "third_party", authorName: "Third Party" } });
     state = recordNativeMirror(state, { connectionId: "native-x", presenceId: state.presence!.id, post: { id: "mentioned-post", text: "Hey @jenny_ai what do you think?", authorId: "author-99", authorUsername: "third_party", authorName: "Third Party" } });
 
@@ -1389,7 +1399,16 @@ describe("OpenPresence runtime boundaries", () => {
     const mentionedQuote = formXActionIntent(state, { affordance: "x.quote", target: { type: "x.post", id: "mentioned-post" }, text: "A quote on mentioned post." });
     expect(mentionedQuote.executions[0]?.connector).toBe("native");
 
-    const unknownQuote = formXActionIntent(state, { affordance: "x.quote", target: { type: "x.post", id: "unknown-post" }, text: "A later quote after learning." });
+    const browserReadyState = structuredClone(state);
+    browserReadyState.presence!.browserAccess = { enabled: true };
+    browserReadyState.presences = browserReadyState.presences.map((presence) => presence.id === browserReadyState.presence!.id ? { ...presence, browserAccess: { enabled: true } } : presence);
+    browserReadyState.presence = browserReadyState.presences[0];
+    const browserPreferredQuote = formXActionIntent(browserReadyState, { affordance: "x.quote", target: { type: "x.post", id: "mentioned-post" }, text: "Use the browser tool for this quote.", routePreference: "browser" });
+    expect(browserPreferredQuote.executions[0]?.connector).toBe("bridge");
+    const apiPreferredQuote = formXActionIntent(browserReadyState, { affordance: "x.quote", target: { type: "x.post", id: "mentioned-post" }, text: "Use the API tool for this quote.", routePreference: "api" });
+    expect(apiPreferredQuote.executions[0]?.connector).toBe("native");
+
+    const unknownQuote = formXActionIntent(browserReadyState, { affordance: "x.quote", target: { type: "x.post", id: "unknown-post" }, text: "A later quote after learning." });
     const learned = rerouteExecutionToBridge(unknownQuote, unknownQuote.executions[0]!.id, "The native API rejected this quote action.");
     const nextAttempt = formXActionIntent(learned, { affordance: "x.quote", target: { type: "x.post", id: "mentioned-post" }, text: "A later quote after learning." });
     expect(nextAttempt.executions[0]?.connector).toBe("bridge");
@@ -1400,9 +1419,10 @@ describe("OpenPresence runtime boundaries", () => {
     let state = createAgent(input);
     const presence = state.presence!;
     presence.execution.quote = "auto";
+    presence.browserAccess = { enabled: true };
     const observedAt = new Date().toISOString();
     state.nativeConnections = [{ id: "native-x-verified", presenceId: presence.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: presence.handle, name: presence.name }, createdAt: observedAt, updatedAt: observedAt }];
-    state.bridges = [{ id: "bridge-chrome-verified", presenceId: presence.id, name: "OpenPresence Chrome · Genny", kind: "bridge", channelId: "x", state: "online", lastHeartbeatAt: observedAt, accountIdentity: { username: presence.handle, status: "verified", observedAt }, capabilities: { inbound: true, reconcile: true, affordances: ["quote"], formats: ["x.quote"], metrics: [] }, createdAt: observedAt, updatedAt: observedAt }];
+    state.bridges = [{ id: "bridge-chrome-verified", presenceId: presence.id, name: "OpenPresence Chrome · Genny", kind: "bridge", channelId: "x", state: "online", lastHeartbeatAt: observedAt, accountIdentity: { username: presence.handle, status: "verified", observedAt }, browserAdapters: verifiedBrowserAdapters({ username: presence.handle, status: "verified", observedAt }), capabilities: { inbound: true, reconcile: true, affordances: ["quote"], formats: ["x.quote"], metrics: [] }, createdAt: observedAt, updatedAt: observedAt }];
     state.mirrorObjects.unshift({ id: "unmentioned-public-post", bridgeId: "bridge-chrome-verified", presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: "unmentioned-public-post" }, objectType: "post", author: { displayName: "Public Author", handle: "public_author" }, content: { text: "A public post worth adding context to." }, observedAt, occurredAt: observedAt, visibility: "public", shareability: "presence-only", environment: "live", source: "native", trust: "untrusted_world_content" });
 
     expect(xQuoteTargetHasAvailableRoute(state, presence, "unmentioned-public-post")).toBe(true);
@@ -1410,10 +1430,24 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.executions[0]).toMatchObject({ affordance: "x.quote", connector: "bridge", status: "queued" });
   });
 
+  it("does not offer a verified Chrome route after its account no longer matches the Presence", () => {
+    const state = createAgent(input);
+    const presence = state.presence!;
+    presence.browserAccess = { enabled: true };
+    const observedAt = new Date().toISOString();
+    state.bridges = [{ id: "bridge-wrong-account", presenceId: presence.id, name: "OpenPresence Chrome · Jenny", kind: "bridge", channelId: "x", state: "online", lastHeartbeatAt: observedAt, accountIdentity: { username: "richardsondx", status: "verified", observedAt }, browserAdapters: verifiedBrowserAdapters({ username: "richardsondx", status: "verified", observedAt }), capabilities: { inbound: true, reconcile: true, affordances: ["quote"], formats: ["x.quote"], metrics: [] }, createdAt: observedAt, updatedAt: observedAt }];
+    state.mirrorObjects.unshift({ id: "unmentioned-post-wrong-account", bridgeId: "bridge-wrong-account", presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: "unmentioned-post-wrong-account" }, objectType: "post", author: { displayName: "Public Author", handle: "public_author" }, content: { text: "A public post worth adding context to." }, observedAt, occurredAt: observedAt, visibility: "public", shareability: "presence-only", environment: "live", source: "native", trust: "untrusted_world_content" });
+
+    expect(xQuoteTargetHasAvailableRoute(state, presence, "unmentioned-post-wrong-account")).toBe(false);
+    expect(formXActionIntent(state, { affordance: "x.quote", target: { type: "x.post", id: "unmentioned-post-wrong-account" }, text: "Do not route through the wrong account." }).executions).toHaveLength(0);
+  });
+
   it("automatically reroutes an execution to Chrome extension bridge when X rejects with mention restriction error", () => {
     const state = createAgent(input);
     state.presence!.execution.quote = "auto";
-    state.bridges = [{ id: "bridge-chrome", presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", channelId: "x", state: "online", capabilities: { inbound: true, reconcile: true, affordances: ["quote", "reply"], formats: ["x.quote", "x.reply"], metrics: [] }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state.presence!.browserAccess = { enabled: true };
+    const observedAt = new Date().toISOString();
+    state.bridges = [{ id: "bridge-chrome", presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", channelId: "x", state: "online", lastHeartbeatAt: observedAt, accountIdentity: { username: state.presence!.handle, status: "verified", observedAt }, browserAdapters: verifiedBrowserAdapters({ username: state.presence!.handle, status: "verified", observedAt }), capabilities: { inbound: true, reconcile: true, affordances: ["quote", "reply"], formats: ["x.quote", "x.reply"], metrics: [] }, createdAt: observedAt, updatedAt: observedAt }];
 
     const quoteResult = formXActionIntent(state, { affordance: "x.quote", target: { type: "x.post", id: "third-party-quote" }, text: "Insightful quote" });
     const execution = quoteResult.executions[0]!;
@@ -1429,14 +1463,16 @@ describe("OpenPresence runtime boundaries", () => {
     expect(reroutedExecution?.bridgeId).toBe("bridge-chrome");
     expect(reroutedExecution?.status).toBe("queued");
     expect(reroutedExecution?.failure).toBeUndefined();
-    expect(reroutedState.events[0]?.title).toBe("Browser fallback learned");
+    expect(reroutedState.events[0]?.title).toBe("Browser route learned");
   });
 
   it("reroutes repost delivery to Chrome when native X rejects the action", () => {
     const state = createAgent(input);
     state.presence!.execution.repost = "auto";
+    state.presence!.browserAccess = { enabled: true };
     state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
-    state.bridges = [{ id: "bridge-chrome", presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", channelId: "x", state: "online", capabilities: { inbound: true, reconcile: true, affordances: ["repost", "quote"], formats: ["x.repost", "x.quote"], metrics: [] }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    const observedAt = new Date().toISOString();
+    state.bridges = [{ id: "bridge-chrome", presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", channelId: "x", state: "online", lastHeartbeatAt: observedAt, accountIdentity: { username: state.presence!.handle, status: "verified", observedAt }, browserAdapters: verifiedBrowserAdapters({ username: state.presence!.handle, status: "verified", observedAt }), capabilities: { inbound: true, reconcile: true, affordances: ["repost", "quote"], formats: ["x.repost", "x.quote"], metrics: [] }, createdAt: observedAt, updatedAt: observedAt }];
     const result = formXActionIntent(state, { affordance: "x.repost", target: { type: "x.post", id: "repost-target" } });
     const execution = result.executions[0]!;
     expect(execution.connector).toBe("native");
@@ -1794,7 +1830,7 @@ describe("OpenPresence runtime boundaries", () => {
     expect(manifest.items.find((item) => item.capability === "post_performance")).toMatchObject({ availability: "temporarily-unavailable" });
     expect(manifest.items.find((item) => item.capability === "image")).toMatchObject({ availability: "temporarily-unavailable", canExecute: false });
     expect(manifest.items.find((item) => item.capability === "video")).toMatchObject({ availability: "temporarily-unavailable", canExecute: false });
-    const previouslyShipped = { ...state, bridges: [{ ...state.bridges[0], id: "previously-shipped-chrome", presenceId, channelId: "x" as const, name: "OpenPresence Chrome · Jenny", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: heartbeat, accountIdentity: { username: state.presence!.handle.replace(/^@/, ""), status: "verified" as const, observedAt: heartbeat }, capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply", "repost", "quote", "like", "message", "follow"], formats: ["x.post", "x.media-post", "x.thread", "x.reply"], metrics: ["replies", "reactions", "posts", "followers", "public_metrics"], assetKinds: ["image", "video"] as ("image" | "video")[] } }] };
+    const previouslyShipped = { ...state, bridges: [{ ...state.bridges[0], id: "previously-shipped-chrome", presenceId, channelId: "x" as const, name: "OpenPresence Chrome · Jenny", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: heartbeat, accountIdentity: { username: state.presence!.handle.replace(/^@/, ""), status: "verified" as const, observedAt: heartbeat }, browserAdapters: verifiedBrowserAdapters({ username: state.presence!.handle.replace(/^@/, ""), status: "verified" as const, observedAt: heartbeat }), capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply", "repost", "quote", "like", "message", "follow"], formats: ["x.post", "x.media-post", "x.thread", "x.reply"], metrics: ["replies", "reactions", "posts", "followers", "public_metrics"], assetKinds: ["image", "video"] as ("image" | "video")[] } }] };
     const migrated = derivePresenceCapabilityManifest(previouslyShipped, presenceId);
     expect(migrated.items.find((item) => item.capability === "follow")).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true });
     expect(migrated.items.find((item) => item.capability === "reply")).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true });

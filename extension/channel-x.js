@@ -353,6 +353,16 @@
     const affordance = String(execution.affordance || "").replace(/^x\./, "");
     if (!["post", "reply", "quote", "repost", "like", "follow", "delete"].includes(affordance)) return failure({ executionId: execution.id, ok: false, code: "UNSUPPORTED_AFFORDANCE", message: `The Chrome Bridge does not execute ${execution.affordance || "this action"}.`, retryable: false });
     const targetId = execution.target?.id;
+    if (pendingStage === "readback") {
+      setState("verifying");
+      const evidence = await collectWebsiteEvidence(execution, true);
+      setState("observing");
+      // Readback failure is submission uncertainty, never permission to write again.
+      return { executionId: execution.id, ok: true, verifyWithApi: true,
+        externalRef: evidence?.post?.externalRef,
+        browserEvidence: evidence,
+        message: evidence ? undefined : "X submission was observed, but independent public readback is still pending." };
+    }
     if (affordance !== "post" && !targetId) return failure({ executionId: execution.id, ok: false, code: "MISSING_TARGET", message: affordance === "follow" ? "The Bridge follow execution has no target user." : "The Bridge execution has no target post.", retryable: false });
     if (affordance === "follow") {
       if (!window.location.pathname.includes("/i/user/") && canNavigate) {
@@ -503,14 +513,26 @@
     try {
       mediaAssets = await window.OpenPresenceExecution?.assetsForExecution?.(execution) ?? [];
     } catch (error) {
-      return failure({ executionId: execution.id, ok: false, code: "UNSUPPORTED_ASSET", message: error instanceof Error ? error.message : "The approved Asset could not be retrieved for X.", retryable: false });
+      return failure({ executionId: execution.id, ok: false, code: error?.code === "BROWSER_CONNECTOR_UNAVAILABLE" ? error.code : "UNSUPPORTED_ASSET", message: error instanceof Error ? error.message : "The approved Asset could not be retrieved for X.", retryable: false });
     }
     const expectedAssetIds = Array.isArray(execution.publication?.assetIds) ? execution.publication.assetIds : [];
     if (expectedAssetIds.length && (!Array.isArray(mediaAssets) || mediaAssets.length !== expectedAssetIds.length || mediaAssets.some((item, index) => item?.assetId !== expectedAssetIds[index]))) {
       return failure({ executionId: execution.id, ok: false, code: "UNSUPPORTED_ASSET", message: "The installed Bridge could not retrieve every sealed Asset for this publication. OpenPresence did not submit text without the approved media.", retryable: false });
     }
-    if (mediaAssets.length && !(await window.OpenPresenceComposer?.attachFiles?.({ composer, files: mediaAssets.map((item) => item.file) }))) {
-      return failure({ executionId: execution.id, ok: false, code: "ASSET_UPLOAD_FAILED", message: "X did not accept the approved image attachment. OpenPresence did not submit the text.", retryable: true });
+    await window.OpenPresenceExecution?.evidenceRequest?.("start", {
+      executionId: execution.id, permitNonce: execution.permit?.nonce,
+      assets: mediaAssets.map(({ assetId, sha256 }) => ({ assetId, sha256 })),
+      expiresAt: Date.now() + 180_000,
+    });
+    if (mediaAssets.length) {
+      const attachment = window.OpenPresenceComposer?.attachFilesWithEvidence
+        ? await window.OpenPresenceComposer.attachFilesWithEvidence({ composer, files: mediaAssets.map(item => item.file) })
+        : { ok: await window.OpenPresenceComposer?.attachFiles?.({ composer, files: mediaAssets.map(item => item.file) }) };
+      if (!attachment.ok) return failure({ executionId: execution.id, ok: false, code: "ASSET_UPLOAD_FAILED",
+        message: attachment.diagnostics?.alerts?.length
+          ? `The browser showed this notice while attaching the approved image: ${attachment.diagnostics.alerts.join("; ")}. OpenPresence did not submit the text.`
+          : "The browser could not confirm the approved image attachment. No rejection reason was observed. OpenPresence did not submit the text.",
+        diagnostics: attachment.diagnostics, retryable: true });
     }
     sessionStorage.removeItem("openpresence-pending-execution");
     const content = window.OpenPresenceExecution?.textForExecution(execution) || "";
@@ -579,6 +601,16 @@
     // Give X a short settling window for in-flight XHR/fetch completion before closing tab
     await new Promise((resolve) => setTimeout(resolve, 1_200));
 
+    const captured = await collectWebsiteEvidence(execution, false);
+    if (captured?.createdPostId) {
+      // A fresh document causes X's own client to read the public object.
+      // The bounded MAIN observer restores only this claim and upload lineage.
+      // This route is read-only and cannot revisit the composer on recovery.
+      sessionStorage.setItem("openpresence-pending-execution", JSON.stringify({ execution, expectedHandle, presenceName, stage: "readback" }));
+      window.location.href = `https://x.com/i/web/status/${encodeURIComponent(captured.createdPostId)}`;
+      return undefined;
+    }
+
     const ownReply = submission?.kind === "visible" ? submission.ownReply : undefined;
     if (submission?.kind === "settled" || ownReply) {
       if (affordance === "post" && !ownReply) return failure({ executionId: execution.id, ok: false, code: "PUBLIC_OBJECT_NOT_VISIBLE", message: "X accepted the composer, but the new original post was not visible for verification.", retryable: true });
@@ -595,15 +627,33 @@
         externalRef,
         authorHandle: ownReply.handle,
         text: ownReply.text,
-        parentId: affordance === "reply" ? targetId : undefined,
+        // The target selected by the Agent is not evidence of the public parent.
+        parentId: ownReply.parentId,
         quotedTargetId: affordance === "quote" ? ownReply.quotedPost?.id : undefined,
         mediaCount: ownReply.media?.length ?? 0,
-        assetIds: execution.publication?.assetIds ?? [],
       };
       return { executionId: execution.id, ok: true, verifyWithApi: true, externalRef, publicProof };
     }
 
     return failure({ executionId: execution.id, ok: false, code: "PUBLIC_OBJECT_NOT_VISIBLE", message: `X did not show the completed ${affordance} in the controlled tab.`, retryable: true });
+  }
+
+  async function collectWebsiteEvidence(execution, requireReadback) {
+    const deadline = Date.now() + (requireReadback ? 18_000 : 5_000);
+    while (Date.now() < deadline) {
+      const response = await window.OpenPresenceExecution?.evidenceRequest?.("snapshot");
+      const evidence = response?.evidence;
+      if (evidence?.executionId === execution.id && evidence.permitNonce === execution.permit?.nonce
+        && evidence.createdPostId && (!requireReadback || evidence.readback && evidence.post)) {
+        return { version: 1, source: "x_website_response", readback: Boolean(evidence.readback),
+          executionId: execution.id, bridgeId: execution.bridgeId, presenceId: execution.presenceId,
+          permitNonce: execution.permit.nonce, createdPostId: evidence.createdPostId,
+          observedAt: evidence.observedAt, post: evidence.post, uploads: evidence.uploads };
+      }
+      if (!response?.installed) return null;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    return null;
   }
 
   function reportObservation(sourceEventId, object) {
@@ -635,6 +685,16 @@
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "OPENPRESENCE_ADAPTER_CAPABILITIES") {
+      void window.OpenPresenceExecution?.evidenceRequest?.("probe").then(probe => sendResponse({
+        mediaProtocol: window.OpenPresenceExecution?.protocolVersion ?? 0,
+        adapter: { version: "0.1.3", protocolVersion: 2, probed: true,
+          capabilities: { channelRead: typeof visiblePosts === "function" && verifyAccount().ok,
+            mediaUpload: Boolean(window.OpenPresenceExecution?.assetsForExecution && window.OpenPresenceComposer?.attachFiles && probe?.installed),
+            verification: Boolean(probe?.installed), affordances: ["post", "reply", "quote", "repost", "like", "follow", "delete"] } },
+      }));
+      return true;
+    }
     if (message?.type === "OPENPRESENCE_READ") {
       expectedHandle = message.expectedHandle || expectedHandle;
       void waitFor(() => verifyAccount().ok && visiblePosts().length ? visiblePosts() : undefined, 8000).then((posts) => {

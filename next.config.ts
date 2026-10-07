@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   typedRoutes: true,
+  // Route collection imports the local SQLite schema. Keep one build worker
+  // so simultaneous migrations cannot race against the same workspace.
+  experimental: { cpus: 1 },
   // Keep local runtime controls from covering the mobile navigation dock.
   devIndicators: false,
   distDir: process.env.OPENPRESENCE_NEXT_DIST_DIR ?? ".next",

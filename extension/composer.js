@@ -163,44 +163,56 @@
     });
   }
 
-  function attachmentEvidence(scope, count, submitSelector) {
-    if (!scope || count < 1) return false;
-    const previews = scope.querySelectorAll?.('[data-testid*="mediaPreview"], [data-testid*="preview"], [aria-label*="Remove media"], [aria-label*="Remove photo"], [aria-label*="Remove image"], img[src^="blob:"], video[src^="blob:"]');
-    const removeControls = scope.querySelectorAll?.('[aria-label*="Remove media"], [aria-label*="Remove photo"], [aria-label*="Remove image"]');
-    const pendingUpload = scope.querySelectorAll?.('[aria-busy="true"], [data-testid*="progress"], [data-testid*="uploading"]');
-    const submit = [...(scope.querySelectorAll?.('button,[role="button"]') || [])].find((node) => {
-      const matches = submitSelector.split(",").some((selector) => node.matches?.(selector.trim()));
-      return matches && !node.disabled && node.getAttribute?.("aria-disabled") !== "true";
-    });
-    // X may render several nested preview nodes for one file. The per-file
-    // remove controls are the stable one-to-one evidence; generic preview
-    // counts would let a wrapper and thumbnail masquerade as two uploads.
-    return Boolean(submit && removeControls.length === count && pendingUpload.length === 0 && previews.length >= count);
+  function attachmentDiagnostics(scope, count, stage) {
+    const previews = scope?.querySelectorAll?.('[data-testid*="mediaPreview"], [data-testid*="preview"], [aria-label*="Remove media"], [aria-label*="Remove photo"], [aria-label*="Remove image"], img[src^="blob:"], video[src^="blob:"]') || [];
+    const controls = scope?.querySelectorAll?.('[aria-label*="Remove media"], [aria-label*="Remove photo"], [aria-label*="Remove image"]') || [];
+    const pending = scope?.querySelectorAll?.('[aria-busy="true"], [data-testid*="progress"], [data-testid*="uploading"]') || [];
+    // Read only visible, composer-scoped platform notices. Page content is
+    // untrusted evidence, never an instruction or publication authority.
+    const alerts = [...(scope?.querySelectorAll?.('[role="alert"]') || [])]
+      .filter(node => node.getClientRects?.().length > 0)
+      .map(visibleText).filter(Boolean).slice(0, 3).map(text => text.slice(0, 240));
+    return { stage, expectedFiles: count, previewCount: previews.length, removeControlCount: controls.length, pendingUploadCount: pending.length, alerts, beforeSubmission: true };
   }
 
-  async function attachFiles({ files, composer, submitSelector = '[data-testid*="tweetButton"], [data-testid*="postButton"], [data-testid="tweetButtonInline"], [data-testid="tweetButton"], [data-testid="tweetButtonInline_reply"], [role="button"][data-testid*="tweetButton"]', timeoutMs = 8_000 }) {
-    if (!Array.isArray(files) || !files.length) return true;
+  async function attachFilesWithEvidence({ files, composer, submitSelector = '[data-testid*="tweetButton"], [data-testid*="postButton"], [data-testid="tweetButtonInline"], [data-testid="tweetButton"], [data-testid="tweetButtonInline_reply"], [role="button"][data-testid*="tweetButton"]', timeoutMs = 8_000 }) {
+    if (!Array.isArray(files) || !files.length) return { ok: true };
     const scope = composerScope(composer, submitSelector);
-    if (!scope) return false;
+    if (!scope) return { ok: false, diagnostics: attachmentDiagnostics(null, files.length, "composer_scope_missing") };
+    // Never let an old draft's previews stand in for this approved upload.
+    if (attachmentDiagnostics(scope, files.length, "before_handoff").removeControlCount > 0) {
+      return { ok: false, diagnostics: attachmentDiagnostics(scope, files.length, "composer_existing_media") };
+    }
     let input = mediaInput(scope);
     if (!input) {
       const button = mediaButton(scope);
       if (button) button.click();
       input = await waitFor(() => Boolean(mediaInput(scope)), timeoutMs).then(() => mediaInput(scope));
     }
-    if (!input) return false;
+    if (!input) return { ok: false, diagnostics: attachmentDiagnostics(scope, files.length, "file_input_missing") };
     const transfer = new root.DataTransfer();
     for (const file of files) transfer.items.add(file);
     try { input.files = transfer.files; } catch {
-      try { Object.defineProperty(input, "files", { configurable: true, value: transfer.files }); } catch { return false; }
+      try { Object.defineProperty(input, "files", { configurable: true, value: transfer.files }); } catch {
+        return { ok: false, diagnostics: attachmentDiagnostics(scope, files.length, "file_handoff_failed") };
+      }
     }
+    if (input.files?.length !== files.length) return { ok: false, diagnostics: attachmentDiagnostics(scope, files.length, "file_handoff_failed") };
     input.dispatchEvent(new root.Event("change", { bubbles: true }));
     try { input.dispatchEvent(new root.InputEvent("input", { bubbles: true, inputType: "insertFromDrop" })); } catch {}
-    // The input is only the handoff. X must render the attachments in this
-    // exact composer before text can be submitted; a page-wide input or a
-    // cleared composer is never proof that the upload was accepted.
-    return Boolean(await waitFor(() => input.files?.length === files.length && attachmentEvidence(scope, files.length, submitSelector), timeoutMs));
+    // React may consume and clear FileList after handoff. Acceptance is the
+    // exact per-file previews in this composer with no outstanding upload.
+    // Submit readiness belongs to fillComposer, after approved text is filled.
+    const ok = await waitFor(() => {
+      const evidence = attachmentDiagnostics(scope, files.length, "attachment_wait");
+      return evidence.removeControlCount === files.length && evidence.previewCount >= files.length && evidence.pendingUploadCount === 0;
+    }, timeoutMs);
+    return { ok: Boolean(ok), diagnostics: attachmentDiagnostics(scope, files.length, ok ? "attachments_ready" : "attachment_confirmation_timeout") };
   }
 
-  root.OpenPresenceComposer = { attachFiles, fillComposer };
+  async function attachFiles(options) {
+    return (await attachFilesWithEvidence(options)).ok;
+  }
+
+  root.OpenPresenceComposer = { attachFiles, attachFilesWithEvidence, fillComposer };
 })(window);

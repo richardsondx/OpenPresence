@@ -1,7 +1,7 @@
 import { credentialStorageAvailable, databaseIntegrityVerifiedAt, getDependencyHealth, getDueScheduledWakes, getOperationalRun, getProcessHeartbeats, getRecoveryIncident, listDependencyHealth, listOperationalRuns, listRecoveryIncidents, readBridgeHealthForPresence, readChannelSecret, readRuntimeHealthProjection, upsertDependencyHealth, upsertOperationalRun, upsertRecoveryIncident } from "./db";
 import type { Bridge, OperationalHealthSnapshot } from "./types";
 import { xCreditsExhausted } from "./x-credits";
-import { bridgeExecutionStatus, bridgeIdentityReady } from "./bridge-contract";
+import { bridgeMatchesExpectedAccount, bridgeReadyForExpectedAccount } from "./bridge-contract";
 import { requestAttention } from "./attention-coordinator";
 
 export interface CompiledOperationalContext {
@@ -363,7 +363,7 @@ export function readOperationalHealth(presenceId?: string, now = new Date()): Op
     // do not rehydrate the complete compatibility snapshot inside every
     // browser health poll just to recover the same capabilities.
     const configuredBridges: Bridge[] = bridges as Bridge[];
-    bridgeContinuityAvailable = presence?.channel === "x" && bridges.some((bridge) => bridgeExecutionStatus(bridge as Bridge) === "connected" && bridgeIdentityReady(bridge as Bridge));
+    bridgeContinuityAvailable = presence?.channel === "x" && presence.browserAccess?.enabled === true && bridges.some((bridge) => bridgeReadyForExpectedAccount(bridge as Bridge, presence.handle));
     if (bridgeContinuityAvailable && creditsExhaustedState) creditsExhaustedState = false;
     // Native X quota exhaustion is a dependency incident, not a reason to
     // fence the whole Presence when its verified Chrome Bridge can continue
@@ -383,8 +383,8 @@ export function readOperationalHealth(presenceId?: string, now = new Date()): Op
       }
       activeRuns = activeRuns.filter((run) => run.stage !== "superseded_by_bridge_continuity");
     }
-    const waitingBridgeIds = new Set(bridges.filter((bridge) => bridgeExecutionStatus(bridge as Bridge) !== "connected").map((bridge) => bridge.id));
-    const identityWaitingBridgeIds = new Set(bridges.filter((bridge) => bridgeExecutionStatus(bridge as Bridge) === "waiting" && !bridgeIdentityReady(bridge as Bridge)).map((bridge) => bridge.id));
+    const waitingBridgeIds = new Set(bridges.filter((bridge) => !presence || !bridgeReadyForExpectedAccount(bridge as Bridge, presence.handle)).map((bridge) => bridge.id));
+    const identityWaitingBridgeIds = new Set(bridges.filter((bridge) => !presence || !bridgeMatchesExpectedAccount(bridge as Bridge, presence.handle)).map((bridge) => bridge.id));
     bridgeIdentityWaiting = state.executions.some((execution) =>
       (!presenceId || execution.presenceId === presenceId) &&
       Boolean(execution.bridgeId && identityWaitingBridgeIds.has(execution.bridgeId)) &&
@@ -402,7 +402,7 @@ export function readOperationalHealth(presenceId?: string, now = new Date()): Op
       && (run.result?.pendingExecutionCount ?? 0) > 0,
     );
     if (presence) {
-      const bridgeReady = bridges.some((bridge) => bridgeExecutionStatus(bridge as Bridge) === "connected");
+      const bridgeReady = presence.browserAccess?.enabled === true && bridges.some((bridge) => bridgeReadyForExpectedAccount(bridge as Bridge, presence.handle));
       const nativeReady = Boolean(nativeConn && nativeConn.status === "connected" && nativeConn.access === "read-write" && nativeConn.account?.username?.replace(/^@/, "").toLowerCase() === presence.handle.replace(/^@/, "").toLowerCase());
       enabledCapabilityUnavailable = Object.entries(presence.execution).some(([capability, mode]) => {
         // `review` is an operator-gated mode, not an autonomous capability.

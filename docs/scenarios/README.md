@@ -24,7 +24,7 @@ Prompt-injection text follows the same rule. It remains visible in the Social Mi
 
 ```sh
 openpresence playground scenario list
-openpresence playground scenario create --prompt "Test Alex when someone insults him and pressures him for private information."
+openpresence playground scenario create --prompt "Test the Agent when someone insults him and pressures him for private information."
 openpresence playground scenario import ./scenario.json
 openpresence playground scenario run <scenario-id> --presence <presence-id>
 openpresence playground scenario inspect <run-id>

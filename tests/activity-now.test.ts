@@ -5,7 +5,7 @@ import { createOperatorNudge, directWatchQuery, isBurstStatusQuestion, operatorB
 import { operatorConversationActionEvents } from "../lib/operator-chat-projection";
 import { applyOperation, createAgent, formXActionIntent, initialState } from "../lib/runtime";
 import { deferQueuedAssignmentRunsOutsideWindow } from "../lib/assignment-recovery";
-import { closeNonRetryableVerificationExecutions, dueLiveAssignmentsWithoutWorkers, pauseExhaustedAssignmentPursuits, queuedLiveAssignmentRunsWithoutWorkers, repairMissingAssignmentWakes, repairMissingOperatorNudgeWakes, repairPendingBridgeVerificationWakes } from "../lib/temporal";
+import { closeNonRetryableVerificationExecutions, dueLiveAssignmentsWithoutWorkers, markStaleBridgeVerificationsNonRetryable, pauseExhaustedAssignmentPursuits, queuedLiveAssignmentRunsWithoutWorkers, repairMissingAssignmentWakes, repairMissingOperatorNudgeWakes, repairPendingBridgeVerificationWakes } from "../lib/temporal";
 import { listScheduledWakes, readState, readStateVersion, upsertOperationalRun, writeState } from "../lib/db";
 import { POST as statePost } from "../app/api/state/route";
 import type { OperationalRun } from "../lib/types";
@@ -303,6 +303,27 @@ describe("truthful Activity right-now projection", () => {
     expect(closeNonRetryableVerificationExecutions(state)).toBe(1);
     expect(state.executions.find((item) => item.id === execution.id)?.status).toBe("verification-closed");
     expect(state.executions.find((item) => item.id === execution.id)?.externalRef).toBeUndefined();
+  });
+
+  it("bounds an old browser verification retry without claiming public success", () => {
+    const state = fixture();
+    state.executions.unshift({
+      id: "old-browser-verification",
+      presenceId: state.presence!.id,
+      affordance: "x.post",
+      mode: "auto",
+      connector: "bridge",
+      status: "verification-pending",
+      failure: { code: "X_API_VERIFICATION_PENDING", message: "The API cannot verify this browser submission.", retryable: true },
+      createdAt: "2026-09-22T00:00:00.000Z",
+      updatedAt: "2026-09-23T00:00:00.000Z",
+    } as never);
+    const now = new Date("2026-09-23T12:00:00.000Z");
+    expect(markStaleBridgeVerificationsNonRetryable(state, now)).toBe(1);
+    expect(state.executions[0]!.failure?.retryable).toBe(false);
+    expect(closeNonRetryableVerificationExecutions(state, now)).toBe(1);
+    expect(state.executions[0]!.status).toBe("verification-closed");
+    expect(state.executions[0]!.externalRef).toBeUndefined();
   });
 
   it("detects overdue Assignment work without misrouting it through generic Attention", () => {

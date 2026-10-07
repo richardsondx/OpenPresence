@@ -1,9 +1,25 @@
+import { writeBrowserAdapterObservation, writeBridgeIdentity } from "../lib/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBridgeWithKey, ingestEvents, reportBridgeIdentity } from "../lib/bridge";
 import { applyOperation, createAgent } from "../lib/runtime";
 import { runAutonomousObservation } from "../lib/autonomy-worker";
 import { listScheduledWakes, readState, writeState } from "../lib/db";
 import * as browserChannelRead from "../lib/browser-channel-read";
+
+// A verified account alone does not prove the current Chrome adapter can act.
+function verifiedBrowserAdapters(accountIdentity: import("../lib/types").Bridge["accountIdentity"], bridgeId?: string) {
+  const adapters = [{ executorId: "openpresence-chrome-test", version: "1.0.0", protocolVersion: 2, probed: true,
+    observedAt: accountIdentity!.observedAt,
+    accountIdentity,
+    capabilities: { channelRead: true, mediaUpload: true, verification: true,
+      affordances: ["post", "reply", "quote", "repost", "like", "follow", "delete"] },
+  }];
+  if (bridgeId) {
+    writeBrowserAdapterObservation(bridgeId, adapters[0]!);
+    writeBridgeIdentity({ bridgeId, executorId: adapters[0]!.executorId, ...accountIdentity! });
+  }
+  return adapters;
+}
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -169,6 +185,7 @@ describe("Bridge world-observation authorship", () => {
     browser.lastHeartbeatAt = new Date().toISOString();
     browser.lastSeenAt = browser.lastHeartbeatAt;
     browser.accountIdentity = { username: "example_agent", status: "verified", observedAt: browser.lastHeartbeatAt };
+    browser.browserAdapters = verifiedBrowserAdapters(browser.accountIdentity, browser.id);
     writeState(state);
     vi.spyOn(browserChannelRead, "readChannelThroughBrowser").mockResolvedValue([{ id: "founder-pattern-1", text: "Founders keep returning to the cost of coordination.", authorUsername: "founder_one", authorName: "Founder One", language: "en", createdAt: new Date().toISOString() }]);
 

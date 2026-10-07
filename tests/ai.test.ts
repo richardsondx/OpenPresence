@@ -30,6 +30,8 @@ describe("Agent social decision parsing", () => {
     expect(prompt.system).toContain("Recent runtime context");
     expect(prompt.system).toContain("SUPERVISORY WORKSPACE STATE");
     expect(prompt.system).toContain("Answer the direct point first, then take the smallest warranted tool/runtime action");
+    expect(prompt.system).toContain("Do not restate, quote, or paraphrase the operator's latest message");
+    expect(prompt.system).toContain("Never open with \"I hear you\"");
     expect(prompt.system).toContain("same natural voice as the Presence's public self");
     expect(prompt.system).toContain("Do not turn an ordinary thought into a strategy memo");
     expect(prompt.system).not.toContain("Return JSON only in the requested social-decision envelope");
@@ -215,6 +217,17 @@ describe("Agent social decision parsing", () => {
     expect(capabilities).toContain("I can think with you");
     expect(capabilities).not.toBe(howAreYou);
     expect(howAreYou).not.toContain("posting plan");
+  });
+
+  it("does not echo an unmatched operator request as a meta-acknowledgment", async () => {
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    const state = createAgent({ name: "Jenny", description: "Help founders think clearly.", mode: "agent", handle: "@jenny_echo", accent: "#D68754" });
+    const request = "Create a useful post for builders about why visual evidence should stay separate from random web discoveries. Use the attached image and draft it for review without publishing.";
+    const reply = await generateAgentReply(state, request, undefined, { operatorConversation: true, presence: state.presence! });
+
+    expect(reply).toBe("I’ll use the supplied material for the draft and leave publication behind your approval.");
+    expect(reply).not.toMatch(/I hear you|My read is that|conversation first|what you actually asked/i);
+    expect(reply).not.toContain(request);
   });
 
   it("returns a typed preference step for an explicit supervisory correction", async () => {
