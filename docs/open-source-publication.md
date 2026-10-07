@@ -21,6 +21,22 @@ corpora, a local Remotion QA project, cached Python bytecode, and an ad-hoc scri
 with personal paths. Synthetic scenarios, tests, eval criteria, project skills,
 curated demo screenshots, and generalized regression rules remain source.
 
+## Artifact organization and database privacy
+
+Curated public interface captures live in `docs/screenshots/`. Old root-level
+captures are preserved locally under the ignored `out/local-artifacts/root-captures/`
+folder. Generated release archives and manifests stay under `out/`; private runtime
+state stays under `data/`. Project guidance and root build/configuration files
+remain in their established locations so existing entry points continue to work.
+
+Local databases contain conversation history, people and account identities,
+observed social content, Agent memory/configuration, and encrypted provider/channel
+credentials. Treat the entire database and its backups as private; encryption of
+credential columns does not encrypt the rest of the database. No database or key
+files are tracked in the current source. Ignore rules cover `.db`, `.sqlite`, and
+`.sqlite3` files and their sidecars, the entire runtime directory, and root capture
+formats. These rules do not remove database or key objects from earlier commits.
+
 ## What was inspected
 
 - Current tracked source plus non-ignored pending files; environment and runtime-data ignore coverage.

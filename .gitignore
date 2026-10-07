@@ -11,28 +11,11 @@ var/
 *.tsbuildinfo
 *.sqlite
 *.sqlite-*
+*.sqlite3
+*.sqlite3-*
 .env
 .env.*
 !.env.example
-# Local runtime state, credentials, and recovery artifacts.
-data/*.db
-data/**/*.db
-data/*.db-*
-data/**/*.db-*
-data/*.db.server-lock
-data/**/*.db.server-lock
-data/*.bak
-data/**/*.bak
-data/*.bak-*
-data/**/*.bak-*
-data/*.backup*
-data/**/*.backup*
-data/*.json
-data/**/*.json
-data/**/.secret-key
-data/**/.publication-signing-key
-data/x-browser-profile/
-data/assets/
 .DS_Store
 
 # Private local evidence and captured third-party content are not source releases.
@@ -41,7 +24,12 @@ qa-learnings/**
 !qa-learnings/regression-rules.md
 remotion-jev-qa/
 qa_check.mjs
+# Curated public screenshots belong in docs/screenshots/.
 /*.png
+/*.jpg
+/*.jpeg
+/*.webp
+/*.gif
 scenarios/boardy-additional-leads-development.json
 scenarios/boardy-capture-development-48.json
 scenarios/boardy-development-observed-2026-08-13.json
@@ -49,6 +37,7 @@ scenarios/boardy-replies-20.json
 scenarios/boardy-replies-20-rubric.json
 scenarios/boardy-social-cue-smoke.json
 scenarios/boardy-thread-replay-development.json
+# Entire private runtime workspace, including assets, browser profiles, and keys.
 data/
 
 # Credentials, browser sessions, backups, and generated Python artifacts.
