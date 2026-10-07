@@ -13,6 +13,7 @@
     "eval:prompts": "node scripts/run-conversation-eval.mjs",
     "eval:prompts:report": "node scripts/summarize-conversation-eval.mjs",
     "db:compact": "node scripts/compact-openpresence-db.mjs",
+    "db:rotate-key": "node scripts/rotate-credential-key.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

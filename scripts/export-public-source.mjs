@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 // Export current source, including pending changes, without copying Git history,
 // ignored runtime data, or ignored historical evidence. Never modify the source.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const destination = path.resolve(root, process.argv[2] ?? "out/openpresence-public");
+const destinationArgument = process.argv[2] === "--" ? process.argv[3] : process.argv[2];
+const destination = path.resolve(root, destinationArgument ?? "out/openpresence-public");
 if (fs.existsSync(destination)) throw new Error(`Destination already exists: ${destination}. Choose a new empty destination.`);
 if (destination === root || root.startsWith(`${destination}${path.sep}`)) throw new Error("Destination cannot contain the source repository.");
 const candidates = [...new Set(execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }).split("\0").filter(Boolean))].sort();

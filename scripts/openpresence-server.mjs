@@ -36,6 +36,10 @@ if (manifestDbPath && !fs.existsSync(manifestDbPath)) {
   throw new Error(`Configured OpenPresence database does not exist: ${manifestDbPath}. Set OPENPRESENCE_DB_PATH explicitly or restore that file; the launcher will not fall back to another workspace.`);
 }
 const dbPath = runtimeSelection.dbPath;
+const credentialKeyRotationMarker = `${dbPath}.credential-key-rotation.json`;
+if (fs.existsSync(credentialKeyRotationMarker)) {
+  throw new Error(`Credential-key rotation is incomplete for ${dbPath}. Recover it with: pnpm db:rotate-key -- --recover --db "${dbPath}"`);
+}
 const allowDatabaseInitialization = process.env.OPENPRESENCE_ALLOW_DATABASE_INIT === "1";
 if (!fs.existsSync(dbPath) && process.env.OPENPRESENCE_TEST_MODE !== "1" && !allowDatabaseInitialization) {
   throw new Error(`Configured OpenPresence database does not exist: ${dbPath}. Refusing to create a blank workspace; restore the database or set OPENPRESENCE_ALLOW_DATABASE_INIT=1 for an intentional first-run initialization.`);

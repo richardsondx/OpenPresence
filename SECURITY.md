@@ -17,9 +17,13 @@ contains unencrypted conversations and state. Development captures and traces
 must stay local unless deliberately sanitized.
 
 Keep database and encryption-key backups together in private storage. Set a
-32-byte `OPENPRESENCE_SECRET_KEY` before production credential storage. Preserve an
-existing key when migrating; replacing it will prevent decryption of existing
-credentials. Never enable mock or test-mode flags in a production deployment.
+32-byte `OPENPRESENCE_SECRET_KEY` before production credential storage. Never
+replace an existing key directly; that prevents decryption of saved credentials.
+For file-backed local storage, stop the app, run `pnpm db:rotate-key` to verify
+the current key, then use `pnpm db:rotate-key -- --apply --backup-dir <private
+directory outside the project>` to re-encrypt credentials. Environment-managed
+keys require a coordinated migration with the secret manager. Never enable mock
+or test-mode flags in a production deployment.
 
 ## Reporting a vulnerability
 

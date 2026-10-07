@@ -40,6 +40,9 @@ scenarios/boardy-thread-replay-development.json
 # Entire private runtime workspace, including assets, browser profiles, and keys.
 data/
 
+# Maintainer-only report about this repository's private publication cleanup.
+docs/open-source-publication.md
+
 # Credentials, browser sessions, backups, and generated Python artifacts.
 *.db
 *.db-*

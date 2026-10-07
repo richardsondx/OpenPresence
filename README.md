@@ -125,7 +125,12 @@ openssl rand -base64 32
 ```
 
 Local development generates `data/.secret-key` when no key is configured.
-Changing the encryption key does not re-encrypt existing credentials.
+Never replace that file directly: existing credentials would become unreadable.
+For file-backed local storage, `pnpm db:rotate-key` checks the saved credentials;
+add `-- --apply --backup-dir <private-directory-outside-the-project>` to safely
+re-encrypt them with a new key. Stop the app first and keep the generated backup
+private. Installations whose key comes from a secret manager need a coordinated
+database migration and secret-manager update.
 
 The primary UI and legacy APIs are intended for a trusted local operator. Keep
 them on a trusted machine; place authentication in front of any remote deployment.

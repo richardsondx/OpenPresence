@@ -34,6 +34,10 @@ if (manifestDbPath && !fs.existsSync(manifestDbPath)) {
 }
 export const resolvedDbPath = path.resolve(explicitDbPath || manifestDbPath || defaultDbPath);
 export const dbSelectionSource = explicitDbPath ? "OPENPRESENCE_DB_PATH" : manifestDbPath ? "data/openpresence-db.json" : "legacy filename fallback";
+const credentialKeyRotationMarker = `${resolvedDbPath}.credential-key-rotation.json`;
+if (fs.existsSync(credentialKeyRotationMarker)) {
+  throw new Error(`Credential-key rotation is incomplete for ${resolvedDbPath}. Recover it with: pnpm db:rotate-key -- --recover --db "${resolvedDbPath}"`);
+}
 const isTestDatabaseRuntime = process.env.OPENPRESENCE_TEST_MODE === "1" || process.env.VITEST === "true";
 const allowDatabaseInitialization = process.env.OPENPRESENCE_ALLOW_DATABASE_INIT === "1";
 if (!fs.existsSync(resolvedDbPath) && !isTestDatabaseRuntime && !allowDatabaseInitialization) {
