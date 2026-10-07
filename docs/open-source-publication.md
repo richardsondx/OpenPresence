@@ -128,7 +128,7 @@ trusted and revisit the upstream dependency when a patch becomes available.
 Fresh-workspace HTTP checks returned 200 for `/` and `/api/state` without inherited
 credentials or personal data. The production build passes in isolated source,
 with one schema-initialization worker to avoid SQLite migration races. A separate fresh `pnpm install --frozen-lockfile` succeeds. Full unit verification
-passes: 170 suites passed, 2 skipped; 1,622 tests passed, 3 skipped. Typechecking,
+passes: 171 suites passed, 2 skipped; 1,625 tests passed, 3 skipped. Typechecking,
 scoped lint, full lint (170 warnings, zero errors), and staged/unstaged whitespace
 checks pass. The Vitest upgrade explicitly lowers preserved JSX and gives bounded
 subprocess tests 15 seconds. The final source export passes Gitleaks

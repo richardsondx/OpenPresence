@@ -26,7 +26,7 @@ jobs:
           import re, subprocess
           paths = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
           paths += [line.partition(' ')[2] for line in subprocess.check_output(['git', 'rev-list', '--objects', '--all']).decode().splitlines() if ' ' in line]
-          pattern = re.compile(r'(^|/)(\.env(?:\.|$)|\.secret-key$|\.publication-signing-key$|node_modules/|__pycache__/|\.venv/)|\.(db|sqlite3?)(-|$)|\.(bak|backup|pem|key|p12|pfx|har)$|(^|/)trace\.zip$|^data/|^tmp/|^var/')
+          pattern = re.compile(r'(^|/)(\.env(?:\.|$)|\.secret-key$|\.publication-signing-key$|node_modules/|__pycache__/|\.venv/)|\.(db|sqlite3?)([-.]|$)|\.(bak|backup|pem|key|p12|pfx|har)$|(^|/)trace\.zip$|^data/|^tmp/|^var/')
           forbidden = [p for p in sorted(set(paths)) if p != '.env.example' and (pattern.search(p) or (p.startswith('qa-learnings/') and p not in ['qa-learnings/README.md', 'qa-learnings/regression-rules.md']))]
           if forbidden:
               raise SystemExit('Private/generated paths must not occur in tracked files or Git history:\n' + '\n'.join(forbidden))

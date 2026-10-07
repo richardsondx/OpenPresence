@@ -76,3 +76,10 @@ __pycache__/
 /scripts/restore-*.mjs
 /scripts/repair-*.mjs
 /docs/*-connection-runbook.md
+
+# Database recovery variants and accidentally local full-project archives.
+*.db.*
+*.sqlite.*
+*.sqlite3.*
+/*.zip
+/private-backups/
