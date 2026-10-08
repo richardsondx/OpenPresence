@@ -41,5 +41,5 @@ and actual behavior, and the impact. Do not test against someone else's account.
 Revoke or rotate the affected external credential first. Removing a file or adding
 an ignore rule does not remove old commits, branches, tags, caches, or forks.
 Remove affected history before publishing, or publish a separately scanned source
-snapshot with a new history. See [the publication audit](docs/open-source-publication.md)
-for this repository's release boundary.
+snapshot with a new history. Follow [GitHub's sensitive-data removal guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository)
+to address retained pull-request refs and cached views.
