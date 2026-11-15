@@ -1,12 +1,18 @@
 # Open-source publication audit
 
-Reviewed 2026-10-07. This is a source-publication review, not a certification of
+Reviewed 2026-10-08. This is a source-publication review, not a certification of
 all autonomous product capabilities or internet-facing deployment security.
 
 ## Publication decision
 
-**Keep the repository private until GitHub has purged the old pull-request refs
-and cached views, and the historical encryption-key exposure is addressed.**
+**The verified history-free source package is ready for publication in a new
+repository. Keep the existing GitHub repository private until GitHub has purged
+the old pull-request refs and cached views.**
+
+Final source: `out/openpresence-public-final-2026-10-08/` (710 files).
+Evidence: `out/open-source-finalization-2026-10-08/`. On 2026-10-08, the
+existing repository remains private and PR head refs 1, 2, and 3 remain reachable.
+No repository visibility was changed and no support request was sent.
 
 The authorized security sweep rewrote local branch/tag histories after a full
 private ZIP backup. The rewritten histories remove databases, encryption keys,
@@ -21,12 +27,15 @@ Support before making the repository public. Other clones must migrate to the
 rewritten history; merging or pushing old history can restore the removed data.
 Never publish the original ZIP, old repository refs, or private local captures.
 
-The removed historical key matches the primary local encryption key. The live
-key and databases were preserved. Encrypting credential columns does not encrypt
-conversations or the whole database, and removing a key from Git does not revoke
-it. Rotate affected external credentials if necessary and re-encrypt live stored
-credentials with a coordinated key migration before releasing historical access;
-never simply replace the key file and strand encrypted credentials.
+The removed historical key matched the primary local encryption key. The current
+canonical local database has since been backed up privately and its four saved
+credentials re-encrypted under a newly generated key. The historical database/key
+copies remain private and are excluded from the public source. Because old GitHub
+pull-request refs still retain historical objects, keep the repository private
+until GitHub purges those refs and cached views. Review and rotate third-party
+credentials that may have existed in historical database backups before any
+historical objects or backups are made public; key rotation cannot revoke copies
+already present in old database snapshots.
 
 ## Backup and history verification
 
@@ -110,13 +119,27 @@ Gitleaks pre-commit configuration is included.
 
 The exporter applies ignore rules even to tracked files, copies current pending
 source, rejects symlinks and existing destinations, and never copies `.git`.
-It does not certify arbitrary new source; scan each newly generated export.
+It omits this maintainer-only audit report as well as ignored local evidence. It
+does not certify arbitrary new source; scan each newly generated export.
+
+Credential-key rotation is now available for file-backed local storage. The
+command has a read-only decryption check by default, refuses a live database or
+an environment-variable key override, requires a private backup directory
+outside the project for changes, stages and validates a re-encrypted database,
+and leaves a recovery marker if interrupted. App startup refuses to open a
+database with an unfinished rotation. The canonical local database was backed
+up privately and its four encrypted credentials were re-encrypted successfully.
+The old database and key backup remain private.
 
 ## Dependency and verification limits
 
 Production dependencies now pass `pnpm audit --prod` with zero reported
-vulnerabilities. Next.js/its ESLint config, Sharp, source-map-js, Vitest/Vite,
+vulnerabilities. Next.js/its ESLint config (15.5.27), Sharp, source-map-js, Vitest/Vite,
 js-yaml, and brace-expansion were updated to patched versions.
+
+Two newly reported Next.js cache-poisoning advisories were resolved by upgrading
+Next.js and its ESLint config from 15.5.24 to 15.5.27. The fresh production audit
+reports zero vulnerabilities.
 
 The complete dependency audit retains one **high, development-only** advisory:
 `braces@3.0.3`, through `eslint-config-next → fast-glob → micromatch`.
@@ -126,14 +149,18 @@ The audit is intentionally not suppressed. Keep lint configuration/pattern input
 trusted and revisit the upstream dependency when a patch becomes available.
 
 Fresh-workspace HTTP checks returned 200 for `/` and `/api/state` without inherited
-credentials or personal data. The production build passes in isolated source,
+credentials or personal data. The patched production server opens first-run
+onboarding in Chromium without page errors; a screenshot and structured result
+are retained with the final evidence. The canonical database also passes the
+rotation command's read-only check: all four credential records still decrypt. The production build passes in isolated source,
 with one schema-initialization worker to avoid SQLite migration races. A separate fresh `pnpm install --frozen-lockfile` succeeds. Full unit verification
-passes: 171 suites passed, 2 skipped; 1,625 tests passed, 3 skipped. Typechecking,
-scoped lint, full lint (170 warnings, zero errors), and staged/unstaged whitespace
+passes: 172 suites passed, 2 skipped; 1,628 tests passed, 3 skipped. Typechecking,
+scoped lint, full lint (164 warnings, zero errors), and staged/unstaged whitespace
 checks pass. The Vitest upgrade explicitly lowers preserved JSX and gives bounded
 subprocess tests 15 seconds. The final source export passes Gitleaks
-(including two decode levels), the reviewed TruffleHog scan, an independent
-credential-signature scan, and filename/personal-path checks. No runtime data,
+(including two decode levels) with no findings; TruffleHog reports only the two
+reviewed synthetic `example.org` URI cases in URL-safety tests. An independent
+credential-signature scan and filename/personal-path checks also pass. No runtime data,
 Git metadata, or local evidence captures are included. Full browser/live-account and real-model
 behavior certification are outside this source-publication audit. The existing
 capability ledger's limitations remain unchanged; historical local evidence links
@@ -152,7 +179,8 @@ This export excludes Git metadata and ignored runtime/evidence files. A new
 repository initialized inside it is the safest alternative if GitHub cannot
 purge the existing repository's retained refs. Otherwise, publish only after
 confirming the rewritten remote refs, GitHub's retained-object cleanup, and
-credential/key remediation. Keep secret-scanning push protection enabled.
+review/rotation of credentials present in historical database snapshots. Keep
+secret-scanning push protection enabled.
 
 See [GitHub's sensitive-data removal guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository)
 for cached refs and clone remediation. Do not fetch, merge, or push original refs
